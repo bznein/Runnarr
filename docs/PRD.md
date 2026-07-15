@@ -10,6 +10,7 @@ The first release is intentionally not a full training science platform. It shou
 
 - Provide a Dockerized service that can run on a home server, NAS, VPS, or local machine.
 - Connect to Strava through OAuth and import the authenticated athlete's activities.
+- Provide a subscription-free Strava import path using the user's Strava data export or downloaded activity files.
 - Import local activity files with an extensible parser architecture.
 - Store activities in a canonical schema that is independent from Strava or any one file format.
 - Render a useful activity dashboard, activity list, detail view, route map, and basic charts.
@@ -50,6 +51,8 @@ The default deployment is single-user. The architecture should avoid blocking fu
 ### Activity Imports
 
 - V1 must import GPX, TCX, and FIT files.
+- V1 must import Strava account bulk export archives so users can migrate their Strava history without a paid Strava API/developer subscription.
+- Strava archive import must locate supported activity files inside the archive, import each supported activity, and report unsupported files without failing the entire archive.
 - The importer must deduplicate repeated uploads by file hash and provider source identifiers.
 - The import pipeline must normalize:
   - activity name
@@ -65,10 +68,15 @@ The default deployment is single-user. The architecture should avoid blocking fu
 
 ### Strava Provider
 
+- OAuth/API sync is an optional convenience path, not the only way to import Strava data.
 - The Strava integration must support OAuth connect and callback.
+- Strava setup must be driven by `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, and `RUNNARR_BASE_URL`; for the default local port, the OAuth callback URL is `http://localhost:37617/api/providers/strava/callback`.
 - It must store accepted scopes and provider account metadata.
 - It must refresh short-lived access tokens using the latest refresh token.
 - It must support manual sync.
+- Manual sync must backfill accessible Strava activities from the athlete activity feed, not only activities created since the last sync.
+- Re-running sync must update existing Strava activities by provider activity ID and add newly discovered activities without creating duplicates.
+- The provider settings UI should make clear that importing requires connecting Strava first, then triggering sync.
 - It must track rate-limit response headers where available.
 - Webhook endpoints may exist in v1, but polling/manual sync is acceptable for self-hosted local deployments without public callback URLs.
 
@@ -77,6 +85,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Dashboard must show total activities, recent activity, total distance, total time, and recent weekly distance.
 - Activity list must support scanning by date, type, distance, time, and source.
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
+- The admin must be able to delete activities from Runnarr, including their samples and laps, without deleting provider connections or source files outside the app.
 - Import and provider settings views must make the data pipeline visible enough to debug failed imports or syncs.
 
 ## 6. UX Principles
@@ -112,7 +121,6 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 ### Import Formats
 
 - Bulk ZIP archives.
-- Strava account exports.
 - Garmin account exports.
 - CSV and JSON exports from popular platforms.
 - Folder-watch imports for NAS or device-drop workflows.
@@ -183,8 +191,11 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - The app applies migrations and serves the UI.
 - The admin can log in with configured credentials.
 - The admin can upload a sample GPX, TCX, or FIT file.
+- The admin can upload a Strava account export archive and import supported activities without configuring Strava OAuth/API credentials.
 - Uploaded activities appear in the dashboard and activity list.
 - A GPS activity detail page renders a map and charts.
+- The admin can delete an activity and it no longer appears in the dashboard, activity list, or detail view.
 - Strava OAuth routes are present and report clear configuration errors when credentials are missing.
 - With Strava credentials configured, the admin can connect Strava and trigger a manual import.
+- Strava sync imports historical accessible activities as well as new activities, while repeated syncs avoid duplicate activity rows.
 - Duplicate imports do not create duplicate activities.
