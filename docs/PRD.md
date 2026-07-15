@@ -91,6 +91,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Dashboard must show total activities, recent activity, total distance, total time, and recent weekly distance.
 - Dashboard charts must allow changing the time scale, such as weekly, monthly, and yearly views, without leaving the dashboard.
 - Dashboard metrics and charts must support the same core activity filters as the activity list so excluded activity types do not affect totals.
+- Dashboard and activity-list time-scale controls may be separate in the first implementation, but the target UX is shared filter state so time scale and other core filters stay synchronized across both views.
 - Activity list must support scanning, filtering, and sorting by date, activity type, source, distance, moving time, elapsed time, elevation, and name.
 - Activity filtering must support include and exclude rules for activity types, including common exclusions such as hikes, walks, commutes, strength/weight training, and indoor/trainer activities.
 - Activity sorting must support ascending and descending order for sortable columns and preserve the selected filters.
@@ -153,6 +154,10 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - Intervals and workout structure detection.
 - Training load, fitness/fatigue, monotony, and freshness models.
 - Heart rate zones, pace zones, power zones, and distribution charts.
+- Heart-rate zones should be configurable by the admin when heart-rate data is available.
+- If no custom heart-rate zones are configured, the app may offer sensible defaults based on max heart rate or threshold heart rate when known.
+- Activity detail should show time in heart-rate zones for activities with heart-rate samples.
+- Dashboard analytics should summarize heart-rate zone distribution across the active time scale and activity filters where enough data exists.
 - Health metrics such as resting HR, HRV, sleep, body weight, and subjective notes if provider support exists.
 - Grade Adjusted Pace (GAP), sourced directly from provider/workout data when available and computed from route grade and pace when not.
 - Interactive chart zooming and panning for inspecting specific sections of an activity.
@@ -176,7 +181,10 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 
 - Saved route library.
 - Saved courses with map, distance, elevation profile, climb metadata, and activity history on the course.
-- Personal heatmaps.
+- Personal heatmaps generated from stored GPS activity samples.
+- Heatmaps must respect the active activity filters and time scale, including activity type include/exclude rules and future source/metric filters.
+- Heatmaps should support at least all activities, runs only, and rides only, with room for additional sport-specific views.
+- Heatmap generation may be computed on demand initially, but should be cacheable or precomputed once activity volume makes rendering slow.
 - Climb detection and climb summaries.
 - Automatic climb detection with grade, length, elevation gain, and difficulty classification.
 - Route comparison and repeated-course history.
