@@ -109,6 +109,10 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.
 - Route maps should show start and end markers, and should eventually support well-designed direction indicators along the route without cluttering the map.
+- Activity detail should allow attaching media such as photos to an activity.
+- Attached media should preserve useful metadata, including capture time and EXIF GPS coordinates when present.
+- Activity detail should show attached media in a gallery; media with EXIF location should also appear on the activity map as small thumbnail markers at the recorded location.
+- Media thumbnail markers should be unobtrusive and should open or highlight the corresponding media item when selected.
 - The admin must be able to delete activities from Runnarr, including their samples and laps, without deleting provider connections or source files outside the app.
 - Import and provider settings views must make the data pipeline visible enough to debug failed imports or syncs.
 - Provider imports should populate calories/energy expenditure on activities when the provider exposes it, including Intervals.icu where available.
@@ -130,6 +134,7 @@ The storage model should separate canonical activity fields from provider/raw de
 - `activities`: one row per normalized activity, including calories/energy expenditure when provided by the source.
 - `activity_samples`: time-series samples such as position, elevation, heart rate, cadence, power, distance, and speed.
 - `activity_laps`: lap or split summaries from providers/files.
+- `activity_media`: media attached to activities, including file metadata, thumbnail paths, capture time, and optional EXIF-derived latitude/longitude.
 - `import_files`: uploaded file metadata and parser status.
 - `provider_connections`: external provider accounts and encrypted tokens.
 - `sync_jobs`: provider sync/backfill job state.
