@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, BarChart3, Cloud, Database, LogOut, Map, RefreshCw, Upload } from "lucide-react";
+import { Activity as ActivityIcon, BarChart3, Cloud, Database, LogOut, Map, RefreshCw, Trash2, Upload } from "lucide-react";
 import { MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
@@ -190,6 +190,22 @@ function ActivitiesPage() {
   const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
   const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
+  const queryClient = useQueryClient();
+  const deleteActivity = useMutation({
+    mutationFn: api.deleteActivity,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-types"] })
+      ]);
+    }
+  });
+  const handleDelete = (activity: Activity) => {
+    if (window.confirm(`Delete "${activity.name}" from Runnarr?`)) {
+      deleteActivity.mutate(activity.id);
+    }
+  };
   return (
     <Page title="Activities">
       <ActivityTypeFilterPanel
@@ -198,7 +214,8 @@ function ActivitiesPage() {
         onChange={setFilters}
       />
       {activities.isLoading && <LoadingRow />}
-      {activities.data && <ActivityTable activities={activities.data.activities ?? []} />}
+      {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
+      {activities.data && <ActivityTable activities={activities.data.activities ?? []} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
       {(activities.data?.activities ?? []).length === 0 && <EmptyState title="No activities yet" action={<Link className="secondary-button" to="/imports">Import a file</Link>} />}
     </Page>
   );
@@ -282,7 +299,17 @@ function ActivityTypeFilterPanel({
   );
 }
 
-function ActivityTable({ activities, compact = false }: { activities: Activity[]; compact?: boolean }) {
+function ActivityTable({
+  activities,
+  compact = false,
+  onDelete,
+  deletingId
+}: {
+  activities: Activity[];
+  compact?: boolean;
+  onDelete?: (activity: Activity) => void;
+  deletingId?: string;
+}) {
   if (activities.length === 0) {
     return <EmptyState title="No activities found" />;
   }
@@ -297,6 +324,7 @@ function ActivityTable({ activities, compact = false }: { activities: Activity[]
             <th>Distance</th>
             <th>Time</th>
             {!compact && <th>Source</th>}
+            {onDelete && <th aria-label="Actions" />}
           </tr>
         </thead>
         <tbody>
@@ -308,6 +336,20 @@ function ActivityTable({ activities, compact = false }: { activities: Activity[]
               <td>{formatDistance(activity.distanceM)}</td>
               <td>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</td>
               {!compact && <td><span className="source-pill">{activity.source}</span></td>}
+              {onDelete && (
+                <td className="row-actions">
+                  <button
+                    className="icon-button danger"
+                    type="button"
+                    title="Delete activity"
+                    aria-label={`Delete ${activity.name}`}
+                    disabled={deletingId === activity.id}
+                    onClick={() => onDelete(activity)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -318,7 +360,20 @@ function ActivityTable({ activities, compact = false }: { activities: Activity[]
 
 function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const activity = useQuery({ queryKey: ["activity", id], queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const deleteActivity = useMutation({
+    mutationFn: api.deleteActivity,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-types"] })
+      ]);
+      navigate("/activities");
+    }
+  });
 
   if (activity.isLoading) {
     return <Page title="Activity"><LoadingRow /></Page>;
@@ -330,9 +385,24 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const item = activity.data.activity;
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
+  const handleDelete = () => {
+    if (window.confirm(`Delete "${item.name}" from Runnarr?`)) {
+      deleteActivity.mutate(item.id);
+    }
+  };
 
   return (
-    <Page title={item.name} eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}>
+    <Page
+      title={item.name}
+      eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}
+      actions={
+        <button className="danger-button" type="button" disabled={deleteActivity.isPending} onClick={handleDelete}>
+          <Trash2 size={16} />
+          Delete
+        </button>
+      }
+    >
+      {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
