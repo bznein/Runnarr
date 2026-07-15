@@ -508,7 +508,21 @@ func activityFiltersFromQuery(r *http.Request) ActivityFilters {
 		SportTypes:         compactQueryValues(values["sport"], values["sports"]),
 		ExcludedSportTypes: compactQueryValues(values["excludeSport"], values["excludeSports"]),
 		Search:             strings.TrimSpace(values.Get("search")),
+		DateFrom:           parseActivityFilterDate(values.Get("dateFrom")),
+		DateTo:             parseActivityFilterDate(values.Get("dateTo")),
 	}
+}
+
+func parseActivityFilterDate(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	date, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}
+	}
+	return date
 }
 
 func compactQueryValues(groups ...[]string) []string {

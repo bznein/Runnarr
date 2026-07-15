@@ -69,6 +69,8 @@ type ActivityFilters struct {
 	SportTypes         []string
 	ExcludedSportTypes []string
 	Search             string
+	DateFrom           time.Time
+	DateTo             time.Time
 }
 
 type ImportFile struct {

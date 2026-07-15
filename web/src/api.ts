@@ -26,6 +26,12 @@ function activityFilterQuery(filters?: ActivityTypeFilters) {
   if (filters?.search?.trim()) {
     params.set("search", filters.search.trim());
   }
+  if (filters?.dateFrom) {
+    params.set("dateFrom", filters.dateFrom);
+  }
+  if (filters?.dateTo) {
+    params.set("dateTo", filters.dateTo);
+  }
   return params.toString();
 }
 

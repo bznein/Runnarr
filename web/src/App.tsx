@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, BarChart3, Cloud, Database, LogOut, Map, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Activity as ActivityIcon, BarChart3, Cloud, Database, Filter, LogOut, Map, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -10,8 +10,9 @@ import { api, ApiError, setCsrfToken } from "./api";
 import type { Activity, ActivitySample, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
+type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 
-const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "" };
+const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "" };
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -214,6 +215,7 @@ function Dashboard() {
 
 function ActivitiesPage() {
   const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
   const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
   const queryClient = useQueryClient();
@@ -232,8 +234,31 @@ function ActivitiesPage() {
       deleteActivity.mutate(activity.id);
     }
   };
+  const activityList = activities.data?.activities ?? [];
+  const dateFiltersActive = hasDateFilters(filters);
+  const anyFiltersActive = hasActivityFilters(filters);
   return (
-    <Page title="Activities">
+    <Page
+      title="Activities"
+      actions={
+        <button
+          className={`secondary-button ${dateFiltersActive ? "active-filter-button" : ""}`}
+          type="button"
+          onClick={() => setFiltersOpen(true)}
+        >
+          <Filter size={16} />
+          Filter
+          {dateFiltersActive && <span className="button-badge">1</span>}
+        </button>
+      }
+    >
+      {filtersOpen && (
+        <ActivityFiltersDialog
+          filters={filters}
+          onApply={setFilters}
+          onClose={() => setFiltersOpen(false)}
+        />
+      )}
       <ActivitySearchPanel
         value={filters.search ?? ""}
         onChange={(search) => setFilters({ ...filters, search })}
@@ -245,8 +270,13 @@ function ActivitiesPage() {
       />
       {activities.isLoading && <LoadingRow />}
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
-      {activities.data && <ActivityTable activities={activities.data.activities ?? []} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
-      {(activities.data?.activities ?? []).length === 0 && <EmptyState title="No activities yet" action={<Link className="secondary-button" to="/imports">Import a file</Link>} />}
+      {activities.data && activityList.length > 0 && <ActivityTable activities={activityList} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
+      {activities.data && activityList.length === 0 && (
+        <EmptyState
+          title={anyFiltersActive ? "No activities found" : "No activities yet"}
+          action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/imports">Import a file</Link>}
+        />
+      )}
     </Page>
   );
 }
@@ -267,6 +297,111 @@ function ActivitySearchPanel({ value, onChange }: { value: string; onChange: (va
         Clear
       </button>
     </section>
+  );
+}
+
+function ActivityFiltersDialog({
+  filters,
+  onApply,
+  onClose
+}: {
+  filters: ActivityTypeFiltersValue;
+  onApply: (filters: ActivityTypeFiltersValue) => void;
+  onClose: () => void;
+}) {
+  const [draftDates, setDraftDates] = useState<ActivityDateRange>({
+    dateFrom: filters.dateFrom ?? "",
+    dateTo: filters.dateTo ?? ""
+  });
+  const presets = dateFilterPresets();
+  const activePreset = presets.find((preset) => dateRangesMatch(draftDates, preset.range));
+  const dateRangeInvalid = Boolean(draftDates.dateFrom && draftDates.dateTo && draftDates.dateFrom > draftDates.dateTo);
+  const applyDates = () => {
+    if (dateRangeInvalid) {
+      return;
+    }
+    onApply({
+      ...filters,
+      dateFrom: draftDates.dateFrom ?? "",
+      dateTo: draftDates.dateTo ?? ""
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-filters-title">
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Filters</div>
+            <h2 id="activity-filters-title">Date</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close filters" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Preset</div>
+          <div className="date-preset-grid">
+            {presets.map((preset) => (
+              <button
+                key={preset.id}
+                className={`filter-chip ${activePreset?.id === preset.id ? "active" : ""}`}
+                type="button"
+                onClick={() => setDraftDates(preset.range)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Custom range</div>
+          <div className="date-range-grid">
+            <label className="field">
+              <span>From</span>
+              <input
+                type="date"
+                value={draftDates.dateFrom ?? ""}
+                max={draftDates.dateTo || undefined}
+                onChange={(event) => setDraftDates({ ...draftDates, dateFrom: event.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>To</span>
+              <input
+                type="date"
+                value={draftDates.dateTo ?? ""}
+                min={draftDates.dateFrom || undefined}
+                onChange={(event) => setDraftDates({ ...draftDates, dateTo: event.target.value })}
+              />
+            </label>
+          </div>
+          {dateRangeInvalid && <div className="row-error">End date must be after start date.</div>}
+        </div>
+
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={() => setDraftDates({ dateFrom: "", dateTo: "" })}>
+            Clear dates
+          </button>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" disabled={dateRangeInvalid} onClick={applyDates}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -900,6 +1035,59 @@ function routeForActivity(activity: Activity): RoutePoint[] {
     return decodePolyline(activity.summaryPolyline);
   }
   return [];
+}
+
+function hasActivityFilters(filters: ActivityTypeFiltersValue) {
+  return Boolean(
+    filters.search?.trim() ||
+    filters.dateFrom ||
+    filters.dateTo ||
+    filters.sports.length > 0 ||
+    filters.excludeSports.length > 0
+  );
+}
+
+function hasDateFilters(filters: ActivityTypeFiltersValue) {
+  return Boolean(filters.dateFrom || filters.dateTo);
+}
+
+function dateFilterPresets(): Array<{ id: string; label: string; range: ActivityDateRange }> {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  return [
+    { id: "last-7-days", label: "Last 7 days", range: dateRange(addDays(today, -6), today) },
+    { id: "last-30-days", label: "Last 30 days", range: dateRange(addDays(today, -29), today) },
+    { id: "last-90-days", label: "Last 90 days", range: dateRange(addDays(today, -89), today) },
+    { id: "this-month", label: "This month", range: dateRange(new Date(currentYear, currentMonth, 1), today) },
+    { id: "last-month", label: "Last month", range: dateRange(new Date(currentYear, currentMonth - 1, 1), new Date(currentYear, currentMonth, 0)) },
+    { id: "this-year", label: "This year", range: dateRange(new Date(currentYear, 0, 1), today) },
+    { id: "last-year", label: "Last year", range: dateRange(new Date(currentYear - 1, 0, 1), new Date(currentYear - 1, 11, 31)) }
+  ];
+}
+
+function dateRange(start: Date, end: Date): ActivityDateRange {
+  return {
+    dateFrom: dateInputValue(start),
+    dateTo: dateInputValue(end)
+  };
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateRangesMatch(left: ActivityDateRange, right: ActivityDateRange) {
+  return (left.dateFrom ?? "") === (right.dateFrom ?? "") && (left.dateTo ?? "") === (right.dateTo ?? "");
 }
 
 function chartDataFor(samples: ActivitySample[]) {

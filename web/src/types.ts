@@ -60,6 +60,8 @@ export type ActivityTypeFilters = {
   sports: string[];
   excludeSports: string[];
   search?: string;
+  dateFrom?: string;
+  dateTo?: string;
 };
 
 export type SummaryStats = {
