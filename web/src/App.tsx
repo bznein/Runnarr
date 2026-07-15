@@ -568,7 +568,7 @@ function ActivityMap({ points, tileURL }: { points: RoutePoint[]; tileURL?: stri
   const center = points[0] ?? [53.3498, -6.2603];
   return (
     <div className="map-frame">
-      <MapContainer center={center} zoom={13} scrollWheelZoom={false} className="route-map">
+      <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
         <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
         <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />
         <FitRoute points={points} />
