@@ -168,6 +168,21 @@ input {
   gap: 12px;
 }
 
+.search-panel {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.search-field {
+  min-width: 0;
+}
+
+.search-field input {
+  width: 100%;
+}
+
 .filter-header {
   display: flex;
   align-items: center;
@@ -586,6 +601,7 @@ input {
   .metric-grid,
   .split-layout,
   .filter-grid,
+  .search-panel,
   .sync-progress-grid {
     grid-template-columns: 1fr;
   }

@@ -59,6 +59,7 @@ export type DeleteActivityResult = {
 export type ActivityTypeFilters = {
   sports: string[];
   excludeSports: string[];
+  search?: string;
 };
 
 export type SummaryStats = {

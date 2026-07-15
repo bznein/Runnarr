@@ -507,6 +507,7 @@ func activityFiltersFromQuery(r *http.Request) ActivityFilters {
 	return ActivityFilters{
 		SportTypes:         compactQueryValues(values["sport"], values["sports"]),
 		ExcludedSportTypes: compactQueryValues(values["excludeSport"], values["excludeSports"]),
+		Search:             strings.TrimSpace(values.Get("search")),
 	}
 }
 

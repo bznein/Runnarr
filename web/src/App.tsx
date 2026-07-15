@@ -11,7 +11,7 @@ import type { Activity, ActivitySample, ActivityTypeFilters as ActivityTypeFilte
 
 type RoutePoint = [number, number];
 
-const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [] };
+const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "" };
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -234,6 +234,10 @@ function ActivitiesPage() {
   };
   return (
     <Page title="Activities">
+      <ActivitySearchPanel
+        value={filters.search ?? ""}
+        onChange={(search) => setFilters({ ...filters, search })}
+      />
       <ActivityTypeFilterPanel
         activityTypes={activityTypes.data?.activityTypes ?? []}
         filters={filters}
@@ -244,6 +248,25 @@ function ActivitiesPage() {
       {activities.data && <ActivityTable activities={activities.data.activities ?? []} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
       {(activities.data?.activities ?? []).length === 0 && <EmptyState title="No activities yet" action={<Link className="secondary-button" to="/imports">Import a file</Link>} />}
     </Page>
+  );
+}
+
+function ActivitySearchPanel({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <section className="panel search-panel">
+      <label className="field search-field">
+        <span>Search by name</span>
+        <input
+          type="search"
+          placeholder="Activity name"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+      <button className="secondary-button small-button" type="button" disabled={value.length === 0} onClick={() => onChange("")}>
+        Clear
+      </button>
+    </section>
   );
 }
 
@@ -267,6 +290,7 @@ function ActivityTypeFilterPanel({
       ? filters.sports.filter((item) => item !== sport)
       : [...filters.sports, sport];
     onChange({
+      ...filters,
       sports: nextSports,
       excludeSports: filters.excludeSports.filter((item) => item !== sport)
     });
@@ -276,11 +300,12 @@ function ActivityTypeFilterPanel({
       ? filters.excludeSports.filter((item) => item !== sport)
       : [...filters.excludeSports, sport];
     onChange({
+      ...filters,
       sports: filters.sports.filter((item) => item !== sport),
       excludeSports: nextExcluded
     });
   };
-  const clearFilters = () => onChange(emptyActivityTypeFilters);
+  const clearFilters = () => onChange({ ...filters, sports: [], excludeSports: [] });
   const hasFilters = filters.sports.length > 0 || filters.excludeSports.length > 0;
 
   return (

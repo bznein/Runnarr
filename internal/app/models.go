@@ -68,6 +68,7 @@ type ImportedActivity struct {
 type ActivityFilters struct {
 	SportTypes         []string
 	ExcludedSportTypes []string
+	Search             string
 }
 
 type ImportFile struct {

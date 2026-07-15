@@ -23,6 +23,9 @@ function activityFilterQuery(filters?: ActivityTypeFilters) {
   for (const sport of filters?.excludeSports ?? []) {
     params.append("excludeSport", sport);
   }
+  if (filters?.search?.trim()) {
+    params.set("search", filters.search.trim());
+  }
   return params.toString();
 }
 

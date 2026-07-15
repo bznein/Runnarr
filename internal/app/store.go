@@ -622,9 +622,14 @@ func activityFilterWhere(filters ActivityFilters, startArg int) (string, []any) 
 }
 
 func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, []any) {
-	conditions := make([]string, 0, 2)
-	args := make([]any, 0, 2)
+	conditions := make([]string, 0, 3)
+	args := make([]any, 0, 3)
 	nextArg := startArg
+	if strings.TrimSpace(filters.Search) != "" {
+		conditions = append(conditions, fmt.Sprintf("name ilike $%d", nextArg))
+		args = append(args, "%"+strings.TrimSpace(filters.Search)+"%")
+		nextArg++
+	}
 	if len(filters.SportTypes) > 0 {
 		conditions = append(conditions, fmt.Sprintf("sport_type = any($%d)", nextArg))
 		args = append(args, filters.SportTypes)
