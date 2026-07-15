@@ -380,6 +380,46 @@ input {
   min-width: 0;
 }
 
+.chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.chart-header .panel-heading {
+  margin-bottom: 0;
+}
+
+.chart-toggle-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chart-toggle {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #cbd6d0;
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chart-toggle.active {
+  color: #ffffff;
+}
+
+.chart-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
