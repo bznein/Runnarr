@@ -13,7 +13,10 @@ type RoutePoint = [number, number];
 type ActivityTypeFiltersValue = ActivityTypeFilters;
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityChartPoint = {
+  index: number;
   label: string;
+  latitude?: number;
+  longitude?: number;
   elevationM?: number;
   heartRate?: number;
   paceSPKM?: number;
@@ -407,6 +410,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       navigate("/activities");
     }
   });
+  const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
+
+  useEffect(() => {
+    setHighlightedSample(undefined);
+  }, [id]);
 
   if (activity.isLoading) {
     return <Page title="Activity"><LoadingRow /></Page>;
@@ -418,6 +426,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const item = activity.data.activity;
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
+  const highlightedPoint = routePointForChartPoint(highlightedSample);
   const handleDelete = () => {
     if (window.confirm(`Delete "${item.name}" from Runnarr?`)) {
       deleteActivity.mutate(item.id);
@@ -446,11 +455,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {routePoints.length > 1 && (
         <section className="panel">
           <div className="panel-heading">Route</div>
-          <ActivityMap points={routePoints} tileURL={config?.mapTileURL} />
+          <ActivityMap points={routePoints} tileURL={config?.mapTileURL} highlightedPoint={highlightedPoint} />
         </section>
       )}
 
-      <ActivityCombinedChart key={item.id} data={chartData} />
+      <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
 
       {item.laps && item.laps.length > 0 && (
         <section className="panel">
@@ -563,7 +572,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ActivityCombinedChart({ data }: { data: ActivityChartPoint[] }) {
+function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint[]; onHighlight: (point?: ActivityChartPoint) => void }) {
   const availableSeries = activityChartSeries.filter((series) => data.some((item) => typeof item[series.key] === "number"));
   const defaultVisible = availableSeries.filter((series) => series.defaultVisible).map((series) => series.key);
   const initialVisible = defaultVisible.length > 0 ? defaultVisible : availableSeries.slice(0, 1).map((series) => series.key);
@@ -606,7 +615,11 @@ function ActivityCombinedChart({ data }: { data: ActivityChartPoint[] }) {
       {activeSeries.length > 0 ? (
         <div className="chart-area">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data}>
+            <LineChart
+              data={data}
+              onMouseMove={(state) => onHighlight(chartPointFromMouseState(state, data))}
+              onMouseLeave={() => onHighlight(undefined)}
+            >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" minTickGap={26} />
               {activeSeries.map((series, index) => (
@@ -644,7 +657,7 @@ function ActivityCombinedChart({ data }: { data: ActivityChartPoint[] }) {
   );
 }
 
-function ActivityMap({ points, tileURL }: { points: RoutePoint[]; tileURL?: string }) {
+function ActivityMap({ points, tileURL, highlightedPoint }: { points: RoutePoint[]; tileURL?: string; highlightedPoint?: RoutePoint }) {
   const center = points[0] ?? [53.3498, -6.2603];
   const start = points[0];
   const end = points.length > 1 ? points[points.length - 1] : undefined;
@@ -655,6 +668,7 @@ function ActivityMap({ points, tileURL }: { points: RoutePoint[]; tileURL?: stri
         <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />
         {start && <Marker position={start} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
         {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
+        {highlightedPoint && <Marker position={highlightedPoint} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
         <FitRoute points={points} />
       </MapContainer>
     </div>
@@ -681,6 +695,15 @@ function routeEndpointIcon(kind: "start" | "end") {
   });
 }
 
+function routeHighlightIcon() {
+  return divIcon({
+    className: "route-highlight-marker-icon",
+    html: `<span class="route-highlight-marker"></span>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
+  });
+}
+
 function routeForActivity(activity: Activity): RoutePoint[] {
   const samplePoints = (activity.samples ?? [])
     .filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number")
@@ -698,7 +721,10 @@ function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
   return samples.map((sample, index) => {
     const rawPaceSPKM = sample.speedMPS && sample.speedMPS > 0 ? 1000 / sample.speedMPS : undefined;
     return {
+      index: sample.index ?? index,
       label: sample.distanceM !== undefined ? `${(sample.distanceM / 1000).toFixed(1)} km` : String(index + 1),
+      latitude: typeof sample.latitude === "number" ? sample.latitude : undefined,
+      longitude: typeof sample.longitude === "number" ? sample.longitude : undefined,
       elevationM: sample.elevationM !== undefined ? Math.round(sample.elevationM) : undefined,
       heartRate: sample.heartRate,
       paceSPKM: rawPaceSPKM !== undefined ? Math.min(rawPaceSPKM, PACE_GRAPH_SLOW_CAP_S_PER_KM) : undefined,
@@ -707,6 +733,25 @@ function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
       cadence: sample.cadence
     };
   });
+}
+
+function routePointForChartPoint(point?: ActivityChartPoint): RoutePoint | undefined {
+  if (typeof point?.latitude === "number" && Number.isFinite(point.latitude) && typeof point.longitude === "number" && Number.isFinite(point.longitude)) {
+    return [point.latitude, point.longitude];
+  }
+  return undefined;
+}
+
+function chartPointFromMouseState(state: unknown, data: ActivityChartPoint[]): ActivityChartPoint | undefined {
+  if (!state || typeof state !== "object" || !("activeTooltipIndex" in state)) {
+    return undefined;
+  }
+  const tooltipIndex = (state as { activeTooltipIndex?: unknown }).activeTooltipIndex;
+  const index = typeof tooltipIndex === "number" ? tooltipIndex : typeof tooltipIndex === "string" ? Number(tooltipIndex) : NaN;
+  if (!Number.isInteger(index) || index < 0 || index >= data.length) {
+    return undefined;
+  }
+  return data[index];
 }
 
 function formatChartTick(value: number, series: ActivityChartSeries) {
@@ -732,12 +777,17 @@ function formatChartTooltip(value: unknown, name: string, seriesList: ActivityCh
 }
 
 function chartPayloadNumber(item: unknown, key: keyof ActivityChartPoint) {
+  const payload = chartPayload(item);
+  const value = payload?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function chartPayload(item: unknown): Partial<Record<keyof ActivityChartPoint, unknown>> | undefined {
   if (!item || typeof item !== "object" || !("payload" in item)) {
     return undefined;
   }
   const payload = (item as { payload?: Partial<Record<keyof ActivityChartPoint, unknown>> }).payload;
-  const value = payload?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return payload && typeof payload === "object" ? payload : undefined;
 }
 
 function decodePolyline(encoded: string): RoutePoint[] {
