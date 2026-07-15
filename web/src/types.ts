@@ -99,6 +99,7 @@ export type SyncJob = {
   status: string;
   error?: string;
   createdAt: string;
+  startedAt?: string;
   finishedAt?: string;
   payload?: Record<string, unknown>;
 };

@@ -6,7 +6,7 @@ import { Activity as ActivityIcon, BarChart3, Cloud, Database, LogOut, Map, Refr
 import { MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivitySample, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig } from "./types";
+import type { Activity, ActivitySample, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
 
@@ -513,9 +513,11 @@ function SettingsPage() {
   const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["strava-status"], queryFn: api.stravaStatus });
   const intervalsStatus = useQuery({ queryKey: ["intervals-status"], queryFn: api.intervalsStatus });
-  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs });
+  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
   const [intervalsAPIKey, setIntervalsAPIKey] = useState("");
   const [intervalsOldest, setIntervalsOldest] = useState("1970-01-01");
+  const latestIntervalsJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "intervals");
+  const intervalsSyncRunning = latestIntervalsJob?.status === "running";
   const sync = useMutation({
     mutationFn: api.stravaSync,
     onSuccess: async () => {
@@ -592,12 +594,13 @@ function SettingsPage() {
             <span>Oldest</span>
             <input type="date" value={intervalsOldest} onChange={(event) => setIntervalsOldest(event.target.value)} />
           </label>
-          <button className="primary-button" type="button" disabled={!intervalsStatus.data?.connected || intervalsSync.isPending} onClick={() => intervalsSync.mutate(intervalsOldest)}>
+          <button className="primary-button" type="button" disabled={!intervalsStatus.data?.connected || intervalsSync.isPending || intervalsSyncRunning} onClick={() => intervalsSync.mutate(intervalsOldest)}>
             <RefreshCw size={16} />
-            Sync
+            {intervalsSyncRunning ? "Syncing" : "Sync"}
           </button>
         </div>
       </section>
+      <SyncProgressCard job={latestIntervalsJob} />
       {intervalsConnect.error && <div className="error">{intervalsConnect.error instanceof Error ? intervalsConnect.error.message : "Intervals.icu connection failed"}</div>}
       {intervalsSync.error && <div className="error">{intervalsSync.error instanceof Error ? intervalsSync.error.message : "Intervals.icu sync failed"}</div>}
       <section className="panel">
@@ -610,6 +613,8 @@ function SettingsPage() {
                 <th>Provider</th>
                 <th>Kind</th>
                 <th>Status</th>
+                <th>Progress</th>
+                <th>Details</th>
                 <th>Created</th>
               </tr>
             </thead>
@@ -619,6 +624,8 @@ function SettingsPage() {
                   <td>{job.provider}</td>
                   <td>{job.kind}</td>
                   <td><span className={`status ${job.status}`}>{job.status}</span>{job.error && <span className="row-error">{job.error}</span>}</td>
+                  <td><SyncProgressBar job={job} /></td>
+                  <td>{formatSyncJobDetails(job)}</td>
                   <td>{formatDate(job.createdAt)}</td>
                 </tr>
               ))}
@@ -628,6 +635,118 @@ function SettingsPage() {
       </section>
     </Page>
   );
+}
+
+function SyncProgressCard({ job }: { job?: SyncJob }) {
+  if (!job || job.provider !== "intervals") {
+    return null;
+  }
+  const payload = job.payload ?? {};
+  const imported = payloadNumber(payload, "imported");
+  const processed = payloadNumber(payload, "processed");
+  const activities = payloadNumber(payload, "activities");
+  const failed = payloadNumber(payload, "failed");
+  const laps = payloadNumber(payload, "lapsImported");
+  const stage = payloadText(payload, "stage") || job.status;
+  const currentWindowStart = payloadText(payload, "currentWindowStart");
+  const currentWindowEnd = payloadText(payload, "currentWindowEnd");
+  const warnings = payloadList(payload, "warnings");
+  const firstErrors = payloadList(payload, "firstErrors");
+  const windowText = currentWindowStart && currentWindowEnd ? `${currentWindowStart} to ${currentWindowEnd}` : "Waiting for first window";
+
+  return (
+    <section className="panel sync-progress-panel">
+      <div className="filter-header">
+        <div className="panel-heading">Intervals.icu sync progress</div>
+        <span className={`status ${job.status}`}>{job.status}</span>
+      </div>
+      <SyncProgressBar job={job} />
+      <div className="sync-progress-grid">
+        <SyncStat label="Imported" value={imported.toLocaleString()} />
+        <SyncStat label="Processed" value={`${processed.toLocaleString()} / ${activities.toLocaleString()}`} />
+        <SyncStat label="Failed" value={failed.toLocaleString()} />
+        <SyncStat label="Laps" value={laps.toLocaleString()} />
+      </div>
+      <div className="sync-progress-details">
+        <span>{stage}</span>
+        <span>{windowText}</span>
+        <span>{formatSyncJobDetails(job)}</span>
+      </div>
+      {(warnings.length > 0 || firstErrors.length > 0) && (
+        <div className="sync-progress-messages">
+          {warnings.map((message) => <span key={`warning-${message}`}>{message}</span>)}
+          {firstErrors.map((message) => <span key={`error-${message}`}>{message}</span>)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SyncStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="sync-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function SyncProgressBar({ job }: { job: SyncJob }) {
+  const payload = job.payload ?? {};
+  const processed = payloadNumber(payload, "processed");
+  const activities = payloadNumber(payload, "activities");
+  const percent = activities > 0 ? Math.min(100, Math.round((processed / activities) * 100)) : 0;
+  return (
+    <div className="progress-cell">
+      <div className="progress-bar" aria-label={`Sync progress ${percent}%`}>
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <span>{activities > 0 ? `${percent}%` : job.status}</span>
+    </div>
+  );
+}
+
+function formatSyncJobDetails(job: SyncJob) {
+  const payload = job.payload ?? {};
+  const imported = payloadNumber(payload, "imported");
+  const failed = payloadNumber(payload, "failed");
+  const activities = payloadNumber(payload, "activities");
+  const windows = payloadNumber(payload, "fetchedWindows");
+  const splitWindows = payloadNumber(payload, "splitWindows");
+  const currentWindowStart = payloadText(payload, "currentWindowStart");
+  const currentWindowEnd = payloadText(payload, "currentWindowEnd");
+  const parts = [];
+  if (activities > 0 || imported > 0 || failed > 0) {
+    parts.push(`${imported}/${activities} imported`);
+  }
+  if (failed > 0) {
+    parts.push(`${failed} failed`);
+  }
+  if (windows > 0) {
+    parts.push(`${windows} windows`);
+  }
+  if (splitWindows > 0) {
+    parts.push(`${splitWindows} split`);
+  }
+  if (currentWindowStart && currentWindowEnd && job.status === "running") {
+    parts.push(`${currentWindowStart} to ${currentWindowEnd}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "-";
+}
+
+function payloadNumber(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function payloadText(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
+}
+
+function payloadList(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function Page({ title, eyebrow, actions, children }: { title: string; eyebrow?: string; actions?: ReactNode; children: ReactNode }) {

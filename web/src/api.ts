@@ -81,7 +81,7 @@ export const api = {
       body: JSON.stringify({ apiKey })
     }),
   intervalsSync: (oldest: string) =>
-    request<{ jobId: string; result: Record<string, unknown> }>("/api/providers/intervals/sync", {
+    request<{ jobId: string; status: string }>("/api/providers/intervals/sync", {
       method: "POST",
       body: JSON.stringify({ oldest })
     }),

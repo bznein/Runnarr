@@ -369,12 +369,24 @@ func (s *Server) handleIntervalsSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	jobID, payload, err := s.runIntervalsSync(r.Context(), "manual", opts)
+	running, err := s.store.HasRunningSyncJob(r.Context(), intervalsProvider)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		s.logger.Error("check running intervals sync", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not check sync state")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "result": payload})
+	if running {
+		writeError(w, http.StatusConflict, "Intervals.icu sync is already running")
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(r.Context(), intervalsProvider, "manual")
+	if err != nil {
+		s.logger.Error("create intervals sync job", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not create sync job")
+		return
+	}
+	go s.runIntervalsManualSyncJob(jobID, opts)
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
 }
 
 func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
@@ -408,17 +420,13 @@ func (s *Server) StartBackgroundSync(ctx context.Context) {
 }
 
 func (s *Server) runIntervalsScheduledSync(ctx context.Context) {
-	initial := time.NewTimer(30 * time.Second)
 	ticker := time.NewTicker(30 * time.Minute)
-	defer initial.Stop()
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-initial.C:
-			s.runIntervalsScheduledSyncOnce(ctx)
 		case <-ticker.C:
 			s.runIntervalsScheduledSyncOnce(ctx)
 		}
@@ -429,6 +437,12 @@ func (s *Server) runIntervalsScheduledSyncOnce(ctx context.Context) {
 	if _, connected, err := s.intervals.Status(ctx); err != nil || !connected {
 		return
 	}
+	if running, err := s.store.HasRunningSyncJob(ctx, intervalsProvider); err != nil || running {
+		if err != nil {
+			s.logger.Error("check running scheduled intervals sync", "error", err)
+		}
+		return
+	}
 	syncCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	oldest := time.Now().UTC().AddDate(0, 0, -30)
@@ -437,20 +451,38 @@ func (s *Server) runIntervalsScheduledSyncOnce(ctx context.Context) {
 	}
 }
 
+func (s *Server) runIntervalsManualSyncJob(jobID string, opts IntervalsSyncOptions) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+	defer cancel()
+	if _, err := s.finishIntervalsSyncJob(ctx, jobID, opts); err != nil {
+		s.logger.Error("manual intervals sync", "job_id", jobID, "error", err)
+	}
+}
+
 func (s *Server) runIntervalsSync(ctx context.Context, kind string, opts IntervalsSyncOptions) (string, map[string]any, error) {
 	jobID, err := s.store.CreateSyncJob(ctx, intervalsProvider, kind)
 	if err != nil {
 		return "", nil, fmt.Errorf("could not create sync job: %w", err)
 	}
-	payload, err := s.intervals.Sync(ctx, opts)
+	payload, err := s.finishIntervalsSyncJob(ctx, jobID, opts)
+	return jobID, payload, err
+}
+
+func (s *Server) finishIntervalsSyncJob(ctx context.Context, jobID string, opts IntervalsSyncOptions) (map[string]any, error) {
+	progress := func(payload map[string]any) {
+		if err := s.store.UpdateSyncJobProgress(ctx, jobID, payload); err != nil {
+			s.logger.Error("update intervals sync progress", "job_id", jobID, "error", err)
+		}
+	}
+	payload, err := s.intervals.Sync(ctx, opts, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), map[string]any{})
-		return jobID, nil, err
+		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		return nil, err
 	}
 	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
-		return jobID, nil, fmt.Errorf("could not finish sync job: %w", err)
+		return nil, fmt.Errorf("could not finish sync job: %w", err)
 	}
-	return jobID, payload, nil
+	return payload, nil
 }
 
 func decodeIntervalsSyncOptions(r *http.Request) (IntervalsSyncOptions, error) {

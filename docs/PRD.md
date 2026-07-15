@@ -84,7 +84,9 @@ The default deployment is single-user. The architecture should avoid blocking fu
 
 - Provider settings must show sync status for each provider, including whether it is connected, idle, running, completed, or failed.
 - Sync status must include the latest sync time, imported/updated activity counts where available, and any failure message.
-- Scheduled/background syncs must be visible in the same sync history as manual syncs.
+- The main provider UI should emphasize the current or latest sync status rather than a full sync-job table.
+- Detailed sync history may remain available for debugging, but it should be collapsed by default, behind a secondary control, or moved to a less prominent diagnostics view.
+- Scheduled/background syncs must be represented in sync history when diagnostics are opened, but should not dominate the normal provider workflow.
 
 ### Activity Views
 
@@ -93,9 +95,13 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Dashboard metrics and charts must support the same core activity filters as the activity list so excluded activity types do not affect totals.
 - Dashboard and activity-list time-scale controls may be separate in the first implementation, but the target UX is shared filter state so time scale and other core filters stay synchronized across both views.
 - Activity list must support scanning, filtering, and sorting by date, activity type, source, distance, moving time, elapsed time, elevation, and name.
-- Activity filtering must support include and exclude rules for activity types, including common exclusions such as hikes, walks, commutes, strength/weight training, and indoor/trainer activities.
+- Activity filtering must support searching by activity name and include/exclude rules for activity types, including common exclusions such as hikes, walks, commutes, strength/weight training, and indoor/trainer activities.
+- Activity type filters should be hidden when the current dataset contains zero or one distinct activity type.
 - Activity sorting must support ascending and descending order for sortable columns and preserve the selected filters.
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
+- Activity detail should hide elevation charts for activity types where elevation is not meaningful, such as swimming, strength training, indoor workouts, and similar non-route activities.
+- Activity laps imported from providers should preserve provider interval metadata where available, including Intervals.icu `type` and `label` fields from `icu_intervals`.
+- Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.
 - The admin must be able to delete activities from Runnarr, including their samples and laps, without deleting provider connections or source files outside the app.
 - Import and provider settings views must make the data pipeline visible enough to debug failed imports or syncs.
@@ -216,7 +222,7 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - The admin can upload a Strava account export archive and import supported activities without configuring Strava OAuth/API credentials.
 - Uploaded activities appear in the dashboard and activity list.
 - The admin can change the dashboard time scale and see activity totals/charts update for the selected scale.
-- The admin can filter activities by type/source/metrics and sort the activity list by date, name, type, source, distance, time, and elevation.
+- The admin can search activities by name, filter by type/source/metrics, and sort the activity list by date, name, type, source, distance, time, and elevation.
 - Dashboard totals and charts update consistently when activity filters are applied.
 - A GPS activity detail page renders a map and charts.
 - The admin can zoom an activity route map with the mouse wheel.

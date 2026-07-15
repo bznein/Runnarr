@@ -17,6 +17,10 @@ import (
 )
 
 const intervalsProvider = "intervals"
+const intervalsActivityWindowLimit = 100
+const intervalsActivitySplitThreshold = 40
+
+type SyncProgressFunc func(map[string]any)
 
 type IntervalsService struct {
 	store   *Store
@@ -88,7 +92,7 @@ func (s *IntervalsService) Connect(ctx context.Context, apiKey string) (Provider
 	return saved.ProviderConnection, nil
 }
 
-func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions) (map[string]any, error) {
+func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions, progress SyncProgressFunc) (map[string]any, error) {
 	conn, err := s.store.GetProviderConnection(ctx, intervalsProvider)
 	if err != nil {
 		return nil, err
@@ -120,21 +124,118 @@ func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions) 
 	summaryOnly := 0
 	lapsImported := 0
 	windows := 0
+	fetchedWindows := 0
+	splitWindows := 0
+	cappedWindows := 0
 	var firstErrors []string
+	var warnings []string
+	var currentWindowStart time.Time
+	var currentWindowEnd time.Time
+	currentActivity := ""
+	lastProgress := time.Time{}
+	seenActivityIDs := make(map[string]bool)
+
+	payload := func(stage string) map[string]any {
+		out := map[string]any{
+			"stage":           stage,
+			"activities":      total,
+			"processed":       imported + failed,
+			"imported":        imported,
+			"failed":          failed,
+			"fitDownloads":    fitDownloads,
+			"summaryOnly":     summaryOnly,
+			"lapsImported":    lapsImported,
+			"windows":         windows,
+			"fetchedWindows":  fetchedWindows,
+			"splitWindows":    splitWindows,
+			"cappedWindows":   cappedWindows,
+			"oldest":          oldest.Format("2006-01-02"),
+			"newest":          newest.Format("2006-01-02"),
+			"firstErrors":     append([]string(nil), firstErrors...),
+			"warnings":        append([]string(nil), warnings...),
+			"source":          intervalsProvider,
+			"dedupeKey":       "Intervals.icu activity ID",
+			"windowLimit":     intervalsActivityWindowLimit,
+			"splitThreshold":  intervalsActivitySplitThreshold,
+			"automaticMode":   "scheduled sync uses the last 30 days",
+			"completionBasis": "all activity windows fetched from oldest through newest; busy windows are split to avoid limited API responses",
+		}
+		if !currentWindowStart.IsZero() {
+			out["currentWindowStart"] = currentWindowStart.Format("2006-01-02")
+		}
+		if !currentWindowEnd.IsZero() {
+			out["currentWindowEnd"] = currentWindowEnd.Format("2006-01-02")
+		}
+		if currentActivity != "" {
+			out["currentActivity"] = currentActivity
+		}
+		return out
+	}
+	report := func(stage string, force bool) {
+		if progress == nil {
+			return
+		}
+		now := time.Now()
+		if !force && !lastProgress.IsZero() && now.Sub(lastProgress) < time.Second {
+			return
+		}
+		lastProgress = now
+		progress(payload(stage))
+	}
+	report("starting", true)
+
+	fetchWindow := func(windowStart, windowEnd time.Time) ([]intervalsActivity, error) {
+		var fetch func(time.Time, time.Time) ([]intervalsActivity, error)
+		fetch = func(start, end time.Time) ([]intervalsActivity, error) {
+			currentWindowStart = start
+			currentWindowEnd = end
+			report("fetching", true)
+			activities, err := s.listActivities(ctx, apiKey, start, end, intervalsActivityWindowLimit)
+			if err != nil {
+				return nil, err
+			}
+			fetchedWindows++
+			if len(activities) >= intervalsActivitySplitThreshold && start.Before(end) {
+				splitWindows++
+				report("splitting", true)
+				days := int(end.Sub(start).Hours() / 24)
+				mid := start.AddDate(0, 0, days/2)
+				left, err := fetch(start, mid)
+				if err != nil {
+					return nil, err
+				}
+				right, err := fetch(mid.AddDate(0, 0, 1), end)
+				if err != nil {
+					return nil, err
+				}
+				return append(left, right...), nil
+			}
+			if len(activities) >= intervalsActivitySplitThreshold {
+				cappedWindows++
+				warnings = append(warnings, fmt.Sprintf("%s returned %d activities; this single-day window may still be capped by Intervals.icu", start.Format("2006-01-02"), len(activities)))
+			}
+			report("fetched", true)
+			return activities, nil
+		}
+		return fetch(windowStart, windowEnd)
+	}
 
 	for windowStart := startOfDay(oldest); !windowStart.After(newest); windowStart = windowStart.AddDate(1, 0, 0) {
-		windowEnd := minTime(windowStart.AddDate(1, 0, 0).Add(-time.Second), newest)
-		activities, err := s.listActivities(ctx, apiKey, windowStart, windowEnd, 0)
+		windowEnd := startOfDay(minTime(windowStart.AddDate(1, 0, 0).Add(-time.Second), newest))
+		activities, err := fetchWindow(windowStart, windowEnd)
 		if err != nil {
 			return nil, err
 		}
 		windows++
-		total += len(activities)
+		sources := uniqueIntervalsActivities(activities, seenActivityIDs)
+		total += len(sources)
+		report("importing", true)
 
-		for _, source := range activities {
+		for _, source := range sources {
 			if source.ID == "" {
 				continue
 			}
+			currentActivity = source.ID
 			importedActivity, usedFit, err := s.importedActivity(ctx, apiKey, source)
 			if err != nil {
 				failed++
@@ -158,24 +259,31 @@ func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions) 
 				continue
 			}
 			imported++
+			report("importing", false)
 		}
+		currentActivity = ""
+		report("importing", true)
 	}
 
-	return map[string]any{
-		"activities":    total,
-		"imported":      imported,
-		"failed":        failed,
-		"fitDownloads":  fitDownloads,
-		"summaryOnly":   summaryOnly,
-		"lapsImported":  lapsImported,
-		"windows":       windows,
-		"oldest":        oldest.Format("2006-01-02"),
-		"newest":        newest.Format("2006-01-02"),
-		"firstErrors":   firstErrors,
-		"source":        intervalsProvider,
-		"dedupeKey":     "Intervals.icu activity ID",
-		"automaticMode": "scheduled sync uses the last 30 days",
-	}, nil
+	finalPayload := payload("completed")
+	report("completed", true)
+	return finalPayload, nil
+}
+
+func uniqueIntervalsActivities(activities []intervalsActivity, seen map[string]bool) []intervalsActivity {
+	out := make([]intervalsActivity, 0, len(activities))
+	for _, activity := range activities {
+		if activity.ID == "" {
+			out = append(out, activity)
+			continue
+		}
+		if seen[activity.ID] {
+			continue
+		}
+		seen[activity.ID] = true
+		out = append(out, activity)
+	}
+	return out
 }
 
 func (s *IntervalsService) importedActivity(ctx context.Context, apiKey string, source intervalsActivity) (ImportedActivity, bool, error) {

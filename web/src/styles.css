@@ -402,6 +402,72 @@ input {
   font-weight: 680;
 }
 
+.sync-progress-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.sync-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sync-stat {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sync-stat span,
+.sync-progress-details {
+  color: #66706c;
+  font-size: 13px;
+}
+
+.sync-stat strong {
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.sync-progress-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.sync-progress-messages {
+  display: grid;
+  gap: 6px;
+  color: #8c2f24;
+  font-size: 13px;
+}
+
+.progress-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 170px;
+  color: #66706c;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.progress-bar {
+  width: 110px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #edf2ef;
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2f8f83;
+}
+
 .map-frame {
   height: 440px;
   overflow: hidden;
@@ -490,7 +556,8 @@ input {
 
   .metric-grid,
   .split-layout,
-  .filter-grid {
+  .filter-grid,
+  .sync-progress-grid {
     grid-template-columns: 1fr;
   }
 

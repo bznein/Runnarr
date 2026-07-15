@@ -350,14 +350,47 @@ func (s *Store) GetProviderConnection(ctx context.Context, provider string) (Sto
 func (s *Store) CreateSyncJob(ctx context.Context, provider, kind string) (string, error) {
 	var id string
 	err := s.db.QueryRow(ctx, `
-		insert into sync_jobs(provider, kind, status)
-		values($1, $2, 'running')
+		insert into sync_jobs(provider, kind, status, started_at)
+		values($1, $2, 'running', now())
 		returning id::text
 	`, provider, kind).Scan(&id)
 	return id, err
 }
 
+func (s *Store) UpdateSyncJobProgress(ctx context.Context, id string, payload map[string]any) error {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `
+		update sync_jobs
+		set payload = $2
+		where id = $1 and status = 'running'
+	`, id, payloadBytes)
+	return err
+}
+
+func (s *Store) HasRunningSyncJob(ctx context.Context, provider string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(ctx, `
+		select exists(
+			select 1
+			from sync_jobs
+			where provider = $1 and status = 'running'
+		)
+	`, provider).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) FinishSyncJob(ctx context.Context, id, status, message string, payload map[string]any) error {
+	if payload == nil {
+		_, err := s.db.Exec(ctx, `
+			update sync_jobs
+			set status = $2, error = $3, finished_at = now()
+			where id = $1
+		`, id, status, message)
+		return err
+	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return err
