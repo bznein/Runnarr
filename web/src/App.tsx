@@ -11,6 +11,23 @@ import type { Activity, ActivitySample, ActivitySortBy, ActivitySortOrder, Activ
 
 type RoutePoint = [number, number];
 type ActivityTypeFiltersValue = ActivityTypeFilters;
+type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
+type ActivityChartPoint = {
+  label: string;
+  elevationM?: number;
+  heartRate?: number;
+  paceSPKM?: number;
+  rawPaceSPKM?: number;
+  power?: number;
+  cadence?: number;
+};
+type ActivityChartSeries = {
+  key: ActivityChartSeriesKey;
+  label: string;
+  color: string;
+  defaultVisible: boolean;
+  format: (value: number) => string;
+};
 
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
   sports: [],
@@ -21,6 +38,14 @@ const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
   sortBy: "date",
   sortOrder: "desc"
 };
+const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
+const activityChartSeries: ActivityChartSeries[] = [
+  { key: "elevationM", label: "Elevation", color: "#4664c9", defaultVisible: true, format: (value) => `${Math.round(value).toLocaleString()} m` },
+  { key: "heartRate", label: "Heart rate", color: "#c84d4d", defaultVisible: true, format: (value) => `${Math.round(value)} bpm` },
+  { key: "paceSPKM", label: "Pace", color: "#2f8f83", defaultVisible: true, format: (value) => formatPace(value) },
+  { key: "power", label: "Power", color: "#b7791f", defaultVisible: false, format: (value) => `${Math.round(value)} W` },
+  { key: "cadence", label: "Cadence", color: "#7a4eb2", defaultVisible: false, format: (value) => `${Math.round(value)} spm` }
+];
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -425,10 +450,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
 
-      <section className="split-layout">
-        <ChartPanel title="Elevation" data={chartData} dataKey="elevationM" unit="m" color="#4664c9" />
-        <ChartPanel title="Heart rate" data={chartData} dataKey="heartRate" unit="bpm" color="#c84d4d" />
-      </section>
+      <ActivityCombinedChart key={item.id} data={chartData} />
 
       {item.laps && item.laps.length > 0 && (
         <section className="panel">
@@ -541,20 +563,77 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ChartPanel({ title, data, dataKey, unit, color }: { title: string; data: Array<Record<string, number | string | undefined>>; dataKey: string; unit: string; color: string }) {
-  const hasData = data.some((item) => typeof item[dataKey] === "number");
+function ActivityCombinedChart({ data }: { data: ActivityChartPoint[] }) {
+  const availableSeries = activityChartSeries.filter((series) => data.some((item) => typeof item[series.key] === "number"));
+  const defaultVisible = availableSeries.filter((series) => series.defaultVisible).map((series) => series.key);
+  const initialVisible = defaultVisible.length > 0 ? defaultVisible : availableSeries.slice(0, 1).map((series) => series.key);
+  const [visibleSeries, setVisibleSeries] = useState<ActivityChartSeriesKey[]>(initialVisible);
+  const activeSeries = availableSeries.filter((series) => visibleSeries.includes(series.key));
+  const toggleSeries = (key: ActivityChartSeriesKey) => {
+    setVisibleSeries((current) => {
+      if (current.includes(key)) {
+        return current.length === 1 ? current : current.filter((item) => item !== key);
+      }
+      return [...current, key];
+    });
+  };
+
   return (
     <section className="panel">
-      <div className="panel-heading">{title}</div>
-      {hasData ? (
+      <div className="chart-header">
+        <div className="panel-heading">Activity graph</div>
+        {availableSeries.length > 0 && (
+          <div className="chart-toggle-list">
+            {availableSeries.map((series) => {
+              const active = visibleSeries.includes(series.key);
+              return (
+                <button
+                  key={series.key}
+                  className={`chart-toggle ${active ? "active" : ""}`}
+                  type="button"
+                  style={active ? { borderColor: series.color, backgroundColor: series.color } : { borderColor: series.color, color: series.color }}
+                  aria-pressed={active}
+                  disabled={active && visibleSeries.length === 1}
+                  onClick={() => toggleSeries(series.key)}
+                >
+                  {series.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {activeSeries.length > 0 ? (
         <div className="chart-area">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" minTickGap={26} />
-              <YAxis width={42} />
-              <Tooltip formatter={(value) => [`${value} ${unit}`, title]} />
-              <Line type="monotone" dataKey={dataKey} stroke={color} dot={false} strokeWidth={2} connectNulls />
+              {activeSeries.map((series, index) => (
+                <YAxis
+                  key={series.key}
+                  yAxisId={series.key}
+                  orientation={index === 0 ? "left" : "right"}
+                  width={series.key === "paceSPKM" ? 58 : 46}
+                  domain={["auto", "auto"]}
+                  reversed={series.key === "paceSPKM"}
+                  tickFormatter={(value) => formatChartTick(Number(value), series)}
+                />
+              ))}
+              <Tooltip formatter={(value, name, item) => formatChartTooltip(value, String(name), activeSeries, item)} />
+              {activeSeries.map((series) => (
+                <Line
+                  key={series.key}
+                  type="monotone"
+                  dataKey={series.key}
+                  name={series.label}
+                  yAxisId={series.key}
+                  stroke={series.color}
+                  dot={false}
+                  strokeWidth={2}
+                  connectNulls
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -615,12 +694,50 @@ function routeForActivity(activity: Activity): RoutePoint[] {
   return [];
 }
 
-function chartDataFor(samples: ActivitySample[]) {
-  return samples.map((sample, index) => ({
-    label: sample.distanceM !== undefined ? `${(sample.distanceM / 1000).toFixed(1)} km` : String(index + 1),
-    elevationM: sample.elevationM !== undefined ? Math.round(sample.elevationM) : undefined,
-    heartRate: sample.heartRate
-  }));
+function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
+  return samples.map((sample, index) => {
+    const rawPaceSPKM = sample.speedMPS && sample.speedMPS > 0 ? 1000 / sample.speedMPS : undefined;
+    return {
+      label: sample.distanceM !== undefined ? `${(sample.distanceM / 1000).toFixed(1)} km` : String(index + 1),
+      elevationM: sample.elevationM !== undefined ? Math.round(sample.elevationM) : undefined,
+      heartRate: sample.heartRate,
+      paceSPKM: rawPaceSPKM !== undefined ? Math.min(rawPaceSPKM, PACE_GRAPH_SLOW_CAP_S_PER_KM) : undefined,
+      rawPaceSPKM,
+      power: sample.power,
+      cadence: sample.cadence
+    };
+  });
+}
+
+function formatChartTick(value: number, series: ActivityChartSeries) {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  if (series.key === "paceSPKM") {
+    const minutes = Math.floor(value / 60);
+    const seconds = Math.round(value % 60);
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+  return String(Math.round(value));
+}
+
+function formatChartTooltip(value: unknown, name: string, seriesList: ActivityChartSeries[], item?: unknown) {
+  const series = seriesList.find((item) => item.label === name);
+  const numericValue = typeof value === "number" ? value : Number(value);
+  if (!series || !Number.isFinite(numericValue)) {
+    return [String(value), name];
+  }
+  const rawPace = series.key === "paceSPKM" ? chartPayloadNumber(item, "rawPaceSPKM") : undefined;
+  return [series.format(rawPace ?? numericValue), name];
+}
+
+function chartPayloadNumber(item: unknown, key: keyof ActivityChartPoint) {
+  if (!item || typeof item !== "object" || !("payload" in item)) {
+    return undefined;
+  }
+  const payload = (item as { payload?: Partial<Record<keyof ActivityChartPoint, unknown>> }).payload;
+  const value = payload?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function decodePolyline(encoded: string): RoutePoint[] {
