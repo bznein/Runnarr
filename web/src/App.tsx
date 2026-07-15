@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity as ActivityIcon, BarChart3, Cloud, Database, LogOut, Map, RefreshCw, Trash2, Upload } from "lucide-react";
-import { MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
+import { divIcon } from "leaflet";
+import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
 import type { Activity, ActivitySample, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
@@ -828,11 +829,15 @@ function ChartPanel({ title, data, dataKey, unit, color }: { title: string; data
 
 function ActivityMap({ points, tileURL }: { points: RoutePoint[]; tileURL?: string }) {
   const center = points[0] ?? [53.3498, -6.2603];
+  const start = points[0];
+  const end = points.length > 1 ? points[points.length - 1] : undefined;
   return (
     <div className="map-frame">
       <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
         <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
         <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />
+        {start && <Marker position={start} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
+        {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
         <FitRoute points={points} />
       </MapContainer>
     </div>
@@ -847,6 +852,16 @@ function FitRoute({ points }: { points: RoutePoint[] }) {
     }
   }, [map, points]);
   return null;
+}
+
+function routeEndpointIcon(kind: "start" | "end") {
+  const label = kind === "start" ? "Start" : "End";
+  return divIcon({
+    className: "route-endpoint-marker-icon",
+    html: `<span class="route-endpoint-marker ${kind}">${label}</span>`,
+    iconSize: [56, 26],
+    iconAnchor: [28, 13]
+  });
 }
 
 function routeForActivity(activity: Activity): RoutePoint[] {

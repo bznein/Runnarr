@@ -108,6 +108,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity laps imported from providers should preserve provider interval metadata where available, including Intervals.icu `type` and `label` fields from `icu_intervals`.
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.
+- Route maps should show start and end markers, and should eventually support well-designed direction indicators along the route without cluttering the map.
 - The admin must be able to delete activities from Runnarr, including their samples and laps, without deleting provider connections or source files outside the app.
 - Import and provider settings views must make the data pipeline visible enough to debug failed imports or syncs.
 - Provider imports should populate calories/energy expenditure on activities when the provider exposes it, including Intervals.icu where available.
