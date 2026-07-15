@@ -71,6 +71,8 @@ type ActivityFilters struct {
 	Search             string
 	DateFrom           time.Time
 	DateTo             time.Time
+	SortBy             string
+	SortOrder          string
 }
 
 type ImportFile struct {

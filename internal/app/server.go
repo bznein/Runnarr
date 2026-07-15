@@ -510,6 +510,8 @@ func activityFiltersFromQuery(r *http.Request) ActivityFilters {
 		Search:             strings.TrimSpace(values.Get("search")),
 		DateFrom:           parseActivityFilterDate(values.Get("dateFrom")),
 		DateTo:             parseActivityFilterDate(values.Get("dateTo")),
+		SortBy:             strings.TrimSpace(values.Get("sortBy")),
+		SortOrder:          strings.TrimSpace(values.Get("sortOrder")),
 	}
 }
 

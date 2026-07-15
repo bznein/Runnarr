@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, BarChart3, Cloud, Database, Filter, LogOut, Map, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Cloud, Database, Filter, LogOut, Map, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivitySample, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
+import type { Activity, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
+type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
 
-const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "" };
+const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
+const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -214,8 +216,13 @@ function Dashboard() {
 }
 
 function ActivitiesPage() {
-  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = activityFiltersFromSearchParams(searchParams);
+  const setFilters = (nextFilters: ActivityTypeFiltersValue) => {
+    setSearchParams(activityFiltersToSearchParams(nextFilters), { replace: true });
+  };
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
   const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
   const queryClient = useQueryClient();
@@ -237,19 +244,31 @@ function ActivitiesPage() {
   const activityList = activities.data?.activities ?? [];
   const dateFiltersActive = hasDateFilters(filters);
   const anyFiltersActive = hasActivityFilters(filters);
+  const currentSort = normalizedActivitySort(filters);
+  const sortActive = !activitySortsMatch(currentSort, defaultActivitySort);
   return (
     <Page
       title="Activities"
       actions={
-        <button
-          className={`secondary-button ${dateFiltersActive ? "active-filter-button" : ""}`}
-          type="button"
-          onClick={() => setFiltersOpen(true)}
-        >
-          <Filter size={16} />
-          Filter
-          {dateFiltersActive && <span className="button-badge">1</span>}
-        </button>
+        <>
+          <button
+            className={`secondary-button ${dateFiltersActive ? "active-filter-button" : ""}`}
+            type="button"
+            onClick={() => setFiltersOpen(true)}
+          >
+            <Filter size={16} />
+            Filter
+            {dateFiltersActive && <span className="button-badge">1</span>}
+          </button>
+          <button
+            className={`secondary-button ${sortActive ? "active-filter-button" : ""}`}
+            type="button"
+            onClick={() => setSortOpen(true)}
+          >
+            <ArrowUpDown size={16} />
+            Sort
+          </button>
+        </>
       }
     >
       {filtersOpen && (
@@ -257,6 +276,13 @@ function ActivitiesPage() {
           filters={filters}
           onApply={setFilters}
           onClose={() => setFiltersOpen(false)}
+        />
+      )}
+      {sortOpen && (
+        <ActivitySortDialog
+          filters={filters}
+          onApply={setFilters}
+          onClose={() => setSortOpen(false)}
         />
       )}
       <ActivitySearchPanel
@@ -397,6 +423,99 @@ function ActivityFiltersDialog({
             Cancel
           </button>
           <button className="primary-button" type="button" disabled={dateRangeInvalid} onClick={applyDates}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ActivitySortDialog({
+  filters,
+  onApply,
+  onClose
+}: {
+  filters: ActivityTypeFiltersValue;
+  onApply: (filters: ActivityTypeFiltersValue) => void;
+  onClose: () => void;
+}) {
+  const [draftSort, setDraftSort] = useState<ActivitySort>(normalizedActivitySort(filters));
+  const applySort = () => {
+    onApply({
+      ...filters,
+      sortBy: draftSort.sortBy,
+      sortOrder: draftSort.sortOrder
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-sort-title">
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Sort</div>
+            <h2 id="activity-sort-title">Activities</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close sort" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Sort by</div>
+          <div className="sort-option-grid">
+            {activitySortOptions().map((option) => (
+              <button
+                key={option.value}
+                className={`sort-choice ${draftSort.sortBy === option.value ? "active" : ""}`}
+                type="button"
+                onClick={() => setDraftSort({ ...draftSort, sortBy: option.value })}
+              >
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Direction</div>
+          <div className="segmented-control">
+            <button
+              className={draftSort.sortOrder === "desc" ? "active" : ""}
+              type="button"
+              onClick={() => setDraftSort({ ...draftSort, sortOrder: "desc" })}
+            >
+              <ArrowDown size={15} />
+              Desc
+            </button>
+            <button
+              className={draftSort.sortOrder === "asc" ? "active" : ""}
+              type="button"
+              onClick={() => setDraftSort({ ...draftSort, sortOrder: "asc" })}
+            >
+              <ArrowUp size={15} />
+              Asc
+            </button>
+          </div>
+        </div>
+
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={() => setDraftSort(defaultActivitySort)}>
+            Reset
+          </button>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" onClick={applySort}>
             Apply
           </button>
         </div>
@@ -1049,6 +1168,96 @@ function hasActivityFilters(filters: ActivityTypeFiltersValue) {
 
 function hasDateFilters(filters: ActivityTypeFiltersValue) {
   return Boolean(filters.dateFrom || filters.dateTo);
+}
+
+function activityFiltersFromSearchParams(params: URLSearchParams): ActivityTypeFiltersValue {
+  const filters: ActivityTypeFiltersValue = {
+    ...emptyActivityTypeFilters,
+    sports: compactSearchParamValues(params, "sport", "sports"),
+    excludeSports: compactSearchParamValues(params, "excludeSport", "excludeSports"),
+    search: params.get("search")?.trim() ?? "",
+    dateFrom: params.get("dateFrom") ?? "",
+    dateTo: params.get("dateTo") ?? "",
+    sortBy: parseActivitySortBy(params.get("sortBy")),
+    sortOrder: parseActivitySortOrder(params.get("sortOrder"))
+  };
+  return {
+    ...filters,
+    ...normalizedActivitySort(filters)
+  };
+}
+
+function activityFiltersToSearchParams(filters: ActivityTypeFiltersValue) {
+  const params = new URLSearchParams();
+  for (const sport of filters.sports) {
+    params.append("sport", sport);
+  }
+  for (const sport of filters.excludeSports) {
+    params.append("excludeSport", sport);
+  }
+  if (filters.search?.trim()) {
+    params.set("search", filters.search.trim());
+  }
+  if (filters.dateFrom) {
+    params.set("dateFrom", filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    params.set("dateTo", filters.dateTo);
+  }
+
+  const sort = normalizedActivitySort(filters);
+  if (!activitySortsMatch(sort, defaultActivitySort)) {
+    params.set("sortBy", sort.sortBy);
+    params.set("sortOrder", sort.sortOrder);
+  }
+  return params;
+}
+
+function compactSearchParamValues(params: URLSearchParams, ...keys: string[]) {
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const key of keys) {
+    for (const raw of params.getAll(key)) {
+      for (const part of raw.split(",")) {
+        const value = part.trim();
+        if (!value || seen.has(value)) {
+          continue;
+        }
+        seen.add(value);
+        values.push(value);
+      }
+    }
+  }
+  return values;
+}
+
+function parseActivitySortBy(value: string | null): ActivitySortBy {
+  return activitySortOptions().some((option) => option.value === value) ? (value as ActivitySortBy) : defaultActivitySort.sortBy;
+}
+
+function parseActivitySortOrder(value: string | null) {
+  return value === "asc" || value === "desc" ? value : defaultActivitySort.sortOrder;
+}
+
+function activitySortOptions(): Array<{ value: ActivitySortBy; label: string }> {
+  return [
+    { value: "date", label: "Date" },
+    { value: "duration", label: "Duration" },
+    { value: "distance", label: "Distance" },
+    { value: "elevation_gain", label: "Elevation gain" },
+    { value: "avg_pace", label: "Avg pace" }
+  ];
+}
+
+function normalizedActivitySort(filters: ActivityTypeFiltersValue): ActivitySort {
+  return {
+    sortBy: filters.sortBy && activitySortOptions().some((option) => option.value === filters.sortBy) ? filters.sortBy : defaultActivitySort.sortBy,
+    sortOrder: filters.sortOrder === "asc" || filters.sortOrder === "desc" ? filters.sortOrder : defaultActivitySort.sortOrder
+  };
+}
+
+function activitySortsMatch(left: ActivitySort, right: ActivitySort) {
+  return left.sortBy === right.sortBy && left.sortOrder === right.sortOrder;
 }
 
 function dateFilterPresets(): Array<{ id: string; label: string; range: ActivityDateRange }> {

@@ -315,6 +315,60 @@ input {
   gap: 12px;
 }
 
+.sort-option-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.sort-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid #cbd6d0;
+  border-radius: 6px;
+  color: #34413d;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.sort-choice.active {
+  border-color: #236b63;
+  color: #1d665b;
+  background: #eef8f4;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+  border: 1px solid #cbd6d0;
+  border-radius: 6px;
+}
+
+.segmented-control button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border: 0;
+  border-right: 1px solid #cbd6d0;
+  color: #34413d;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.segmented-control button:last-child {
+  border-right: 0;
+}
+
+.segmented-control button.active {
+  color: #ffffff;
+  background: #2f8f83;
+}
+
 .dialog-actions {
   justify-content: flex-end;
   flex-wrap: wrap;

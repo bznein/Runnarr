@@ -32,6 +32,12 @@ function activityFilterQuery(filters?: ActivityTypeFilters) {
   if (filters?.dateTo) {
     params.set("dateTo", filters.dateTo);
   }
+  if (filters?.sortBy) {
+    params.set("sortBy", filters.sortBy);
+  }
+  if (filters?.sortOrder) {
+    params.set("sortOrder", filters.sortOrder);
+  }
   return params.toString();
 }
 

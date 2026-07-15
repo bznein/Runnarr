@@ -212,10 +212,11 @@ func (s *Store) ListActivities(ctx context.Context, limit, offset int, filters A
 	}
 
 	where, args := activityFilterWhere(filters, 1)
+	orderBy := activityOrderBy(filters.SortBy, filters.SortOrder)
 	args = append(args, limit, offset)
 	limitParam := len(args) - 1
 	offsetParam := len(args)
-	rows, err := s.db.Query(ctx, activitySelectSQL+where+fmt.Sprintf(` order by start_time desc limit $%d offset $%d`, limitParam, offsetParam), args...)
+	rows, err := s.db.Query(ctx, activitySelectSQL+where+fmt.Sprintf(` %s limit $%d offset $%d`, orderBy, limitParam, offsetParam), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -650,6 +651,36 @@ func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, 
 		args = append(args, filters.ExcludedSportTypes)
 	}
 	return conditions, args
+}
+
+func activityOrderBy(sortBy, sortOrder string) string {
+	sortExpression := "start_time"
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "", "date":
+		sortExpression = "start_time"
+	case "duration":
+		sortExpression = "coalesce(nullif(moving_time_s, 0), elapsed_time_s, 0)"
+	case "distance":
+		sortExpression = "distance_m"
+	case "elevation_gain":
+		sortExpression = "elevation_gain_m"
+	case "avg_pace":
+		sortExpression = "coalesce(avg_pace_s_per_km, 0)"
+	}
+
+	direction := "desc"
+	switch strings.ToLower(strings.TrimSpace(sortOrder)) {
+	case "asc":
+		direction = "asc"
+	case "desc":
+		direction = "desc"
+	}
+
+	orderBy := fmt.Sprintf("order by %s %s", sortExpression, direction)
+	if sortExpression != "start_time" {
+		orderBy += ", start_time desc"
+	}
+	return orderBy + ", id desc"
 }
 
 func isProviderSyncedSource(source, sourceID string, noSourceFile bool) bool {

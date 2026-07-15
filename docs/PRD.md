@@ -53,6 +53,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - V1 must import GPX, TCX, and FIT files.
 - V1 must import Strava account bulk export archives so users can migrate their Strava history without a paid Strava API/developer subscription.
 - Strava archive import must locate supported activity files inside the archive, import each supported activity, and report unsupported files without failing the entire archive.
+- Manual file/archive import must remain available, but should be a secondary workflow rather than a primary navigation item or prominent dashboard action.
 - The importer must deduplicate repeated uploads by file hash and provider source identifiers.
 - The import pipeline must normalize:
   - activity name
@@ -89,6 +90,14 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Detailed sync history may remain available for debugging, but it should be collapsed by default, behind a secondary control, or moved to a less prominent diagnostics view.
 - Scheduled/background syncs must be represented in sync history when diagnostics are opened, but should not dominate the normal provider workflow.
 
+### Settings and Navigation
+
+- The app must have a top-level Settings page for configuration and maintenance workflows.
+- Settings should contain provider connections, sync controls/status, theme preferences, unit/display preferences, data import tools, and diagnostics as those features exist.
+- Manual import should move into Settings or another secondary location, with clear labeling for file/archive upload but reduced visual prominence compared with dashboard, activity browsing, and provider sync status.
+- Primary navigation should prioritize Dashboard, Activities, and Settings; import/upload should not need its own first-level navigation item once Settings exists.
+- Settings sections should be structured so advanced or debugging workflows, such as detailed sync history and raw import history, are available without dominating the default view.
+
 ### Activity Views
 
 - Dashboard must show total activities, recent activity, total distance, total time, and recent weekly distance.
@@ -114,7 +123,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity detail should show attached media in a gallery; media with EXIF location should also appear on the activity map as small thumbnail markers at the recorded location.
 - Media thumbnail markers should be unobtrusive and should open or highlight the corresponding media item when selected.
 - The admin must be able to delete activities from Runnarr, including their samples and laps, without deleting provider connections or source files outside the app.
-- Import and provider settings views must make the data pipeline visible enough to debug failed imports or syncs.
+- Settings must make the data pipeline visible enough to debug failed imports or syncs without making manual import the dominant workflow.
 - Provider imports should populate calories/energy expenditure on activities when the provider exposes it, including Intervals.icu where available.
 
 ## 6. UX Principles
@@ -230,8 +239,9 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - The app applies migrations and serves the UI.
 - The admin can log in with configured credentials.
 - The UI automatically follows the system light/dark preference and supports a persistent manual theme override.
-- The admin can upload a sample GPX, TCX, or FIT file.
-- The admin can upload a Strava account export archive and import supported activities without configuring Strava OAuth/API credentials.
+- The admin can reach a Settings page for provider connections, display preferences, data import tools, and diagnostics.
+- The admin can upload a sample GPX, TCX, or FIT file from the secondary manual import area.
+- The admin can upload a Strava account export archive from the secondary manual import area and import supported activities without configuring Strava OAuth/API credentials.
 - Uploaded activities appear in the dashboard and activity list.
 - The admin can change the dashboard time scale and see activity totals/charts update for the selected scale.
 - The admin can search activities by name, filter by type/source/metrics/location, and sort the activity list by date, name, type, source, distance, time, and elevation.
