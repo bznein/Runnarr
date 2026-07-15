@@ -19,6 +19,7 @@ type Activity struct {
 	SummaryPolyline string           `json:"summaryPolyline,omitempty"`
 	Samples         []ActivitySample `json:"samples,omitempty"`
 	Laps            []ActivityLap    `json:"laps,omitempty"`
+	Climbs          []ActivityClimb  `json:"climbs,omitempty"`
 	CreatedAt       time.Time        `json:"createdAt"`
 }
 
@@ -41,6 +42,20 @@ type ActivityLap struct {
 	StartTime    *time.Time `json:"startTime,omitempty"`
 	ElapsedTimeS int        `json:"elapsedTimeS"`
 	DistanceM    float64    `json:"distanceM"`
+}
+
+type ActivityClimb struct {
+	Index            int     `json:"index"`
+	Difficulty       string  `json:"difficulty"`
+	StartSampleIndex int     `json:"startSampleIndex"`
+	EndSampleIndex   int     `json:"endSampleIndex"`
+	StartDistanceM   float64 `json:"startDistanceM"`
+	EndDistanceM     float64 `json:"endDistanceM"`
+	DistanceM        float64 `json:"distanceM"`
+	ElevationGainM   float64 `json:"elevationGainM"`
+	AvgGradePct      float64 `json:"avgGradePct"`
+	StartElevationM  float64 `json:"startElevationM"`
+	EndElevationM    float64 `json:"endElevationM"`
 }
 
 type ImportedActivity struct {

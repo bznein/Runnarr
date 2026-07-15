@@ -5,9 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity as ActivityIcon, BarChart3, Database, LogOut, Map, Trash2, Upload } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivitySample, ActivitySortBy, ActivitySortOrder, ActivityTypeFilters, AppConfig } from "./types";
+import type { Activity, ActivityClimb, ActivitySample, ActivitySortBy, ActivitySortOrder, ActivityTypeFilters, AppConfig } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityTypeFiltersValue = ActivityTypeFilters;
@@ -31,6 +31,11 @@ type ActivityChartSeries = {
   color: string;
   defaultVisible: boolean;
   format: (value: number) => string;
+};
+type ClimbProfilePoint = {
+  label: string;
+  distanceKm: number;
+  elevationM: number;
 };
 
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
@@ -414,9 +419,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
   });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
+  const [selectedClimbIndex, setSelectedClimbIndex] = useState(0);
 
   useEffect(() => {
     setHighlightedSample(undefined);
+    setSelectedClimbIndex(0);
   }, [id]);
 
   if (activity.isLoading) {
@@ -430,6 +437,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
+  const climbs = item.climbs ?? [];
+  const selectedClimb = climbs[selectedClimbIndex] ?? climbs[0];
+  const selectedClimbPoints = routeForClimb(item, selectedClimb);
+  const selectedClimbProfile = climbProfileFor(item, selectedClimb);
   const handleDelete = () => {
     if (window.confirm(`Delete "${item.name}" from Runnarr?`)) {
       deleteActivity.mutate(item.id);
@@ -458,8 +469,17 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {routePoints.length > 1 && (
         <section className="panel">
           <div className="panel-heading">Route</div>
-          <ActivityMap points={routePoints} tileURL={config?.mapTileURL} highlightedPoint={highlightedPoint} />
+          <ActivityMap points={routePoints} tileURL={config?.mapTileURL} highlightedPoint={highlightedPoint} highlightedSegment={selectedClimbPoints} />
         </section>
+      )}
+
+      {climbs.length > 0 && (
+        <ActivityClimbsPanel
+          climbs={climbs}
+          selectedClimb={selectedClimb}
+          profileData={selectedClimbProfile}
+          onSelect={(climb) => setSelectedClimbIndex(climb.index)}
+        />
       )}
 
       <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
@@ -488,6 +508,78 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
     </Page>
+  );
+}
+
+function ActivityClimbsPanel({
+  climbs,
+  selectedClimb,
+  profileData,
+  onSelect
+}: {
+  climbs: ActivityClimb[];
+  selectedClimb?: ActivityClimb;
+  profileData: ClimbProfilePoint[];
+  onSelect: (climb: ActivityClimb) => void;
+}) {
+  return (
+    <section className="panel climbs-panel">
+      <div className="chart-header">
+        <div className="panel-heading">Climbs</div>
+        <span className="muted">{climbs.length.toLocaleString()} detected</span>
+      </div>
+      <div className="climbs-layout">
+        <div className="climb-list">
+          {climbs.map((climb) => {
+            const active = selectedClimb?.index === climb.index;
+            return (
+              <button key={climb.index} className={`climb-item ${active ? "active" : ""}`} type="button" onClick={() => onSelect(climb)}>
+                <span className="climb-item-header">
+                  <strong>Climb {climb.index + 1}</strong>
+                  <span className={`climb-difficulty ${difficultyClass(climb.difficulty)}`}>{climb.difficulty}</span>
+                </span>
+                <span className="climb-item-metrics">
+                  <span>{formatGrade(climb.avgGradePct)}</span>
+                  <span>{formatDistance(climb.distanceM)}</span>
+                  <span>{Math.round(climb.elevationGainM).toLocaleString()} m</span>
+                </span>
+                <span className="muted">{formatDistanceRange(climb.startDistanceM, climb.endDistanceM)}</span>
+              </button>
+            );
+          })}
+        </div>
+        {selectedClimb && (
+          <div className="climb-detail">
+            <div className="climb-detail-metrics">
+              <ClimbStat label="Difficulty" value={selectedClimb.difficulty} />
+              <ClimbStat label="Avg Grade" value={formatGrade(selectedClimb.avgGradePct)} />
+              <ClimbStat label="Distance" value={formatDistance(selectedClimb.distanceM)} />
+              <ClimbStat label="Total Ascent" value={`${Math.round(selectedClimb.elevationGainM).toLocaleString()} m`} />
+            </div>
+            <div className="climb-profile">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={profileData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" minTickGap={26} />
+                  <YAxis width={44} domain={["auto", "auto"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
+                  <Tooltip formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Elevation"]} />
+                  <Area type="basis" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ClimbStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="climb-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -660,15 +752,27 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
   );
 }
 
-function ActivityMap({ points, tileURL, highlightedPoint }: { points: RoutePoint[]; tileURL?: string; highlightedPoint?: RoutePoint }) {
+function ActivityMap({
+  points,
+  tileURL,
+  highlightedPoint,
+  highlightedSegment
+}: {
+  points: RoutePoint[];
+  tileURL?: string;
+  highlightedPoint?: RoutePoint;
+  highlightedSegment?: RoutePoint[];
+}) {
   const center = points[0] ?? [53.3498, -6.2603];
   const start = points[0];
   const end = points.length > 1 ? points[points.length - 1] : undefined;
+  const hasHighlightedSegment = highlightedSegment && highlightedSegment.length > 1;
   return (
     <div className="map-frame">
       <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
         <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
         <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />
+        {hasHighlightedSegment && <Polyline pathOptions={{ color: "#f6c432", weight: 7, opacity: 0.95 }} positions={highlightedSegment} />}
         {start && <Marker position={start} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
         {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
         {highlightedPoint && <Marker position={highlightedPoint} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
@@ -718,6 +822,35 @@ function routeForActivity(activity: Activity): RoutePoint[] {
     return decodePolyline(activity.summaryPolyline);
   }
   return [];
+}
+
+function routeForClimb(activity: Activity, climb?: ActivityClimb): RoutePoint[] {
+  return samplesForClimb(activity, climb)
+    .filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number")
+    .map((sample) => [sample.latitude!, sample.longitude!] as RoutePoint);
+}
+
+function climbProfileFor(activity: Activity, climb?: ActivityClimb): ClimbProfilePoint[] {
+  if (!climb) {
+    return [];
+  }
+  return chartDataFor(samplesForClimb(activity, climb))
+    .filter((sample) => typeof sample.distanceM === "number" && typeof sample.elevationM === "number")
+    .map((sample) => {
+      const distanceKm = Math.max(0, (sample.distanceM! - climb.startDistanceM) / 1000);
+      return {
+        label: `${distanceKm.toFixed(1)} km`,
+        distanceKm,
+        elevationM: sample.elevationM!
+      };
+    });
+}
+
+function samplesForClimb(activity: Activity, climb?: ActivityClimb) {
+  if (!climb) {
+    return [];
+  }
+  return (activity.samples ?? []).filter((sample) => sample.index >= climb.startSampleIndex && sample.index <= climb.endSampleIndex);
 }
 
 function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
@@ -937,6 +1070,21 @@ function formatDate(value: string) {
 
 function formatDistance(value: number) {
   return `${(value / 1000).toFixed(value >= 100000 ? 0 : 1)} km`;
+}
+
+function formatDistanceRange(startM: number, endM: number) {
+  return `${(startM / 1000).toFixed(1)}-${(endM / 1000).toFixed(1)} km`;
+}
+
+function formatGrade(value: number) {
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  return `${value.toFixed(1).replace(/\.0$/, "")}%`;
+}
+
+function difficultyClass(value: string) {
+  return value.toLowerCase().replace(/\s+/g, "-");
 }
 
 function formatDuration(totalSeconds: number) {
