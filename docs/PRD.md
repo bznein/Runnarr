@@ -138,6 +138,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Runnarr is an operational tool, not a marketing site.
 - First screen after login should be the usable dashboard.
 - UI should be dense but readable, with restrained styling and clear navigation.
+- The app should include a recognizable favicon/app icon for browser tabs, bookmarks, and installable/PWA contexts.
 - UI must support light and dark themes, defaulting automatically to the user's system color-scheme preference.
 - The admin should be able to override the automatic theme preference and persist that choice locally.
 - Maps and charts should favor inspection and accuracy over decorative presentation.
