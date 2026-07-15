@@ -16,6 +16,7 @@ type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" 
 type ActivityChartPoint = {
   index: number;
   label: string;
+  distanceM?: number;
   latitude?: number;
   longitude?: number;
   elevationM?: number;
@@ -36,6 +37,8 @@ type ActivityChartSeries = {
 const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
 const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
+const ELEVATION_SMOOTHING_RADIUS_M = 150;
+const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
 const activityChartSeries: ActivityChartSeries[] = [
   { key: "elevationM", label: "Elevation", color: "#4664c9", defaultVisible: true, format: (value) => `${Math.round(value).toLocaleString()} m` },
   { key: "heartRate", label: "Heart rate", color: "#c84d4d", defaultVisible: true, format: (value) => `${Math.round(value)} bpm` },
@@ -1178,7 +1181,7 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
               {activeSeries.map((series) => (
                 <Line
                   key={series.key}
-                  type="monotone"
+                  type={series.key === "elevationM" ? "basis" : "monotone"}
                   dataKey={series.key}
                   name={series.label}
                   yAxisId={series.key}
@@ -1402,14 +1405,15 @@ function dateRangesMatch(left: ActivityDateRange, right: ActivityDateRange) {
 }
 
 function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
-  return samples.map((sample, index) => {
+  const points = samples.map((sample, index) => {
     const rawPaceSPKM = sample.speedMPS && sample.speedMPS > 0 ? 1000 / sample.speedMPS : undefined;
     return {
       index: sample.index ?? index,
       label: sample.distanceM !== undefined ? `${(sample.distanceM / 1000).toFixed(1)} km` : String(index + 1),
+      distanceM: typeof sample.distanceM === "number" ? sample.distanceM : undefined,
       latitude: typeof sample.latitude === "number" ? sample.latitude : undefined,
       longitude: typeof sample.longitude === "number" ? sample.longitude : undefined,
-      elevationM: sample.elevationM !== undefined ? Math.round(sample.elevationM) : undefined,
+      elevationM: typeof sample.elevationM === "number" ? sample.elevationM : undefined,
       heartRate: sample.heartRate,
       paceSPKM: rawPaceSPKM !== undefined ? Math.min(rawPaceSPKM, PACE_GRAPH_SLOW_CAP_S_PER_KM) : undefined,
       rawPaceSPKM,
@@ -1417,6 +1421,7 @@ function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
       cadence: sample.cadence
     };
   });
+  return smoothElevationSeries(points);
 }
 
 function routePointForChartPoint(point?: ActivityChartPoint): RoutePoint | undefined {
@@ -1424,6 +1429,88 @@ function routePointForChartPoint(point?: ActivityChartPoint): RoutePoint | undef
     return [point.latitude, point.longitude];
   }
   return undefined;
+}
+
+function smoothElevationSeries(points: ActivityChartPoint[]): ActivityChartPoint[] {
+  if (points.length < 3 || !points.some((point) => typeof point.elevationM === "number")) {
+    return points;
+  }
+  if (hasMonotonicDistances(points)) {
+    return smoothElevationByDistance(points);
+  }
+  return smoothElevationBySampleWindow(points);
+}
+
+function hasMonotonicDistances(points: ActivityChartPoint[]) {
+  let previousDistance = -Infinity;
+  let seenDistance = false;
+  for (const point of points) {
+    if (typeof point.distanceM !== "number" || !Number.isFinite(point.distanceM)) {
+      return false;
+    }
+    if (point.distanceM < previousDistance) {
+      return false;
+    }
+    previousDistance = point.distanceM;
+    seenDistance = true;
+  }
+  return seenDistance;
+}
+
+function smoothElevationByDistance(points: ActivityChartPoint[]) {
+  let left = 0;
+  let right = 0;
+  let sum = 0;
+  let count = 0;
+  return points.map((point) => {
+    const center = point.distanceM!;
+    while (right < points.length) {
+      const rightPoint = points[right];
+      if (!rightPoint || rightPoint.distanceM! > center + ELEVATION_SMOOTHING_RADIUS_M) {
+        break;
+      }
+      if (typeof rightPoint.elevationM === "number") {
+        sum += rightPoint.elevationM;
+        count++;
+      }
+      right++;
+    }
+    while (left < points.length) {
+      const leftPoint = points[left];
+      if (!leftPoint || leftPoint.distanceM! >= center - ELEVATION_SMOOTHING_RADIUS_M) {
+        break;
+      }
+      if (typeof leftPoint.elevationM === "number") {
+        sum -= leftPoint.elevationM;
+        count--;
+      }
+      left++;
+    }
+    if (typeof point.elevationM !== "number" || count === 0) {
+      return point;
+    }
+    return { ...point, elevationM: sum / count };
+  });
+}
+
+function smoothElevationBySampleWindow(points: ActivityChartPoint[]) {
+  return points.map((point, index) => {
+    if (typeof point.elevationM !== "number") {
+      return point;
+    }
+    let sum = 0;
+    let count = 0;
+    const start = Math.max(0, index - ELEVATION_SMOOTHING_SAMPLE_RADIUS);
+    const end = Math.min(points.length - 1, index + ELEVATION_SMOOTHING_SAMPLE_RADIUS);
+    for (let i = start; i <= end; i++) {
+      const sample = points[i];
+      if (typeof sample?.elevationM === "number") {
+        sum += sample.elevationM;
+        count++;
+      }
+    }
+    return count > 0 ? { ...point, elevationM: sum / count } : point;
+  });
 }
 
 function chartPointFromMouseState(state: unknown, data: ActivityChartPoint[]): ActivityChartPoint | undefined {
