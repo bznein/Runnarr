@@ -119,6 +119,7 @@ func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions, 
 
 	imported := 0
 	failed := 0
+	skippedExcluded := 0
 	total := 0
 	fitDownloads := 0
 	summaryOnly := 0
@@ -139,9 +140,10 @@ func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions, 
 		out := map[string]any{
 			"stage":           stage,
 			"activities":      total,
-			"processed":       imported + failed,
+			"processed":       imported + failed + skippedExcluded,
 			"imported":        imported,
 			"failed":          failed,
+			"skippedExcluded": skippedExcluded,
 			"fitDownloads":    fitDownloads,
 			"summaryOnly":     summaryOnly,
 			"lapsImported":    lapsImported,
@@ -236,6 +238,15 @@ func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions, 
 				continue
 			}
 			currentActivity = source.ID
+			excluded, err := s.store.IsActivitySyncExcluded(ctx, intervalsProvider, source.ID)
+			if err != nil {
+				return nil, err
+			}
+			if excluded {
+				skippedExcluded++
+				report("importing", false)
+				continue
+			}
 			importedActivity, usedFit, err := s.importedActivity(ctx, apiKey, source)
 			if err != nil {
 				failed++
@@ -252,6 +263,11 @@ func (s *IntervalsService) Sync(ctx context.Context, opts IntervalsSyncOptions, 
 			lapsImported += len(importedActivity.Laps)
 			normalizeImported(&importedActivity)
 			if _, err := s.store.SaveImportedActivity(ctx, intervalsProvider, source.ID, nil, importedActivity); err != nil {
+				if errors.Is(err, ErrActivitySyncExcluded) {
+					skippedExcluded++
+					report("importing", false)
+					continue
+				}
 				failed++
 				if len(firstErrors) < 5 {
 					firstErrors = append(firstErrors, source.ID+": "+err.Error())

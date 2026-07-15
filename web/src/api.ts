@@ -1,4 +1,4 @@
-import type { Activity, ActivityTypeFilters, AppConfig, ImportFile, IntervalsStatus, Session, StravaStatus, SummaryStats, SyncJob } from "./types";
+import type { Activity, ActivityTypeFilters, AppConfig, DeleteActivityResult, ImportFile, IntervalsStatus, Session, StravaStatus, SummaryStats, SyncJob } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -62,7 +62,7 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
-  deleteActivity: (id: string) => request<{ deleted: boolean }>(`/api/activities/${id}`, { method: "DELETE" }),
+  deleteActivity: (id: string) => request<DeleteActivityResult>(`/api/activities/${id}`, { method: "DELETE" }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
   upload: (file: File) => {
     const body = new FormData();

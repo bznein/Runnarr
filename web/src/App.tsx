@@ -89,6 +89,31 @@ function NavItem({ to, icon, label }: { to: string; icon: JSX.Element; label: st
   );
 }
 
+function deleteActivityConfirmation(activity: Activity) {
+  if (activity.source === "file") {
+    return `Delete "${activity.name}" from Runnarr?`;
+  }
+  const source = formatSourceName(activity.source);
+  return [
+    `Remove "${activity.name}" from Runnarr?`,
+    `Because this came from ${source}, Runnarr will remember it as ignored and will not import it again during future syncs.`,
+    `This will not delete it from ${source}.`
+  ].join("\n\n");
+}
+
+function formatSourceName(source: string) {
+  switch (source) {
+    case "intervals":
+      return "Intervals.icu";
+    case "strava":
+      return "Strava";
+    case "file":
+      return "manual upload";
+    default:
+      return source;
+  }
+}
+
 function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -202,7 +227,7 @@ function ActivitiesPage() {
     }
   });
   const handleDelete = (activity: Activity) => {
-    if (window.confirm(`Delete "${activity.name}" from Runnarr?`)) {
+    if (window.confirm(deleteActivityConfirmation(activity))) {
       deleteActivity.mutate(activity.id);
     }
   };
@@ -386,7 +411,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
   const handleDelete = () => {
-    if (window.confirm(`Delete "${item.name}" from Runnarr?`)) {
+    if (window.confirm(deleteActivityConfirmation(item))) {
       deleteActivity.mutate(item.id);
     }
   };
@@ -646,7 +671,7 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   const processed = payloadNumber(payload, "processed");
   const activities = payloadNumber(payload, "activities");
   const failed = payloadNumber(payload, "failed");
-  const laps = payloadNumber(payload, "lapsImported");
+  const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const stage = payloadText(payload, "stage") || job.status;
   const currentWindowStart = payloadText(payload, "currentWindowStart");
   const currentWindowEnd = payloadText(payload, "currentWindowEnd");
@@ -665,7 +690,7 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
         <SyncStat label="Imported" value={imported.toLocaleString()} />
         <SyncStat label="Processed" value={`${processed.toLocaleString()} / ${activities.toLocaleString()}`} />
         <SyncStat label="Failed" value={failed.toLocaleString()} />
-        <SyncStat label="Laps" value={laps.toLocaleString()} />
+        <SyncStat label="Ignored" value={skippedExcluded.toLocaleString()} />
       </div>
       <div className="sync-progress-details">
         <span>{stage}</span>
@@ -710,6 +735,7 @@ function formatSyncJobDetails(job: SyncJob) {
   const payload = job.payload ?? {};
   const imported = payloadNumber(payload, "imported");
   const failed = payloadNumber(payload, "failed");
+  const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const activities = payloadNumber(payload, "activities");
   const windows = payloadNumber(payload, "fetchedWindows");
   const splitWindows = payloadNumber(payload, "splitWindows");
@@ -721,6 +747,9 @@ function formatSyncJobDetails(job: SyncJob) {
   }
   if (failed > 0) {
     parts.push(`${failed} failed`);
+  }
+  if (skippedExcluded > 0) {
+    parts.push(`${skippedExcluded} ignored`);
   }
   if (windows > 0) {
     parts.push(`${windows} windows`);

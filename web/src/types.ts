@@ -50,6 +50,12 @@ export type Activity = {
   createdAt: string;
 };
 
+export type DeleteActivityResult = {
+  deleted: boolean;
+  excludedFromSync: boolean;
+  syncExclusionMessage?: string;
+};
+
 export type ActivityTypeFilters = {
   sports: string[];
   excludeSports: string[];

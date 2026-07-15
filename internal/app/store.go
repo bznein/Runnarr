@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ import (
 type Store struct {
 	db *pgxpool.Pool
 }
+
+var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
 
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
@@ -115,6 +118,24 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		}
 	}()
 
+	if isProviderSyncedSource(source, sourceID, sourceFileID == nil) {
+		var excluded bool
+		err = tx.QueryRow(ctx, `
+			select exists(
+				select 1
+				from sync_excluded_activities
+				where source = $1 and source_id = $2
+			)
+		`, source, sourceID).Scan(&excluded)
+		if err != nil {
+			return "", err
+		}
+		if excluded {
+			err = ErrActivitySyncExcluded
+			return "", err
+		}
+	}
+
 	var id string
 	err = tx.QueryRow(ctx, `
 		insert into activities(
@@ -202,6 +223,18 @@ func (s *Store) ListActivities(ctx context.Context, limit, offset int, filters A
 	return scanActivities(rows)
 }
 
+func (s *Store) IsActivitySyncExcluded(ctx context.Context, source, sourceID string) (bool, error) {
+	var excluded bool
+	err := s.db.QueryRow(ctx, `
+		select exists(
+			select 1
+			from sync_excluded_activities
+			where source = $1 and source_id = $2
+		)
+	`, source, sourceID).Scan(&excluded)
+	return excluded, err
+}
+
 func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	var activity Activity
 	row := s.db.QueryRow(ctx, activitySelectSQL+` where id = $1`, id)
@@ -222,15 +255,55 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	return activity, nil
 }
 
-func (s *Store) DeleteActivity(ctx context.Context, id string) error {
-	tag, err := s.db.Exec(ctx, `delete from activities where id = $1`, id)
+func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityResult, error) {
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return err
+		return DeleteActivityResult{}, err
 	}
-	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var source, sourceID, name, sportType string
+	var hasSourceFile bool
+	var startTime time.Time
+	err = tx.QueryRow(ctx, `
+		select source, source_id, source_file_id is not null, name, sport_type, start_time
+		from activities
+		where id = $1
+		for update
+	`, id).Scan(&source, &sourceID, &hasSourceFile, &name, &sportType, &startTime)
+	if err != nil {
+		return DeleteActivityResult{}, err
 	}
-	return nil
+
+	result := DeleteActivityResult{Deleted: true}
+	if isProviderSyncedSource(source, sourceID, !hasSourceFile) {
+		_, err = tx.Exec(ctx, `
+			insert into sync_excluded_activities(source, source_id, name, sport_type, start_time)
+			values($1, $2, $3, $4, $5)
+			on conflict(source, source_id) do update set
+				name = excluded.name,
+				sport_type = excluded.sport_type,
+				start_time = excluded.start_time,
+				reason = 'deleted_from_runnarr'
+		`, source, sourceID, name, sportType, startTime)
+		if err != nil {
+			return DeleteActivityResult{}, err
+		}
+		result.ExcludedFromSync = true
+		result.SyncExclusionMessage = "This synced activity will be ignored in future imports."
+	}
+
+	if _, err = tx.Exec(ctx, `delete from activities where id = $1`, id); err != nil {
+		return DeleteActivityResult{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return DeleteActivityResult{}, err
+	}
+	return result, nil
 }
 
 func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummaryStats, error) {
@@ -562,6 +635,10 @@ func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, 
 		args = append(args, filters.ExcludedSportTypes)
 	}
 	return conditions, args
+}
+
+func isProviderSyncedSource(source, sourceID string, noSourceFile bool) bool {
+	return source != "" && source != "file" && sourceID != "" && noSourceFile
 }
 
 func fallbackName(activity ImportedActivity) string {

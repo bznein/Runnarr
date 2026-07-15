@@ -85,6 +85,7 @@ func (s *StravaService) Sync(ctx context.Context) (map[string]any, error) {
 	}
 
 	imported := 0
+	skippedExcluded := 0
 	pages := 0
 	var rateLimit, rateUsage, readLimit, readUsage string
 	for page := 1; page <= 20; page++ {
@@ -119,9 +120,22 @@ func (s *StravaService) Sync(ctx context.Context) (map[string]any, error) {
 		}
 		pages++
 		for _, source := range activities {
+			sourceID := strconv.FormatInt(source.ID, 10)
+			excluded, err := s.store.IsActivitySyncExcluded(ctx, stravaProvider, sourceID)
+			if err != nil {
+				return nil, err
+			}
+			if excluded {
+				skippedExcluded++
+				continue
+			}
 			importedActivity := source.Imported()
 			normalizeImported(&importedActivity)
-			if _, err := s.store.SaveImportedActivity(ctx, stravaProvider, strconv.FormatInt(source.ID, 10), nil, importedActivity); err != nil {
+			if _, err := s.store.SaveImportedActivity(ctx, stravaProvider, sourceID, nil, importedActivity); err != nil {
+				if errors.Is(err, ErrActivitySyncExcluded) {
+					skippedExcluded++
+					continue
+				}
 				return nil, err
 			}
 			imported++
@@ -129,12 +143,13 @@ func (s *StravaService) Sync(ctx context.Context) (map[string]any, error) {
 	}
 
 	return map[string]any{
-		"imported":      imported,
-		"pages":         pages,
-		"rateLimit":     rateLimit,
-		"rateUsage":     rateUsage,
-		"readRateLimit": readLimit,
-		"readRateUsage": readUsage,
+		"imported":        imported,
+		"skippedExcluded": skippedExcluded,
+		"pages":           pages,
+		"rateLimit":       rateLimit,
+		"rateUsage":       rateUsage,
+		"readRateLimit":   readLimit,
+		"readRateUsage":   readUsage,
 	}, nil
 }
 

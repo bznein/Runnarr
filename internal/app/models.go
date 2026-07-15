@@ -22,6 +22,12 @@ type Activity struct {
 	CreatedAt       time.Time        `json:"createdAt"`
 }
 
+type DeleteActivityResult struct {
+	Deleted              bool   `json:"deleted"`
+	ExcludedFromSync     bool   `json:"excludedFromSync"`
+	SyncExclusionMessage string `json:"syncExclusionMessage,omitempty"`
+}
+
 type ActivitySample struct {
 	Index      int        `json:"index"`
 	Timestamp  *time.Time `json:"timestamp,omitempty"`

@@ -197,7 +197,7 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
-	err := s.store.DeleteActivity(r.Context(), chi.URLParam(r, "id"))
+	result, err := s.store.DeleteActivity(r.Context(), chi.URLParam(r, "id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity not found")
 		return
@@ -207,7 +207,7 @@ func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not delete activity")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
