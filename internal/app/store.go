@@ -223,6 +223,17 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	return activity, nil
 }
 
+func (s *Store) DeleteActivity(ctx context.Context, id string) error {
+	tag, err := s.db.Exec(ctx, `delete from activities where id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) Summary(ctx context.Context) (SummaryStats, error) {
 	var stats SummaryStats
 	stats.Recent = make([]Activity, 0)

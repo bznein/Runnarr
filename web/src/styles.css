@@ -236,7 +236,9 @@ input {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button,
+.icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -260,7 +262,36 @@ input {
   background: #ffffff;
 }
 
+.danger-button {
+  border: 1px solid #b94335;
+  color: #ffffff;
+  background: #c84d4d;
+}
+
+.icon-button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid #cbd6d0;
+  border-radius: 6px;
+  color: #4d5753;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.icon-button.danger {
+  color: #a33b2e;
+}
+
+.icon-button.danger:hover {
+  border-color: #e7b2a8;
+  background: #fff1ee;
+}
+
 .primary-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled,
+.icon-button:disabled,
 .secondary-button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
@@ -272,6 +303,11 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.row-actions {
+  width: 1%;
+  text-align: right;
 }
 
 .map-frame {
@@ -376,4 +412,3 @@ input {
     flex-direction: column;
   }
 }
-

@@ -47,6 +47,7 @@ export const api = {
   summary: () => request<SummaryStats>("/api/stats/summary"),
   activities: () => request<{ activities: Activity[] | null }>("/api/activities?limit=100"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  deleteActivity: (id: string) => request<{ deleted: boolean }>(`/api/activities/${id}`, { method: "DELETE" }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
   upload: (file: File) => {
     const body = new FormData();

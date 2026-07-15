@@ -65,6 +65,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
 			r.Get("/activities/{id}", s.handleGetActivity)
+			r.Delete("/activities/{id}", s.handleDeleteActivity)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/imports", s.handleListImports)
 			r.Post("/imports", s.handleImport)
@@ -161,6 +162,20 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})
+}
+
+func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
+	err := s.store.DeleteActivity(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("delete activity", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not delete activity")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
