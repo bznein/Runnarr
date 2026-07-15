@@ -1,0 +1,9 @@
+.env
+.DS_Store
+tmp/
+dist/
+web/dist/
+web/node_modules/
+coverage/
+*.log
+
