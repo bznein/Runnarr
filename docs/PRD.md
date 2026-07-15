@@ -110,6 +110,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity type filters should be hidden when the current dataset contains zero or one distinct activity type.
 - Activity sorting must support ascending and descending order for sortable columns and preserve the selected filters.
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
+- Activity detail should support overlaying compatible chart series in a single combined graph, such as elevation, pace/speed, heart rate, power, and cadence, with clear axes, legends, and per-series toggles.
 - Activity detail, list rows, and dashboard summaries should use sport-appropriate metrics, units, and labels rather than one generic endurance format for every activity.
 - Pace should be formatted by activity type, for example min/km for running, speed for cycling where appropriate, and min/100 m for swimming.
 - Each supported activity type should be reviewed for which metrics are meaningful to show, hide, or rename, including distance, pace/speed, elevation, cadence, power, laps, intervals, heart rate, and route maps.
@@ -188,6 +189,7 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - Health metrics such as resting HR, HRV, sleep, body weight, and subjective notes if provider support exists.
 - Grade Adjusted Pace (GAP), sourced directly from provider/workout data when available and computed from route grade and pace when not.
 - Interactive chart zooming and panning for inspecting specific sections of an activity.
+- Activity detail charts should allow collapsing separate metric graphs into one overlaid inspection graph where that improves comparison.
 - Selection tools on elevation/profile charts to calculate distance, elevation gain/loss, average grade, pace/speed, heart rate, and other available metrics for the selected range.
 - Synchronized chart hover so inspecting one activity graph highlights the matching point on all other graphs and places a marker at the corresponding location on the map.
 - Activity tagging for custom organization such as workout type, terrain, commute, race, injury context, or personal labels.
