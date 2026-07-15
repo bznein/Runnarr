@@ -93,3 +93,11 @@ func TestTCXParser(t *testing.T) {
 		t.Fatalf("max heart rate = %#v", activity.MaxHeartRate)
 	}
 }
+
+func TestNormalizeSportStrength(t *testing.T) {
+	for _, value := range []string{"WeightTraining", "weight lifting", "StrengthTraining"} {
+		if got := normalizeSport(value); got != "Strength" {
+			t.Fatalf("normalizeSport(%q) = %q", value, got)
+		}
+	}
+}

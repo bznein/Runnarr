@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -181,7 +182,7 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	return id, nil
 }
 
-func (s *Store) ListActivities(ctx context.Context, limit, offset int, sport string) ([]Activity, error) {
+func (s *Store) ListActivities(ctx context.Context, limit, offset int, filters ActivityFilters) ([]Activity, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -189,13 +190,11 @@ func (s *Store) ListActivities(ctx context.Context, limit, offset int, sport str
 		offset = 0
 	}
 
-	var rows pgx.Rows
-	var err error
-	if sport != "" {
-		rows, err = s.db.Query(ctx, activitySelectSQL+` where sport_type = $1 order by start_time desc limit $2 offset $3`, sport, limit, offset)
-	} else {
-		rows, err = s.db.Query(ctx, activitySelectSQL+` order by start_time desc limit $1 offset $2`, limit, offset)
-	}
+	where, args := activityFilterWhere(filters, 1)
+	args = append(args, limit, offset)
+	limitParam := len(args) - 1
+	offsetParam := len(args)
+	rows, err := s.db.Query(ctx, activitySelectSQL+where+fmt.Sprintf(` order by start_time desc limit $%d offset $%d`, limitParam, offsetParam), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -223,18 +222,19 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	return activity, nil
 }
 
-func (s *Store) Summary(ctx context.Context) (SummaryStats, error) {
+func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummaryStats, error) {
 	var stats SummaryStats
 	stats.Recent = make([]Activity, 0)
 	stats.WeeklyDistance = make([]WeeklyBucket, 0)
+	where, args := activityFilterWhere(filters, 1)
 	if err := s.db.QueryRow(ctx, `
 		select count(*), coalesce(sum(distance_m), 0), coalesce(sum(moving_time_s), 0), coalesce(sum(elevation_gain_m), 0)
 		from activities
-	`).Scan(&stats.ActivityCount, &stats.DistanceM, &stats.MovingTimeS, &stats.ElevationGainM); err != nil {
+	`+where, args...).Scan(&stats.ActivityCount, &stats.DistanceM, &stats.MovingTimeS, &stats.ElevationGainM); err != nil {
 		return stats, err
 	}
 
-	recentRows, err := s.db.Query(ctx, activitySelectSQL+` order by start_time desc limit 5`)
+	recentRows, err := s.db.Query(ctx, activitySelectSQL+where+` order by start_time desc limit 5`, args...)
 	if err != nil {
 		return stats, err
 	}
@@ -244,13 +244,15 @@ func (s *Store) Summary(ctx context.Context) (SummaryStats, error) {
 		return stats, err
 	}
 
+	weeklyConditions, weeklyArgs := activityFilterConditions(filters, 1)
+	weeklyConditions = append([]string{`start_time >= now() - interval '12 weeks'`}, weeklyConditions...)
 	weeklyRows, err := s.db.Query(ctx, `
 		select date_trunc('week', start_time)::timestamptz as week_start, coalesce(sum(distance_m), 0)
 		from activities
-		where start_time >= now() - interval '12 weeks'
+		where `+strings.Join(weeklyConditions, " and ")+`
 		group by week_start
 		order by week_start
-	`)
+	`, weeklyArgs...)
 	if err != nil {
 		return stats, err
 	}
@@ -263,6 +265,29 @@ func (s *Store) Summary(ctx context.Context) (SummaryStats, error) {
 		stats.WeeklyDistance = append(stats.WeeklyDistance, bucket)
 	}
 	return stats, weeklyRows.Err()
+}
+
+func (s *Store) ListSportTypes(ctx context.Context) ([]string, error) {
+	rows, err := s.db.Query(ctx, `
+		select distinct sport_type
+		from activities
+		where sport_type <> ''
+		order by sport_type
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var sport string
+		if err := rows.Scan(&sport); err != nil {
+			return nil, err
+		}
+		out = append(out, sport)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) UpsertProviderConnection(ctx context.Context, conn StoredProviderConnection) error {
@@ -469,6 +494,30 @@ func scanActivity(row rowScanner, activity *Activity) error {
 	activity.MaxHeartRate = floatPtrFromNull(maxHR)
 	activity.AvgPaceSPKM = floatPtrFromNull(avgPace)
 	return nil
+}
+
+func activityFilterWhere(filters ActivityFilters, startArg int) (string, []any) {
+	conditions, args := activityFilterConditions(filters, startArg)
+	if len(conditions) == 0 {
+		return "", args
+	}
+	return " where " + strings.Join(conditions, " and "), args
+}
+
+func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, []any) {
+	conditions := make([]string, 0, 2)
+	args := make([]any, 0, 2)
+	nextArg := startArg
+	if len(filters.SportTypes) > 0 {
+		conditions = append(conditions, fmt.Sprintf("sport_type = any($%d)", nextArg))
+		args = append(args, filters.SportTypes)
+		nextArg++
+	}
+	if len(filters.ExcludedSportTypes) > 0 {
+		conditions = append(conditions, fmt.Sprintf("sport_type <> all($%d)", nextArg))
+		args = append(args, filters.ExcludedSportTypes)
+	}
+	return conditions, args
 }
 
 func fallbackName(activity ImportedActivity) string {

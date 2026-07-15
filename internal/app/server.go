@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,6 +28,7 @@ type Server struct {
 	store     *Store
 	imports   *ImportService
 	strava    *StravaService
+	intervals *IntervalsService
 	logger    *slog.Logger
 	adminHash []byte
 }
@@ -48,6 +51,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		store:     store,
 		imports:   NewImportService(store),
 		strava:    NewStravaService(cfg, store, cipher),
+		intervals: NewIntervalsService(store, cipher),
 		logger:    logger,
 		adminHash: adminHash,
 	}, nil
@@ -73,6 +77,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
 			r.Get("/activities/{id}", s.handleGetActivity)
+			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/imports", s.handleListImports)
 			r.Post("/imports", s.handleImport)
@@ -80,6 +85,9 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/providers/strava/connect", s.handleStravaConnect)
 			r.Get("/providers/strava/callback", s.handleStravaCallback)
 			r.Post("/providers/strava/sync", s.handleStravaSync)
+			r.Get("/providers/intervals/status", s.handleIntervalsStatus)
+			r.Post("/providers/intervals/connect", s.handleIntervalsConnect)
+			r.Post("/providers/intervals/sync", s.handleIntervalsSync)
 			r.Get("/sync-jobs", s.handleSyncJobs)
 		})
 	})
@@ -154,13 +162,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	activities, err := s.store.ListActivities(r.Context(), limit, offset, r.URL.Query().Get("sport"))
+	activities, err := s.store.ListActivities(r.Context(), limit, offset, activityFiltersFromQuery(r))
 	if err != nil {
 		s.logger.Error("list activities", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not list activities")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activities": activities})
+}
+
+func (s *Server) handleActivityTypes(w http.ResponseWriter, r *http.Request) {
+	sports, err := s.store.ListSportTypes(r.Context())
+	if err != nil {
+		s.logger.Error("list activity types", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not list activity types")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activityTypes": sports})
 }
 
 func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +196,7 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.store.Summary(r.Context())
+	stats, err := s.store.Summary(r.Context(), activityFiltersFromQuery(r))
 	if err != nil {
 		s.logger.Error("summary", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not load summary")
@@ -300,6 +318,50 @@ func (s *Server) handleStravaSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "result": payload})
 }
 
+func (s *Server) handleIntervalsStatus(w http.ResponseWriter, r *http.Request) {
+	conn, connected, err := s.intervals.Status(r.Context())
+	if err != nil {
+		s.logger.Error("intervals status", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load Intervals.icu status")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true,
+		"connected":  connected,
+		"connection": conn,
+	})
+}
+
+func (s *Server) handleIntervalsConnect(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	conn, err := s.intervals.Connect(r.Context(), body.APIKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connected": true, "connection": conn})
+}
+
+func (s *Server) handleIntervalsSync(w http.ResponseWriter, r *http.Request) {
+	opts, err := decodeIntervalsSyncOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	jobID, payload, err := s.runIntervalsSync(r.Context(), "manual", opts)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "result": payload})
+}
+
 func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, err := s.store.ListSyncJobs(r.Context())
 	if err != nil {
@@ -324,6 +386,99 @@ func (s *Server) handleStravaWebhookEvent(w http.ResponseWriter, r *http.Request
 		_ = s.store.FinishSyncJob(r.Context(), jobID, "queued", "", event)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) StartBackgroundSync(ctx context.Context) {
+	go s.runIntervalsScheduledSync(ctx)
+}
+
+func (s *Server) runIntervalsScheduledSync(ctx context.Context) {
+	initial := time.NewTimer(30 * time.Second)
+	ticker := time.NewTicker(30 * time.Minute)
+	defer initial.Stop()
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-initial.C:
+			s.runIntervalsScheduledSyncOnce(ctx)
+		case <-ticker.C:
+			s.runIntervalsScheduledSyncOnce(ctx)
+		}
+	}
+}
+
+func (s *Server) runIntervalsScheduledSyncOnce(ctx context.Context) {
+	if _, connected, err := s.intervals.Status(ctx); err != nil || !connected {
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	oldest := time.Now().UTC().AddDate(0, 0, -30)
+	if _, _, err := s.runIntervalsSync(syncCtx, "scheduled", IntervalsSyncOptions{Oldest: oldest}); err != nil {
+		s.logger.Error("scheduled intervals sync", "error", err)
+	}
+}
+
+func (s *Server) runIntervalsSync(ctx context.Context, kind string, opts IntervalsSyncOptions) (string, map[string]any, error) {
+	jobID, err := s.store.CreateSyncJob(ctx, intervalsProvider, kind)
+	if err != nil {
+		return "", nil, fmt.Errorf("could not create sync job: %w", err)
+	}
+	payload, err := s.intervals.Sync(ctx, opts)
+	if err != nil {
+		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), map[string]any{})
+		return jobID, nil, err
+	}
+	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+		return jobID, nil, fmt.Errorf("could not finish sync job: %w", err)
+	}
+	return jobID, payload, nil
+}
+
+func decodeIntervalsSyncOptions(r *http.Request) (IntervalsSyncOptions, error) {
+	var body struct {
+		Oldest string `json:"oldest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		return IntervalsSyncOptions{}, errors.New("invalid JSON body")
+	}
+	if strings.TrimSpace(body.Oldest) == "" {
+		return IntervalsSyncOptions{}, nil
+	}
+	oldest, err := time.Parse("2006-01-02", strings.TrimSpace(body.Oldest))
+	if err != nil {
+		return IntervalsSyncOptions{}, errors.New("oldest must use YYYY-MM-DD format")
+	}
+	return IntervalsSyncOptions{Oldest: oldest}, nil
+}
+
+func activityFiltersFromQuery(r *http.Request) ActivityFilters {
+	values := r.URL.Query()
+	return ActivityFilters{
+		SportTypes:         compactQueryValues(values["sport"], values["sports"]),
+		ExcludedSportTypes: compactQueryValues(values["excludeSport"], values["excludeSports"]),
+	}
+}
+
+func compactQueryValues(groups ...[]string) []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0)
+	for _, group := range groups {
+		for _, raw := range group {
+			for _, part := range strings.Split(raw, ",") {
+				value := strings.TrimSpace(part)
+				if value == "" || seen[value] {
+					continue
+				}
+				seen[value] = true
+				out = append(out, value)
+			}
+		}
+	}
+	return out
 }
 
 func (s *Server) requireSession(next http.Handler) http.Handler {

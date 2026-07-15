@@ -163,6 +163,67 @@ input {
   font-weight: 740;
 }
 
+.filter-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.filter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.filter-header .panel-heading {
+  margin-bottom: 0;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.filter-group {
+  display: grid;
+  gap: 8px;
+}
+
+.filter-label {
+  color: #66706c;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #cbd6d0;
+  border-radius: 999px;
+  color: #34413d;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.filter-chip.active {
+  border-color: #236b63;
+  color: #ffffff;
+  background: #2f8f83;
+}
+
+.filter-chip.exclude.active {
+  border-color: #a33b2e;
+  color: #ffffff;
+  background: #c84d4d;
+}
+
 .chart-area {
   height: 300px;
   min-width: 0;
@@ -248,6 +309,11 @@ input {
   cursor: pointer;
 }
 
+.small-button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
 .primary-button {
   border: 1px solid #236b63;
   color: #ffffff;
@@ -261,6 +327,7 @@ input {
 }
 
 .primary-button:disabled,
+.secondary-button:disabled,
 .secondary-button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
@@ -272,6 +339,32 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.provider-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.provider-controls input {
+  min-height: 40px;
+  min-width: 170px;
+  padding: 0 10px;
+  border: 1px solid #cbd6d0;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.compact-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #66706c;
+  font-size: 13px;
+  font-weight: 680;
 }
 
 .map-frame {
@@ -361,7 +454,8 @@ input {
   }
 
   .metric-grid,
-  .split-layout {
+  .split-layout,
+  .filter-grid {
     grid-template-columns: 1fr;
   }
 
@@ -375,5 +469,9 @@ input {
     align-items: flex-start;
     flex-direction: column;
   }
-}
 
+  .provider-controls {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}

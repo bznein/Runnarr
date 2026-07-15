@@ -682,6 +682,8 @@ func normalizeSport(value string) string {
 		return "Walk"
 	case "hike", "hiking":
 		return "Hike"
+	case "strength", "strengthtraining", "strength training", "weighttraining", "weight training", "weightlifting", "weight lifting", "workout":
+		return "Strength"
 	case "":
 		return "Run"
 	default:

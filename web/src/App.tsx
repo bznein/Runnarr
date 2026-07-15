@@ -6,9 +6,11 @@ import { Activity as ActivityIcon, BarChart3, Cloud, Database, LogOut, Map, Refr
 import { MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivitySample, AppConfig } from "./types";
+import type { Activity, ActivitySample, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig } from "./types";
 
 type RoutePoint = [number, number];
+
+const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [] };
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -129,7 +131,9 @@ function LoginPage() {
 }
 
 function Dashboard() {
-  const summary = useQuery({ queryKey: ["summary"], queryFn: api.summary });
+  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
+  const summary = useQuery({ queryKey: ["summary", filters], queryFn: () => api.summary(filters) });
 
   if (summary.isLoading) {
     return <Page title="Dashboard"><LoadingRow /></Page>;
@@ -145,6 +149,11 @@ function Dashboard() {
 
   return (
     <Page title="Dashboard" actions={<Link className="secondary-button" to="/imports"><Upload size={16} /> Import</Link>}>
+      <ActivityTypeFilterPanel
+        activityTypes={activityTypes.data?.activityTypes ?? []}
+        filters={filters}
+        onChange={setFilters}
+      />
       <section className="metric-grid">
         <Metric label="Activities" value={summary.data.activityCount.toLocaleString()} />
         <Metric label="Distance" value={formatDistance(summary.data.distanceM)} />
@@ -178,13 +187,98 @@ function Dashboard() {
 }
 
 function ActivitiesPage() {
-  const activities = useQuery({ queryKey: ["activities"], queryFn: api.activities });
+  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
+  const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
   return (
     <Page title="Activities">
+      <ActivityTypeFilterPanel
+        activityTypes={activityTypes.data?.activityTypes ?? []}
+        filters={filters}
+        onChange={setFilters}
+      />
       {activities.isLoading && <LoadingRow />}
       {activities.data && <ActivityTable activities={activities.data.activities ?? []} />}
       {(activities.data?.activities ?? []).length === 0 && <EmptyState title="No activities yet" action={<Link className="secondary-button" to="/imports">Import a file</Link>} />}
     </Page>
+  );
+}
+
+function ActivityTypeFilterPanel({
+  activityTypes,
+  filters,
+  onChange
+}: {
+  activityTypes: string[];
+  filters: ActivityTypeFiltersValue;
+  onChange: (filters: ActivityTypeFiltersValue) => void;
+}) {
+  const includeSet = new Set(filters.sports);
+  const excludeSet = new Set(filters.excludeSports);
+  if (activityTypes.length === 0) {
+    return null;
+  }
+
+  const toggleInclude = (sport: string) => {
+    const nextSports = includeSet.has(sport)
+      ? filters.sports.filter((item) => item !== sport)
+      : [...filters.sports, sport];
+    onChange({
+      sports: nextSports,
+      excludeSports: filters.excludeSports.filter((item) => item !== sport)
+    });
+  };
+  const toggleExclude = (sport: string) => {
+    const nextExcluded = excludeSet.has(sport)
+      ? filters.excludeSports.filter((item) => item !== sport)
+      : [...filters.excludeSports, sport];
+    onChange({
+      sports: filters.sports.filter((item) => item !== sport),
+      excludeSports: nextExcluded
+    });
+  };
+  const clearFilters = () => onChange(emptyActivityTypeFilters);
+  const hasFilters = filters.sports.length > 0 || filters.excludeSports.length > 0;
+
+  return (
+    <section className="panel filter-panel">
+      <div className="filter-header">
+        <div className="panel-heading">Activity types</div>
+        <button className="secondary-button small-button" type="button" disabled={!hasFilters} onClick={clearFilters}>Clear</button>
+      </div>
+      <div className="filter-grid">
+        <div className="filter-group">
+          <div className="filter-label">Show only</div>
+          <div className="chip-list">
+            {activityTypes.map((sport) => (
+              <button
+                key={`include-${sport}`}
+                className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleInclude(sport)}
+              >
+                {sport}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="filter-group">
+          <div className="filter-label">Exclude</div>
+          <div className="chip-list">
+            {activityTypes.map((sport) => (
+              <button
+                key={`exclude-${sport}`}
+                className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleExclude(sport)}
+              >
+                {sport}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -348,12 +442,36 @@ function ImportsPage() {
 function SettingsPage() {
   const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["strava-status"], queryFn: api.stravaStatus });
+  const intervalsStatus = useQuery({ queryKey: ["intervals-status"], queryFn: api.intervalsStatus });
   const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs });
+  const [intervalsAPIKey, setIntervalsAPIKey] = useState("");
+  const [intervalsOldest, setIntervalsOldest] = useState("1970-01-01");
   const sync = useMutation({
     mutationFn: api.stravaSync,
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["strava-status"] }),
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
+  const intervalsConnect = useMutation({
+    mutationFn: api.intervalsConnect,
+    onSuccess: async () => {
+      setIntervalsAPIKey("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["intervals-status"] }),
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] })
+      ]);
+    }
+  });
+  const intervalsSync = useMutation({
+    mutationFn: api.intervalsSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["intervals-status"] }),
         queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
         queryClient.invalidateQueries({ queryKey: ["activities"] }),
         queryClient.invalidateQueries({ queryKey: ["summary"] })
@@ -384,6 +502,34 @@ function SettingsPage() {
         </div>
       </section>
       {sync.error && <div className="error">{sync.error instanceof Error ? sync.error.message : "Sync failed"}</div>}
+      <section className="panel provider-panel">
+        <div>
+          <div className="panel-heading">Intervals.icu</div>
+          <p className="muted">{intervalsStatus.data?.connected ? `Connected as ${intervalsStatus.data.connection.displayName}` : "Connect with a personal API key from Intervals.icu settings."}</p>
+        </div>
+        <div className="provider-controls">
+          <input
+            type="password"
+            placeholder="API key"
+            value={intervalsAPIKey}
+            onChange={(event) => setIntervalsAPIKey(event.target.value)}
+          />
+          <button className="secondary-button" type="button" disabled={!intervalsAPIKey || intervalsConnect.isPending} onClick={() => intervalsConnect.mutate(intervalsAPIKey)}>
+            <Cloud size={16} />
+            Connect
+          </button>
+          <label className="compact-field">
+            <span>Oldest</span>
+            <input type="date" value={intervalsOldest} onChange={(event) => setIntervalsOldest(event.target.value)} />
+          </label>
+          <button className="primary-button" type="button" disabled={!intervalsStatus.data?.connected || intervalsSync.isPending} onClick={() => intervalsSync.mutate(intervalsOldest)}>
+            <RefreshCw size={16} />
+            Sync
+          </button>
+        </div>
+      </section>
+      {intervalsConnect.error && <div className="error">{intervalsConnect.error instanceof Error ? intervalsConnect.error.message : "Intervals.icu connection failed"}</div>}
+      {intervalsSync.error && <div className="error">{intervalsSync.error instanceof Error ? intervalsSync.error.message : "Intervals.icu sync failed"}</div>}
       <section className="panel">
         <div className="panel-heading">Sync jobs</div>
         {jobs.isLoading && <LoadingRow />}

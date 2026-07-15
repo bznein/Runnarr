@@ -80,11 +80,22 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - It must track rate-limit response headers where available.
 - Webhook endpoints may exist in v1, but polling/manual sync is acceptable for self-hosted local deployments without public callback URLs.
 
+### Provider Sync Status
+
+- Provider settings must show sync status for each provider, including whether it is connected, idle, running, completed, or failed.
+- Sync status must include the latest sync time, imported/updated activity counts where available, and any failure message.
+- Scheduled/background syncs must be visible in the same sync history as manual syncs.
+
 ### Activity Views
 
 - Dashboard must show total activities, recent activity, total distance, total time, and recent weekly distance.
-- Activity list must support scanning by date, type, distance, time, and source.
+- Dashboard charts must allow changing the time scale, such as weekly, monthly, and yearly views, without leaving the dashboard.
+- Dashboard metrics and charts must support the same core activity filters as the activity list so excluded activity types do not affect totals.
+- Activity list must support scanning, filtering, and sorting by date, activity type, source, distance, moving time, elapsed time, elevation, and name.
+- Activity filtering must support include and exclude rules for activity types, including common exclusions such as hikes, walks, commutes, strength/weight training, and indoor/trainer activities.
+- Activity sorting must support ascending and descending order for sortable columns and preserve the selected filters.
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
+- Route maps must support mouse-wheel zooming for detailed activity inspection.
 - The admin must be able to delete activities from Runnarr, including their samples and laps, without deleting provider connections or source files outside the app.
 - Import and provider settings views must make the data pipeline visible enough to debug failed imports or syncs.
 
@@ -93,6 +104,8 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Runnarr is an operational tool, not a marketing site.
 - First screen after login should be the usable dashboard.
 - UI should be dense but readable, with restrained styling and clear navigation.
+- UI must support light and dark themes, defaulting automatically to the user's system color-scheme preference.
+- The admin should be able to override the automatic theme preference and persist that choice locally.
 - Maps and charts should favor inspection and accuracy over decorative presentation.
 - Empty states should explain what action unlocks the page without over-explaining the product.
 
@@ -190,12 +203,18 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - A fresh clone can start with `docker compose up --build`.
 - The app applies migrations and serves the UI.
 - The admin can log in with configured credentials.
+- The UI automatically follows the system light/dark preference and supports a persistent manual theme override.
 - The admin can upload a sample GPX, TCX, or FIT file.
 - The admin can upload a Strava account export archive and import supported activities without configuring Strava OAuth/API credentials.
 - Uploaded activities appear in the dashboard and activity list.
+- The admin can change the dashboard time scale and see activity totals/charts update for the selected scale.
+- The admin can filter activities by type/source/metrics and sort the activity list by date, name, type, source, distance, time, and elevation.
+- Dashboard totals and charts update consistently when activity filters are applied.
 - A GPS activity detail page renders a map and charts.
+- The admin can zoom an activity route map with the mouse wheel.
 - The admin can delete an activity and it no longer appears in the dashboard, activity list, or detail view.
 - Strava OAuth routes are present and report clear configuration errors when credentials are missing.
 - With Strava credentials configured, the admin can connect Strava and trigger a manual import.
 - Strava sync imports historical accessible activities as well as new activities, while repeated syncs avoid duplicate activity rows.
+- The admin can see whether provider sync is running, completed, or failed, including the latest result and error details.
 - Duplicate imports do not create duplicate activities.

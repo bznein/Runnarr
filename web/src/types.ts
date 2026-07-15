@@ -50,6 +50,11 @@ export type Activity = {
   createdAt: string;
 };
 
+export type ActivityTypeFilters = {
+  sports: string[];
+  excludeSports: string[];
+};
+
 export type SummaryStats = {
   activityCount: number;
   distanceM: number;
@@ -71,7 +76,7 @@ export type ImportFile = {
   createdAt: string;
 };
 
-export type StravaStatus = {
+export type ProviderStatus = {
   configured: boolean;
   connected: boolean;
   connection: {
@@ -82,6 +87,10 @@ export type StravaStatus = {
     tokenExpiresAt?: string;
   };
 };
+
+export type StravaStatus = ProviderStatus;
+
+export type IntervalsStatus = ProviderStatus;
 
 export type SyncJob = {
   id: string;
