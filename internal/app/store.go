@@ -253,6 +253,7 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	}
 	activity.Samples = samples
 	activity.Laps = laps
+	activity.Climbs = detectActivityClimbs(samples)
 	return activity, nil
 }
 

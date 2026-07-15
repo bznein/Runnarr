@@ -112,11 +112,15 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity sorting must support ascending and descending order for sortable columns and preserve the selected filters.
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
 - Activity detail should show an "Open original" link for provider-imported activities when an original provider activity URL is available; manual file imports should not show this link unless their source includes a meaningful external URL.
+- Activity detail should allow locally renaming an activity without modifying the original provider activity or imported source file.
+- Activity detail should use a compact overflow menu for secondary actions such as rename and delete instead of showing destructive actions as primary page actions.
 - Activity detail should support overlaying compatible chart series in a single combined graph, such as elevation, pace/speed, heart rate, power, and cadence, with clear axes, legends, and per-series toggles.
 - Activity detail, list rows, and dashboard summaries should use sport-appropriate metrics, units, and labels rather than one generic endurance format for every activity.
 - Pace should be formatted by activity type, for example min/km for running, speed for cycling where appropriate, and min/100 m for swimming.
 - Each supported activity type should be reviewed for which metrics are meaningful to show, hide, or rename, including distance, pace/speed, elevation, cadence, power, laps, intervals, heart rate, and route maps.
 - Activity detail should hide elevation charts for activity types where elevation is not meaningful, such as swimming, strength training, indoor workouts, and similar non-route activities.
+- Activity detail should detect meaningful climbs from distance/elevation samples and summarize each climb with distance, ascent, average grade, difficulty, and map/profile highlighting.
+- Climb detection thresholds should start with sensible defaults and may later become user-configurable settings.
 - Activity laps imported from providers should preserve provider interval metadata where available, including Intervals.icu `type` and `label` fields from `icu_intervals`.
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.

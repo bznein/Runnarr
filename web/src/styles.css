@@ -420,6 +420,122 @@ input {
   opacity: 0.75;
 }
 
+.climbs-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.climb-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.climb-item {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-height: 104px;
+  padding: 12px;
+  border: 1px solid #d6ded9;
+  border-radius: 8px;
+  color: #202927;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.climb-item.active {
+  border-color: #b7791f;
+  box-shadow: inset 4px 0 0 #f6c432;
+}
+
+.climb-item-header,
+.climb-item-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.climb-item-metrics {
+  color: #34413d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.climb-difficulty {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: #202927;
+  background: #eef2ef;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.climb-difficulty.easy {
+  background: #e5f6c8;
+}
+
+.climb-difficulty.moderate {
+  background: #ffe7a3;
+}
+
+.climb-difficulty.hard {
+  color: #ffffff;
+  background: #e87a24;
+}
+
+.climb-difficulty.very-hard,
+.climb-difficulty.epic {
+  color: #ffffff;
+  background: #c84d4d;
+}
+
+.climb-detail {
+  display: grid;
+  grid-template-rows: auto minmax(220px, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.climb-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.climb-stat {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid #d9e1dc;
+  border-radius: 8px;
+  background: #f8faf9;
+}
+
+.climb-stat span {
+  color: #66706c;
+  font-size: 12px;
+}
+
+.climb-stat strong {
+  color: #202927;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.climb-profile {
+  height: 240px;
+  min-width: 0;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -790,7 +906,9 @@ input {
   .filter-grid,
   .date-range-grid,
   .search-panel,
-  .sync-progress-grid {
+  .sync-progress-grid,
+  .climbs-layout,
+  .climb-detail-metrics {
     grid-template-columns: 1fr;
   }
 
