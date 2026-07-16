@@ -4,6 +4,7 @@
 
 ### Features
 
+- Photo media with EXIF GPS coordinates now appears as thumbnail markers on activity maps, and selecting a marker opens the matching photo preview.
 - Activity photo uploads with an authenticated gallery, thumbnails, EXIF metadata extraction, preview, and deletion.
 - Local activity renaming from the activity detail page. Renames are stored only in Runnarr and survive future provider syncs.
 - Original Garmin activity links on activity detail pages when a provider URL is available.

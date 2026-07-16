@@ -753,12 +753,14 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
+  const [selectedMediaId, setSelectedMediaId] = useState<string>();
 
   useEffect(() => {
     setHighlightedSample(undefined);
     setSelectedClimbIndex(0);
     setActionsOpen(false);
     setRenameOpen(false);
+    setSelectedMediaId(undefined);
     uploadMedia.reset();
     setMediaFileInputKey((key) => key + 1);
   }, [id]);
@@ -772,6 +774,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
 
   const item = activity.data.activity;
   const mediaItems = item.media ?? [];
+  const locatedMedia = mediaItems.filter(hasMediaLocation);
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
@@ -841,15 +844,29 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       </section>
 
       {mediaItems.length > 0 ? (
-        <ActivityMediaPanel activity={item} uploading={uploadMedia.isPending} uploadError={uploadMedia.error} />
+        <ActivityMediaPanel
+          activity={item}
+          uploading={uploadMedia.isPending}
+          uploadError={uploadMedia.error}
+          selectedMediaId={selectedMediaId}
+          onSelectMedia={setSelectedMediaId}
+        />
       ) : (
         Boolean(uploadMedia.error) && <div className="error">{uploadMedia.error instanceof Error ? uploadMedia.error.message : "Upload failed"}</div>
       )}
 
-      {routePoints.length > 1 && (
+      {(routePoints.length > 1 || locatedMedia.length > 0) && (
         <section className="panel">
           <div className="panel-heading">Route</div>
-          <ActivityMap points={routePoints} tileURL={config?.mapTileURL} highlightedPoint={highlightedPoint} highlightedSegment={selectedClimbPoints} />
+          <ActivityMap
+            points={routePoints}
+            tileURL={config?.mapTileURL}
+            highlightedPoint={highlightedPoint}
+            highlightedSegment={selectedClimbPoints}
+            mediaMarkers={locatedMedia}
+            selectedMediaId={selectedMediaId}
+            onSelectMedia={setSelectedMediaId}
+          />
         </section>
       )}
 
@@ -930,12 +947,23 @@ function ActivityMediaUploadAction({
   );
 }
 
-function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Activity; uploading: boolean; uploadError: unknown }) {
+function ActivityMediaPanel({
+  activity,
+  uploading,
+  uploadError,
+  selectedMediaId,
+  onSelectMedia
+}: {
+  activity: Activity;
+  uploading: boolean;
+  uploadError: unknown;
+  selectedMediaId?: string;
+  onSelectMedia: (mediaId?: string) => void;
+}) {
   const queryClient = useQueryClient();
   const media = activity.media ?? [];
-  const [previewMediaId, setPreviewMediaId] = useState<string>();
-  const previewMedia = media.find((item) => item.id === previewMediaId);
-  const previewMediaIndex = previewMediaId ? media.findIndex((item) => item.id === previewMediaId) : -1;
+  const previewMedia = media.find((item) => item.id === selectedMediaId);
+  const previewMediaIndex = selectedMediaId ? media.findIndex((item) => item.id === selectedMediaId) : -1;
   const previousMedia = previewMediaIndex > 0 ? media[previewMediaIndex - 1] : undefined;
   const nextMedia = previewMediaIndex >= 0 && previewMediaIndex < media.length - 1 ? media[previewMediaIndex + 1] : undefined;
   const deleteMedia = useMutation({
@@ -958,10 +986,10 @@ function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Ac
   const handleDeleteMedia = (item: ActivityMedia) => {
     deleteMedia.reset();
     if (window.confirm(`Delete "${item.originalFilename}" from this activity?`)) {
-      if (previewMediaId === item.id) {
+      if (selectedMediaId === item.id) {
         const itemIndex = media.findIndex((candidate) => candidate.id === item.id);
         const replacement = media[itemIndex + 1] ?? media[itemIndex - 1];
-        setPreviewMediaId(replacement?.id);
+        onSelectMedia(replacement?.id);
       }
       deleteMedia.mutate(item.id);
     }
@@ -981,7 +1009,7 @@ function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Ac
       {media.length > 0 ? (
         <div className="media-grid">
           {media.map((item) => (
-            <button className="media-thumb-button" key={item.id} type="button" aria-label={`Open ${item.originalFilename}`} onClick={() => setPreviewMediaId(item.id)}>
+            <button className="media-thumb-button" key={item.id} type="button" aria-label={`Open ${item.originalFilename}`} onClick={() => onSelectMedia(item.id)}>
               <img src={activityMediaThumbnailURL(item.id)} alt={item.originalFilename} loading="lazy" />
             </button>
           ))}
@@ -994,10 +1022,10 @@ function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Ac
         <ActivityMediaPreview
           media={previewMedia}
           deleting={deleteMedia.isPending}
-          onClose={() => setPreviewMediaId(undefined)}
+          onClose={() => onSelectMedia(undefined)}
           onDelete={() => handleDeleteMedia(previewMedia)}
-          onPrevious={previousMedia ? () => setPreviewMediaId(previousMedia.id) : undefined}
-          onNext={nextMedia ? () => setPreviewMediaId(nextMedia.id) : undefined}
+          onPrevious={previousMedia ? () => onSelectMedia(previousMedia.id) : undefined}
+          onNext={nextMedia ? () => onSelectMedia(nextMedia.id) : undefined}
         />
       )}
     </section>
@@ -1718,14 +1746,22 @@ function ActivityMap({
   points,
   tileURL,
   highlightedPoint,
-  highlightedSegment
+  highlightedSegment,
+  mediaMarkers = [],
+  selectedMediaId,
+  onSelectMedia
 }: {
   points: RoutePoint[];
   tileURL?: string;
   highlightedPoint?: RoutePoint;
   highlightedSegment?: RoutePoint[];
+  mediaMarkers?: ActivityMedia[];
+  selectedMediaId?: string;
+  onSelectMedia?: (mediaId: string) => void;
 }) {
-  const center = points[0] ?? [53.3498, -6.2603];
+  const mediaPoints = mediaMarkers.map(mediaRoutePoint).filter((point): point is RoutePoint => Boolean(point));
+  const mapPoints = [...points, ...mediaPoints];
+  const center = points[0] ?? mediaPoints[0] ?? [53.3498, -6.2603];
   const start = points[0];
   const end = points.length > 1 ? points[points.length - 1] : undefined;
   const hasHighlightedSegment = highlightedSegment && highlightedSegment.length > 1;
@@ -1733,25 +1769,51 @@ function ActivityMap({
     <div className="map-frame">
       <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
         <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
-        <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />
+        {points.length > 1 && <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />}
         {hasHighlightedSegment && <Polyline pathOptions={{ color: "#f6c432", weight: 7, opacity: 0.95 }} positions={highlightedSegment} />}
         {start && <Marker position={start} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
         {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
         {highlightedPoint && <Marker position={highlightedPoint} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
-        <FitRoute points={points} />
+        {mediaMarkers.map((item) => {
+          const point = mediaRoutePoint(item);
+          if (!point) {
+            return null;
+          }
+          const selected = item.id === selectedMediaId;
+          return (
+            <Marker
+              key={item.id}
+              position={point}
+              icon={mediaMapMarkerIcon(item, selected)}
+              zIndexOffset={selected ? 1200 : 800}
+              title={item.originalFilename}
+              eventHandlers={onSelectMedia ? { click: () => onSelectMedia(item.id) } : undefined}
+            />
+          );
+        })}
+        <FitMapContent points={mapPoints} />
       </MapContainer>
     </div>
   );
 }
 
-function FitRoute({ points }: { points: RoutePoint[] }) {
+function FitMapContent({ points }: { points: RoutePoint[] }) {
   const map = useMap();
   useEffect(() => {
     if (points.length > 1) {
       map.fitBounds(points, { padding: [24, 24] });
+    } else if (points.length === 1) {
+      map.setView(points[0], 15);
     }
   }, [map, points]);
   return null;
+}
+
+function mediaRoutePoint(media: ActivityMedia): RoutePoint | undefined {
+  if (!hasMediaLocation(media)) {
+    return undefined;
+  }
+  return [media.latitude!, media.longitude!];
 }
 
 function routeEndpointIcon(kind: "start" | "end") {
@@ -1770,6 +1832,15 @@ function routeHighlightIcon() {
     html: `<span class="route-highlight-marker"></span>`,
     iconSize: [18, 18],
     iconAnchor: [9, 9]
+  });
+}
+
+function mediaMapMarkerIcon(media: ActivityMedia, selected: boolean) {
+  return divIcon({
+    className: `media-map-marker-icon${selected ? " selected" : ""}`,
+    html: `<span class="media-map-marker"><img src="${activityMediaThumbnailURL(media.id)}" alt=""></span>`,
+    iconSize: selected ? [52, 52] : [44, 44],
+    iconAnchor: selected ? [26, 26] : [22, 22]
   });
 }
 
