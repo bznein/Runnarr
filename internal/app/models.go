@@ -33,6 +33,14 @@ type DeleteActivityResult struct {
 	SyncExclusionMessage string `json:"syncExclusionMessage,omitempty"`
 }
 
+type ActivityListPage struct {
+	Activities []Activity `json:"activities"`
+	Limit      int        `json:"limit"`
+	Offset     int        `json:"offset"`
+	NextOffset int        `json:"nextOffset,omitempty"`
+	HasMore    bool       `json:"hasMore"`
+}
+
 type DeleteActivityMediaResult struct {
 	Deleted bool `json:"deleted"`
 }

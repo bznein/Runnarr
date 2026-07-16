@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -42,6 +42,7 @@ type ClimbProfilePoint = {
 
 const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
+const ACTIVITY_LIST_PAGE_SIZE = 100;
 const themePreferenceStorageKey = "runnarr-theme-preference";
 const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
@@ -308,7 +309,12 @@ function ActivitiesPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
-  const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
+  const activities = useInfiniteQuery({
+    queryKey: ["activities", filters],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.activities(filters, { limit: ACTIVITY_LIST_PAGE_SIZE, offset: pageParam }),
+    getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.nextOffset : undefined)
+  });
   const queryClient = useQueryClient();
   const deleteActivity = useMutation({
     mutationFn: api.deleteActivity,
@@ -325,7 +331,8 @@ function ActivitiesPage() {
       deleteActivity.mutate(activity.id);
     }
   };
-  const activityList = activities.data?.activities ?? [];
+  const activityList = activities.data?.pages.flatMap((page) => page.activities ?? []) ?? [];
+  const activitiesLoaded = Boolean(activities.data);
   const dateFiltersActive = hasDateFilters(filters);
   const anyFiltersActive = hasActivityFilters(filters);
   const currentSort = normalizedActivitySort(filters);
@@ -379,9 +386,27 @@ function ActivitiesPage() {
         onChange={setFilters}
       />
       {activities.isLoading && <LoadingRow />}
+      {activities.error && <div className="error">{activities.error instanceof Error ? activities.error.message : "Could not load activities"}</div>}
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
-      {activities.data && activityList.length > 0 && <ActivityTable activities={activityList} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
-      {activities.data && activityList.length === 0 && (
+      {activitiesLoaded && activityList.length > 0 && (
+        <>
+          <ActivityTable activities={activityList} onDelete={handleDelete} deletingId={deleteActivity.variables} />
+          {activities.hasNextPage && (
+            <div className="pagination-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={activities.isFetchingNextPage}
+                onClick={() => void activities.fetchNextPage()}
+              >
+                <ChevronDown size={16} />
+                {activities.isFetchingNextPage ? "Loading" : "Load more"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {activitiesLoaded && activityList.length === 0 && (
         <EmptyState
           title={anyFiltersActive ? "No activities found" : "No activities yet"}
           action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/settings#import">Import a file</Link>}

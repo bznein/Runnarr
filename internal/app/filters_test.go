@@ -58,6 +58,23 @@ func TestActivityFiltersFromQuerySort(t *testing.T) {
 	}
 }
 
+func TestNormalizeActivityPage(t *testing.T) {
+	limit, offset := normalizeActivityPage(0, -10)
+	if limit != 50 || offset != 0 {
+		t.Fatalf("default page = %d/%d, want 50/0", limit, offset)
+	}
+
+	limit, offset = normalizeActivityPage(101, 20)
+	if limit != 50 || offset != 20 {
+		t.Fatalf("capped page = %d/%d, want 50/20", limit, offset)
+	}
+
+	limit, offset = normalizeActivityPage(100, 30)
+	if limit != 100 || offset != 30 {
+		t.Fatalf("valid page = %d/%d, want 100/30", limit, offset)
+	}
+}
+
 func TestActivityFilterConditionsDateRange(t *testing.T) {
 	dateFrom := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	dateTo := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
