@@ -829,6 +829,12 @@ input {
   overflow-x: auto;
 }
 
+.pagination-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

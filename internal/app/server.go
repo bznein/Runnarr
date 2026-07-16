@@ -157,13 +157,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	activities, err := s.store.ListActivities(r.Context(), limit, offset, activityFiltersFromQuery(r))
+	page, err := s.store.ListActivityPage(r.Context(), limit, offset, activityFiltersFromQuery(r))
 	if err != nil {
 		s.logger.Error("list activities", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not list activities")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"activities": activities})
+	writeJSON(w, http.StatusOK, page)
 }
 
 func (s *Server) handleActivityTypes(w http.ResponseWriter, r *http.Request) {
