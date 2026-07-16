@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
+import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, ImportFile, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
+type ThemePreference = "system" | "light" | "dark";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityChartPoint = {
   index: number;
@@ -41,6 +42,7 @@ type ClimbProfilePoint = {
 
 const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
+const themePreferenceStorageKey = "runnarr-theme-preference";
 const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
@@ -52,7 +54,48 @@ const activityChartSeries: ActivityChartSeries[] = [
   { key: "cadence", label: "Cadence", color: "#7a4eb2", defaultVisible: false, format: (value) => `${Math.round(value)} spm` }
 ];
 
+function useThemePreference(): [ThemePreference, (preference: ThemePreference) => void] {
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(readStoredThemePreference);
+
+  useEffect(() => {
+    applyThemePreference(themePreference);
+  }, [themePreference]);
+
+  const setThemePreference = (preference: ThemePreference) => {
+    setThemePreferenceState(preference);
+    try {
+      window.localStorage.setItem(themePreferenceStorageKey, preference);
+    } catch {
+      // Local storage can be unavailable in private or restricted browser contexts.
+    }
+  };
+
+  return [themePreference, setThemePreference];
+}
+
+function readStoredThemePreference(): ThemePreference {
+  try {
+    return parseThemePreference(window.localStorage.getItem(themePreferenceStorageKey));
+  } catch {
+    return "system";
+  }
+}
+
+function parseThemePreference(value: string | null): ThemePreference {
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+
+function applyThemePreference(preference: ThemePreference) {
+  const root = document.documentElement;
+  if (preference === "system") {
+    delete root.dataset.theme;
+    return;
+  }
+  root.dataset.theme = preference;
+}
+
 export function App() {
+  const [themePreference, setThemePreference] = useThemePreference();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
 
   useEffect(() => {
@@ -72,10 +115,16 @@ export function App() {
     );
   }
 
-  return <AuthenticatedApp />;
+  return <AuthenticatedApp themePreference={themePreference} onThemePreferenceChange={setThemePreference} />;
 }
 
-function AuthenticatedApp() {
+function AuthenticatedApp({
+  themePreference,
+  onThemePreferenceChange
+}: {
+  themePreference: ThemePreference;
+  onThemePreferenceChange: (preference: ThemePreference) => void;
+}) {
   const config = useQuery({ queryKey: ["config"], queryFn: api.config });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -98,21 +147,22 @@ function AuthenticatedApp() {
         <nav className="nav">
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
-          <NavItem to="/imports" icon={<Upload size={18} />} label="Imports" />
-          <NavItem to="/settings" icon={<Cloud size={18} />} label="Providers" />
         </nav>
-        <button className="nav-button" type="button" onClick={() => logout.mutate()}>
-          <LogOut size={18} />
-          <span>Log out</span>
-        </button>
+        <div className="sidebar-bottom">
+          <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
+          <button className="nav-button" type="button" onClick={() => logout.mutate()}>
+            <LogOut size={18} />
+            <span>Log out</span>
+          </button>
+        </div>
       </aside>
       <main className="main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
-          <Route path="/imports" element={<ImportsPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
+          <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -211,7 +261,7 @@ function Dashboard() {
   }));
 
   return (
-    <Page title="Dashboard" actions={<Link className="secondary-button" to="/imports"><Upload size={16} /> Import</Link>}>
+    <Page title="Dashboard">
       <ActivityTypeFilterPanel
         activityTypes={activityTypes.data?.activityTypes ?? []}
         filters={filters}
@@ -334,7 +384,7 @@ function ActivitiesPage() {
       {activities.data && activityList.length === 0 && (
         <EmptyState
           title={anyFiltersActive ? "No activities found" : "No activities yet"}
-          action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/imports">Import a file</Link>}
+          action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/settings#import">Import a file</Link>}
         />
       )}
     </Page>
@@ -1310,76 +1360,36 @@ function ClimbStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ImportsPage() {
-  const [file, setFile] = useState<File | null>(null);
-  const queryClient = useQueryClient();
-  const imports = useQuery({ queryKey: ["imports"], queryFn: api.imports });
-  const upload = useMutation({
-    mutationFn: (selected: File) => api.upload(selected),
-    onSuccess: async () => {
-      setFile(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["imports"] }),
-        queryClient.invalidateQueries({ queryKey: ["activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["summary"] })
-      ]);
-    }
-  });
-
-  return (
-    <Page title="Imports">
-      <section className="panel upload-panel">
-        <div>
-          <div className="panel-heading">Activity file</div>
-          <p className="muted">GPX, TCX, and FIT are supported in v1.</p>
-        </div>
-        <input type="file" accept=".gpx,.tcx,.fit" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-        <button className="primary-button" type="button" disabled={!file || upload.isPending} onClick={() => file && upload.mutate(file)}>
-          <Upload size={16} />
-          Upload
-        </button>
-      </section>
-      {upload.error && <div className="error">{upload.error instanceof Error ? upload.error.message : "Upload failed"}</div>}
-      <section className="panel">
-        <div className="panel-heading">Recent imports</div>
-        {imports.isLoading && <LoadingRow />}
-        {imports.data && (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>File</th>
-                <th>Parser</th>
-                <th>Status</th>
-                <th>Imported</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(imports.data.imports ?? []).map((item) => (
-                <tr key={item.id}>
-                  <td>{item.filename}</td>
-                  <td>{item.parser.toUpperCase()}</td>
-                  <td><span className={`status ${item.status}`}>{item.status}</span>{item.error && <span className="row-error">{item.error}</span>}</td>
-                  <td>{formatDate(item.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </Page>
-  );
-}
-
-function SettingsPage() {
+function SettingsPage({
+  themePreference,
+  onThemePreferenceChange
+}: {
+  themePreference: ThemePreference;
+  onThemePreferenceChange: (preference: ThemePreference) => void;
+}) {
+  const location = useLocation();
   const queryClient = useQueryClient();
   const garminStatus = useQuery({ queryKey: ["garmin-status"], queryFn: api.garminStatus });
   const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
+  const imports = useQuery({ queryKey: ["imports"], queryFn: api.imports });
+  const [file, setFile] = useState<File | null>(null);
   const [garminEmail, setGarminEmail] = useState("");
   const [garminPassword, setGarminPassword] = useState("");
   const [garminMFACode, setGarminMFACode] = useState("");
   const [garminOldest, setGarminOldest] = useState("1970-01-01");
   const latestGarminJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin");
   const garminSyncRunning = latestGarminJob?.status === "running";
+
+  useEffect(() => {
+    if (location.hash !== "#import") {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      document.getElementById("import")?.scrollIntoView({ block: "start" });
+    });
+    return () => window.clearTimeout(timeout);
+  }, [location.hash]);
+
   const garminConnect = useMutation({
     mutationFn: api.garminConnect,
     onSuccess: async () => {
@@ -1402,9 +1412,21 @@ function SettingsPage() {
       ]);
     }
   });
+  const upload = useMutation({
+    mutationFn: (selected: File) => api.upload(selected),
+    onSuccess: async () => {
+      setFile(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["imports"] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-types"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
 
   return (
-    <Page title="Providers">
+    <Page title="Settings">
       <section className="panel provider-panel">
         <div>
           <div className="panel-heading">Garmin Connect</div>
@@ -1447,37 +1469,172 @@ function SettingsPage() {
       <SyncProgressCard job={latestGarminJob} />
       {garminConnect.error && <div className="error">{garminConnect.error instanceof Error ? garminConnect.error.message : "Garmin connection failed"}</div>}
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
-      <section className="panel">
-        <div className="panel-heading">Sync jobs</div>
-        {jobs.isLoading && <LoadingRow />}
-        {jobs.data && (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Provider</th>
-                <th>Kind</th>
-                <th>Status</th>
-                <th>Progress</th>
-                <th>Details</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(jobs.data.jobs ?? []).map((job) => (
-                <tr key={job.id}>
-                  <td>{job.provider}</td>
-                  <td>{job.kind}</td>
-                  <td><span className={`status ${job.status}`}>{job.status}</span>{job.error && <span className="row-error">{job.error}</span>}</td>
-                  <td><SyncProgressBar job={job} /></td>
-                  <td>{formatSyncJobDetails(job)}</td>
-                  <td>{formatDate(job.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} />
+      <section id="import" className="panel upload-panel">
+        <div>
+          <div className="panel-heading">Data import</div>
+          <p className="muted">Upload a GPX, TCX, or FIT activity file.</p>
+        </div>
+        <input type="file" accept=".gpx,.tcx,.fit" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+        <button className="primary-button" type="button" disabled={!file || upload.isPending} onClick={() => file && upload.mutate(file)}>
+          <Upload size={16} />
+          {upload.isPending ? "Uploading" : "Upload"}
+        </button>
       </section>
+      {upload.error && <div className="error">{upload.error instanceof Error ? upload.error.message : "Upload failed"}</div>}
+      <DiagnosticsPanel
+        jobs={jobs.data?.jobs ?? []}
+        jobsLoading={jobs.isLoading}
+        imports={imports.data?.imports ?? []}
+        importsLoading={imports.isLoading}
+      />
     </Page>
+  );
+}
+
+function DisplaySettingsSection({
+  value,
+  onChange
+}: {
+  value: ThemePreference;
+  onChange: (preference: ThemePreference) => void;
+}) {
+  return (
+    <section className="panel display-panel">
+      <div>
+        <div className="panel-heading">Display</div>
+        <p className="muted">Choose how Runnarr follows your browser color settings.</p>
+      </div>
+      <ThemePreferenceControl value={value} onChange={onChange} />
+    </section>
+  );
+}
+
+function ThemePreferenceControl({
+  value,
+  onChange
+}: {
+  value: ThemePreference;
+  onChange: (preference: ThemePreference) => void;
+}) {
+  const options: Array<{ value: ThemePreference; label: string; icon: JSX.Element }> = [
+    { value: "system", label: "System", icon: <Monitor size={15} /> },
+    { value: "light", label: "Light", icon: <Sun size={15} /> },
+    { value: "dark", label: "Dark", icon: <Moon size={15} /> }
+  ];
+
+  return (
+    <div className="segmented-control theme-control" role="group" aria-label="Theme preference">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          className={value === option.value ? "active" : ""}
+          type="button"
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.icon}
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DiagnosticsPanel({
+  jobs,
+  jobsLoading,
+  imports,
+  importsLoading
+}: {
+  jobs: SyncJob[];
+  jobsLoading: boolean;
+  imports: ImportFile[];
+  importsLoading: boolean;
+}) {
+  return (
+    <section className="panel diagnostics-panel">
+      <details className="diagnostics-details">
+        <summary>
+          <span>
+            <span className="panel-heading">Diagnostics</span>
+            <span className="muted">Sync jobs and manual import history</span>
+          </span>
+        </summary>
+        <div className="diagnostics-content">
+          <section className="diagnostics-section">
+            <div className="panel-heading">Sync jobs</div>
+            {jobsLoading && <LoadingRow />}
+            {!jobsLoading && jobs.length === 0 && <EmptyState title="No sync jobs yet" />}
+            {!jobsLoading && jobs.length > 0 && <SyncJobsTable jobs={jobs} />}
+          </section>
+          <section className="diagnostics-section">
+            <div className="panel-heading">Recent imports</div>
+            {importsLoading && <LoadingRow />}
+            {!importsLoading && imports.length === 0 && <EmptyState title="No imports yet" />}
+            {!importsLoading && imports.length > 0 && <RecentImportsTable imports={imports} />}
+          </section>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function SyncJobsTable({ jobs }: { jobs: SyncJob[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>Kind</th>
+            <th>Status</th>
+            <th>Progress</th>
+            <th>Details</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.map((job) => (
+            <tr key={job.id}>
+              <td>{job.provider}</td>
+              <td>{job.kind}</td>
+              <td><span className={`status ${job.status}`}>{job.status}</span>{job.error && <span className="row-error">{job.error}</span>}</td>
+              <td><SyncProgressBar job={job} /></td>
+              <td>{formatSyncJobDetails(job)}</td>
+              <td>{formatDate(job.createdAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RecentImportsTable({ imports }: { imports: ImportFile[] }) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Parser</th>
+            <th>Status</th>
+            <th>Imported</th>
+          </tr>
+        </thead>
+        <tbody>
+          {imports.map((item) => (
+            <tr key={item.id}>
+              <td>{item.filename}</td>
+              <td>{item.parser.toUpperCase()}</td>
+              <td><span className={`status ${item.status}`}>{item.status}</span>{item.error && <span className="row-error">{item.error}</span>}</td>
+              <td>{formatDate(item.createdAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

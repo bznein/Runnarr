@@ -4,10 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Runnarr</title>
+    <script>
+      (() => {
+        try {
+          const preference = window.localStorage.getItem("runnarr-theme-preference");
+          if (preference === "light" || preference === "dark") {
+            document.documentElement.dataset.theme = preference;
+          }
+        } catch {
+          // Ignore storage errors and let CSS follow the system preference.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

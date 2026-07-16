@@ -38,7 +38,7 @@ Set `DATABASE_URL` to a running Postgres instance before starting the backend ou
 
 ## Garmin Connect Setup
 
-Garmin Connect sync is configured from the Providers page after login. Enter your Garmin email/password, and enter an MFA code if Garmin asks for one. Runnarr stores Garmin Connect tokens in the Docker `app-data` volume and does not store your Garmin password.
+Garmin Connect sync is configured from Settings after login. Enter your Garmin email/password, and enter an MFA code if Garmin asks for one. Runnarr stores Garmin Connect tokens in the Docker `app-data` volume and does not store your Garmin password.
 
 The Garmin integration uses an unofficial Garmin Connect client because Garmin's official Activity API requires approval. If Garmin changes their private endpoints, reconnecting or updating the image dependency may be required.
 
