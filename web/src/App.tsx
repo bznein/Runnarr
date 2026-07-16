@@ -39,6 +39,11 @@ type ClimbProfilePoint = {
   distanceKm: number;
   elevationM: number;
 };
+type ClimbMapSegment = {
+  climb: ActivityClimb;
+  points: RoutePoint[];
+  start?: RoutePoint;
+};
 
 const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
@@ -824,7 +829,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
   });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
-  const [selectedClimbIndex, setSelectedClimbIndex] = useState(0);
+  const [selectedClimbIndex, setSelectedClimbIndex] = useState<number | undefined>();
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
@@ -832,7 +837,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
 
   useEffect(() => {
     setHighlightedSample(undefined);
-    setSelectedClimbIndex(0);
+    setSelectedClimbIndex(undefined);
     setActionsOpen(false);
     setRenameOpen(false);
     setSelectedMediaId(undefined);
@@ -854,8 +859,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const chartData = chartDataFor(item.samples ?? []);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
   const climbs = item.climbs ?? [];
-  const selectedClimb = climbs[selectedClimbIndex] ?? climbs[0];
-  const selectedClimbPoints = routeForClimb(item, selectedClimb);
+  const selectedClimb = selectedClimbIndex === undefined ? undefined : climbs.find((climb) => climb.index === selectedClimbIndex);
+  const climbMapSegments = climbMapSegmentsFor(item, climbs);
   const selectedClimbProfile = climbProfileFor(item, selectedClimb);
   const showLapElevation = (item.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
   const handleDelete = () => {
@@ -937,7 +942,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             points={routePoints}
             tileURL={config?.mapTileURL}
             highlightedPoint={highlightedPoint}
-            highlightedSegment={selectedClimbPoints}
+            climbSegments={climbMapSegments}
+            selectedClimbIndex={selectedClimb?.index}
+            onSelectClimb={(climb) => setSelectedClimbIndex(climb.index)}
             mediaMarkers={locatedMedia}
             selectedMediaId={selectedMediaId}
             onSelectMedia={setSelectedMediaId}
@@ -1330,12 +1337,12 @@ function ActivityClimbsPanel({
         <div className="panel-heading">Climbs</div>
         <span className="muted">{climbs.length.toLocaleString()} detected</span>
       </div>
-      <div className="climbs-layout">
+      <div className={`climbs-layout ${selectedClimb ? "" : "list-only"}`}>
         <div className="climb-list">
           {climbs.map((climb) => {
             const active = selectedClimb?.index === climb.index;
             return (
-              <button key={climb.index} className={`climb-item ${active ? "active" : ""}`} type="button" onClick={() => onSelect(climb)}>
+              <button key={climb.index} className={`climb-item ${active ? "active" : ""}`} type="button" aria-pressed={active} onClick={() => onSelect(climb)}>
                 <span className="climb-item-header">
                   <strong>Climb {climb.index + 1}</strong>
                   <span className={`climb-difficulty ${difficultyClass(climb.difficulty)}`}>{climb.difficulty}</span>
@@ -1928,7 +1935,9 @@ function ActivityMap({
   points,
   tileURL,
   highlightedPoint,
-  highlightedSegment,
+  climbSegments = [],
+  selectedClimbIndex,
+  onSelectClimb,
   mediaMarkers = [],
   selectedMediaId,
   onSelectMedia
@@ -1936,7 +1945,9 @@ function ActivityMap({
   points: RoutePoint[];
   tileURL?: string;
   highlightedPoint?: RoutePoint;
-  highlightedSegment?: RoutePoint[];
+  climbSegments?: ClimbMapSegment[];
+  selectedClimbIndex?: number;
+  onSelectClimb?: (climb: ActivityClimb) => void;
   mediaMarkers?: ActivityMedia[];
   selectedMediaId?: string;
   onSelectMedia?: (mediaId: string) => void;
@@ -1946,13 +1957,12 @@ function ActivityMap({
   const center = points[0] ?? mediaPoints[0] ?? [53.3498, -6.2603];
   const start = points[0];
   const end = points.length > 1 ? points[points.length - 1] : undefined;
-  const hasHighlightedSegment = highlightedSegment && highlightedSegment.length > 1;
   return (
     <div className="map-frame">
       <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
         <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
         {points.length > 1 && <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />}
-        {hasHighlightedSegment && <Polyline pathOptions={{ color: "#f6c432", weight: 7, opacity: 0.95 }} positions={highlightedSegment} />}
+        <ActivityClimbMapSegments climbSegments={climbSegments} selectedClimbIndex={selectedClimbIndex} onSelectClimb={onSelectClimb} />
         {start && <Marker position={start} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
         {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
         {highlightedPoint && <Marker position={highlightedPoint} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
@@ -1960,6 +1970,59 @@ function ActivityMap({
         <FitMapContent points={mapPoints} />
       </MapContainer>
     </div>
+  );
+}
+
+function ActivityClimbMapSegments({
+  climbSegments,
+  selectedClimbIndex,
+  onSelectClimb
+}: {
+  climbSegments: ClimbMapSegment[];
+  selectedClimbIndex?: number;
+  onSelectClimb?: (climb: ActivityClimb) => void;
+}) {
+  const unselectedSegments = climbSegments.filter((segment) => segment.climb.index !== selectedClimbIndex);
+  const selectedSegment = climbSegments.find((segment) => segment.climb.index === selectedClimbIndex);
+  return (
+    <>
+      {unselectedSegments.map((segment) => (
+        <ClimbMapSegmentLayer key={segment.climb.index} segment={segment} selected={false} onSelectClimb={onSelectClimb} />
+      ))}
+      {selectedSegment && <ClimbMapSegmentLayer segment={selectedSegment} selected onSelectClimb={onSelectClimb} />}
+    </>
+  );
+}
+
+function ClimbMapSegmentLayer({
+  segment,
+  selected,
+  onSelectClimb
+}: {
+  segment: ClimbMapSegment;
+  selected: boolean;
+  onSelectClimb?: (climb: ActivityClimb) => void;
+}) {
+  const eventHandlers = onSelectClimb ? { click: () => onSelectClimb(segment.climb) } : undefined;
+  return (
+    <>
+      {segment.points.length > 1 && (
+        <Polyline
+          positions={segment.points}
+          pathOptions={selected ? { color: "#f6c432", weight: 8, opacity: 0.98 } : { color: "#2f8f83", weight: 6, opacity: 0.78 }}
+          eventHandlers={eventHandlers}
+        />
+      )}
+      {segment.start && (
+        <Marker
+          position={segment.start}
+          icon={climbStartMarkerIcon(selected)}
+          zIndexOffset={selected ? 1100 : 700}
+          title={`Climb ${segment.climb.index + 1}`}
+          eventHandlers={eventHandlers}
+        />
+      )}
+    </>
   );
 }
 
@@ -2034,6 +2097,16 @@ function routeHighlightIcon() {
   });
 }
 
+function climbStartMarkerIcon(selected: boolean) {
+  const size = selected ? 34 : 28;
+  return divIcon({
+    className: `climb-start-marker-icon${selected ? " selected" : ""}`,
+    html: `<span class="climb-start-marker" style="--climb-marker-size:${size}px"><span class="climb-start-marker-peak"></span></span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2]
+  });
+}
+
 function mediaMapMarkerIcon(media: ActivityMedia, selected: boolean) {
   const size = selected ? 52 : 44;
   return divIcon({
@@ -2065,6 +2138,15 @@ function routeForClimb(activity: Activity, climb?: ActivityClimb): RoutePoint[] 
   return samplesForClimb(activity, climb)
     .filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number")
     .map((sample) => [sample.latitude!, sample.longitude!] as RoutePoint);
+}
+
+function climbMapSegmentsFor(activity: Activity, climbs: ActivityClimb[]): ClimbMapSegment[] {
+  return climbs
+    .map((climb) => {
+      const points = routeForClimb(activity, climb);
+      return { climb, points, start: points[0] };
+    })
+    .filter((segment) => segment.points.length > 1 || segment.start);
 }
 
 function climbProfileFor(activity: Activity, climb?: ActivityClimb): ClimbProfilePoint[] {

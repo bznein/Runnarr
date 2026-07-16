@@ -591,6 +591,14 @@ input {
   align-items: stretch;
 }
 
+.climbs-layout.list-only {
+  grid-template-columns: 1fr;
+}
+
+.climbs-layout.list-only .climb-list {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
 .climb-list {
   display: grid;
   align-content: start;
@@ -1210,6 +1218,7 @@ input {
 
 .route-endpoint-marker-icon,
 .route-highlight-marker-icon,
+.climb-start-marker-icon,
 .media-map-marker-icon {
   border: 0;
   background: transparent;
@@ -1247,6 +1256,29 @@ input {
   border-radius: 999px;
   box-shadow: var(--shadow-marker-strong);
   background: var(--color-marker-dark);
+}
+
+.climb-start-marker {
+  position: relative;
+  display: block;
+  width: var(--climb-marker-size);
+  height: var(--climb-marker-size);
+  border: 2px solid var(--color-white);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #f6c432 0%, #2f8f83 100%);
+  box-shadow: var(--shadow-marker);
+}
+
+.climb-start-marker-peak {
+  position: absolute;
+  inset: 7px 6px 8px;
+  background: var(--color-white);
+  clip-path: polygon(0 100%, 36% 25%, 51% 58%, 70% 10%, 100% 100%);
+}
+
+.climb-start-marker-icon.selected .climb-start-marker {
+  border-color: var(--color-warning-bright);
+  box-shadow: var(--shadow-marker-strong);
 }
 
 .media-map-marker {
