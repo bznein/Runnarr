@@ -66,6 +66,9 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Dashboard must show total activities, recent activity, total distance, total time, and recent weekly distance.
 - Activity list must support scanning, searching, filtering by activity type/date, and sorting by date, distance, duration, elevation, and pace.
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
+- Activity detail should support overlaying compatible chart series in a single combined graph, such as elevation, pace/speed, heart rate, power, and cadence, with clear axes, legends, and per-series toggles.
+- Activity detail should detect meaningful climbs from distance/elevation samples and summarize each climb with distance, ascent, average grade, difficulty, and map/profile highlighting.
+- Climb detection thresholds should start with sensible defaults and may later become user-configurable settings.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.
 - Route maps should show start and end markers, and should eventually support well-designed direction indicators along the route without cluttering the map.
 - The admin must be able to delete activities from Runnarr, including their samples and laps.

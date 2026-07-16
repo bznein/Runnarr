@@ -29,6 +29,20 @@ export type ActivityLap = {
   distanceM: number;
 };
 
+export type ActivityClimb = {
+  index: number;
+  difficulty: string;
+  startSampleIndex: number;
+  endSampleIndex: number;
+  startDistanceM: number;
+  endDistanceM: number;
+  distanceM: number;
+  elevationGainM: number;
+  avgGradePct: number;
+  startElevationM: number;
+  endElevationM: number;
+};
+
 export type Activity = {
   id: string;
   source: string;
@@ -46,6 +60,7 @@ export type Activity = {
   summaryPolyline?: string;
   samples?: ActivitySample[];
   laps?: ActivityLap[];
+  climbs?: ActivityClimb[];
   createdAt: string;
 };
 
