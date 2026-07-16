@@ -1,4 +1,4 @@
-import type { Activity, ActivityMedia, ActivityTypeFilters, AppConfig, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
+import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -15,8 +15,19 @@ export function setCsrfToken(value?: string) {
   csrfToken = value ?? "";
 }
 
-function activityFilterQuery(filters?: ActivityTypeFilters) {
+type ActivityPageOptions = {
+  limit?: number;
+  offset?: number;
+};
+
+function activityFilterQuery(filters?: ActivityTypeFilters, page?: ActivityPageOptions) {
   const params = new URLSearchParams();
+  if (page?.limit !== undefined) {
+    params.set("limit", String(page.limit));
+  }
+  if (page?.offset !== undefined) {
+    params.set("offset", String(page.offset));
+  }
   for (const sport of filters?.sports ?? []) {
     params.append("sport", sport);
   }
@@ -71,9 +82,9 @@ export const api = {
   logout: () => request<Session>("/api/session/logout", { method: "POST" }),
   config: () => request<AppConfig>("/api/config"),
   summary: (filters?: ActivityTypeFilters) => request<SummaryStats>(`/api/stats/summary?${activityFilterQuery(filters)}`),
-  activities: (filters?: ActivityTypeFilters) => {
-    const filtersQuery = activityFilterQuery(filters);
-    return request<{ activities: Activity[] | null }>(`/api/activities?limit=100${filtersQuery ? `&${filtersQuery}` : ""}`);
+  activities: (filters?: ActivityTypeFilters, page?: ActivityPageOptions) => {
+    const query = activityFilterQuery(filters, page);
+    return request<ActivityListPage>(`/api/activities${query ? `?${query}` : ""}`);
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
