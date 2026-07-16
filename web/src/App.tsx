@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Cloud, Database, ExternalLink, Filter, LogOut, Map, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -921,20 +921,24 @@ function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Ac
   const media = activity.media ?? [];
   const [previewMediaId, setPreviewMediaId] = useState<string>();
   const previewMedia = media.find((item) => item.id === previewMediaId);
+  const previewMediaIndex = previewMediaId ? media.findIndex((item) => item.id === previewMediaId) : -1;
+  const previousMedia = previewMediaIndex > 0 ? media[previewMediaIndex - 1] : undefined;
+  const nextMedia = previewMediaIndex >= 0 && previewMediaIndex < media.length - 1 ? media[previewMediaIndex + 1] : undefined;
   const deleteMedia = useMutation({
     mutationFn: (mediaId: string) => api.deleteActivityMedia(activity.id, mediaId),
-    onSuccess: async (_result, mediaId) => {
-      if (previewMediaId === mediaId) {
-        setPreviewMediaId(undefined);
-      }
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["activity", activity.id] });
     }
   });
-  const deletingMediaId = deleteMedia.isPending ? deleteMedia.variables : undefined;
   const mediaCountLabel = media.length === 1 ? "1 photo" : `${media.length} photos`;
   const handleDeleteMedia = (item: ActivityMedia) => {
     deleteMedia.reset();
     if (window.confirm(`Delete "${item.originalFilename}" from this activity?`)) {
+      if (previewMediaId === item.id) {
+        const itemIndex = media.findIndex((candidate) => candidate.id === item.id);
+        const replacement = media[itemIndex + 1] ?? media[itemIndex - 1];
+        setPreviewMediaId(replacement?.id);
+      }
       deleteMedia.mutate(item.id);
     }
   };
@@ -953,27 +957,9 @@ function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Ac
       {media.length > 0 ? (
         <div className="media-grid">
           {media.map((item) => (
-            <article className="media-card" key={item.id}>
-              <button className="media-thumb-button" type="button" aria-label={`Open ${item.originalFilename}`} onClick={() => setPreviewMediaId(item.id)}>
-                <img src={activityMediaThumbnailURL(item.id)} alt={item.originalFilename} loading="lazy" />
-              </button>
-              <div className="media-card-body">
-                <button className="media-card-title" type="button" onClick={() => setPreviewMediaId(item.id)}>
-                  {item.originalFilename}
-                </button>
-                <div className="media-card-meta">{formatActivityMediaMeta(item)}</div>
-              </div>
-              <button
-                className="icon-button danger"
-                type="button"
-                title="Delete photo"
-                aria-label={`Delete ${item.originalFilename}`}
-                disabled={deletingMediaId === item.id}
-                onClick={() => handleDeleteMedia(item)}
-              >
-                <Trash2 size={16} />
-              </button>
-            </article>
+            <button className="media-thumb-button" key={item.id} type="button" aria-label={`Open ${item.originalFilename}`} onClick={() => setPreviewMediaId(item.id)}>
+              <img src={activityMediaThumbnailURL(item.id)} alt={item.originalFilename} loading="lazy" />
+            </button>
           ))}
         </div>
       ) : (
@@ -983,9 +969,11 @@ function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Ac
       {previewMedia && (
         <ActivityMediaPreview
           media={previewMedia}
-          deleting={deletingMediaId === previewMedia.id}
+          deleting={deleteMedia.isPending}
           onClose={() => setPreviewMediaId(undefined)}
           onDelete={() => handleDeleteMedia(previewMedia)}
+          onPrevious={previousMedia ? () => setPreviewMediaId(previousMedia.id) : undefined}
+          onNext={nextMedia ? () => setPreviewMediaId(nextMedia.id) : undefined}
         />
       )}
     </section>
@@ -996,13 +984,36 @@ function ActivityMediaPreview({
   media,
   deleting,
   onClose,
-  onDelete
+  onDelete,
+  onPrevious,
+  onNext
 }: {
   media: ActivityMedia;
   deleting: boolean;
   onClose: () => void;
   onDelete: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key === "ArrowLeft" && onPrevious) {
+        event.preventDefault();
+        onPrevious();
+      }
+      if (event.key === "ArrowRight" && onNext) {
+        event.preventDefault();
+        onNext();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, onNext, onPrevious]);
+
   return (
     <div
       className="dialog-backdrop media-preview-backdrop"
@@ -1023,8 +1034,16 @@ function ActivityMediaPreview({
           </button>
         </div>
 
-        <div className="media-preview-image">
-          <img src={activityMediaOriginalURL(media.id)} alt={media.originalFilename} />
+        <div className="media-preview-stage">
+          <button className="icon-button media-preview-nav" type="button" aria-label="Previous photo" disabled={!onPrevious} onClick={onPrevious}>
+            <ChevronLeft size={20} />
+          </button>
+          <div className="media-preview-image">
+            <img src={activityMediaOriginalURL(media.id)} alt={media.originalFilename} />
+          </div>
+          <button className="icon-button media-preview-nav" type="button" aria-label="Next photo" disabled={!onNext} onClick={onNext}>
+            <ChevronRight size={20} />
+          </button>
         </div>
         <div className="media-preview-meta">
           <span>{formatActivityMediaMeta(media)}</span>
