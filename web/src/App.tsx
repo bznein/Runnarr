@@ -6,9 +6,20 @@ import { Activity as ActivityIcon, BarChart3, Database, LogOut, Map, Trash2, Upl
 import { MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivitySample, AppConfig } from "./types";
+import type { Activity, ActivitySample, ActivitySortBy, ActivitySortOrder, ActivityTypeFilters, AppConfig } from "./types";
 
 type RoutePoint = [number, number];
+type ActivityTypeFiltersValue = ActivityTypeFilters;
+
+const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
+  sports: [],
+  excludeSports: [],
+  search: "",
+  dateFrom: "",
+  dateTo: "",
+  sortBy: "date",
+  sortOrder: "desc"
+};
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -127,7 +138,7 @@ function LoginPage() {
 }
 
 function Dashboard() {
-  const summary = useQuery({ queryKey: ["summary"], queryFn: api.summary });
+  const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.summary() });
 
   if (summary.isLoading) {
     return <Page title="Dashboard"><LoadingRow /></Page>;
@@ -176,14 +187,17 @@ function Dashboard() {
 }
 
 function ActivitiesPage() {
-  const activities = useQuery({ queryKey: ["activities"], queryFn: api.activities });
+  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
+  const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
   const queryClient = useQueryClient();
   const deleteActivity = useMutation({
     mutationFn: api.deleteActivity,
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["summary"] })
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-types"] })
       ]);
     }
   });
@@ -194,11 +208,102 @@ function ActivitiesPage() {
   };
   return (
     <Page title="Activities">
+      <ActivityControls
+        activityTypes={activityTypes.data?.activityTypes ?? []}
+        filters={filters}
+        onChange={setFilters}
+      />
       {activities.isLoading && <LoadingRow />}
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
       {activities.data && <ActivityTable activities={activities.data.activities ?? []} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
       {(activities.data?.activities ?? []).length === 0 && <EmptyState title="No activities yet" action={<Link className="secondary-button" to="/imports">Import a file</Link>} />}
     </Page>
+  );
+}
+
+function ActivityControls({
+  activityTypes,
+  filters,
+  onChange
+}: {
+  activityTypes: string[];
+  filters: ActivityTypeFiltersValue;
+  onChange: (filters: ActivityTypeFiltersValue) => void;
+}) {
+  const includeSet = new Set(filters.sports);
+  const excludeSet = new Set(filters.excludeSports);
+  const clearFilters = () => onChange(emptyActivityTypeFilters);
+  const update = (partial: Partial<ActivityTypeFiltersValue>) => onChange({ ...filters, ...partial });
+  const toggleInclude = (sport: string) => {
+    const sports = includeSet.has(sport) ? filters.sports.filter((item) => item !== sport) : [...filters.sports, sport];
+    onChange({ ...filters, sports, excludeSports: filters.excludeSports.filter((item) => item !== sport) });
+  };
+  const toggleExclude = (sport: string) => {
+    const excludeSports = excludeSet.has(sport) ? filters.excludeSports.filter((item) => item !== sport) : [...filters.excludeSports, sport];
+    onChange({ ...filters, sports: filters.sports.filter((item) => item !== sport), excludeSports });
+  };
+
+  return (
+    <section className="panel activity-controls">
+      <div className="control-grid">
+        <label className="field">
+          <span>Search</span>
+          <input value={filters.search ?? ""} onChange={(event) => update({ search: event.target.value })} placeholder="Activity name" />
+        </label>
+        <label className="field">
+          <span>From</span>
+          <input type="date" value={filters.dateFrom ?? ""} onChange={(event) => update({ dateFrom: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>To</span>
+          <input type="date" value={filters.dateTo ?? ""} onChange={(event) => update({ dateTo: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Sort</span>
+          <select value={filters.sortBy ?? "date"} onChange={(event) => update({ sortBy: event.target.value as ActivitySortBy })}>
+            <option value="date">Date</option>
+            <option value="distance">Distance</option>
+            <option value="duration">Duration</option>
+            <option value="elevation_gain">Elevation</option>
+            <option value="avg_pace">Pace</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Direction</span>
+          <select value={filters.sortOrder ?? "desc"} onChange={(event) => update({ sortOrder: event.target.value as ActivitySortOrder })}>
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </label>
+      </div>
+      {activityTypes.length > 0 && (
+        <div className="filter-groups">
+          <div>
+            <div className="filter-label">Show only</div>
+            <div className="filter-chips">
+              {activityTypes.map((sport) => (
+                <button key={sport} className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`} type="button" onClick={() => toggleInclude(sport)}>
+                  {sport}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="filter-label">Exclude</div>
+            <div className="filter-chips">
+              {activityTypes.map((sport) => (
+                <button key={sport} className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`} type="button" onClick={() => toggleExclude(sport)}>
+                  {sport}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <button className="secondary-button small-button" type="button" onClick={clearFilters}>
+        Clear
+      </button>
+    </section>
   );
 }
 

@@ -64,7 +64,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 ### Activity Views
 
 - Dashboard must show total activities, recent activity, total distance, total time, and recent weekly distance.
-- Activity list must support scanning by date, type, distance, time, and source.
+- Activity list must support scanning, searching, filtering by activity type/date, and sorting by date, distance, duration, elevation, and pace.
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
 - Import views must make the data pipeline visible enough to debug failed imports.
 

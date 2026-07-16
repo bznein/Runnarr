@@ -21,7 +21,8 @@ a {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -305,6 +306,63 @@ input {
   gap: 16px;
 }
 
+.activity-controls {
+  display: grid;
+  gap: 16px;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.filter-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.filter-label {
+  margin-bottom: 8px;
+  color: #66706c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #cbd6d0;
+  border-radius: 999px;
+  color: #3e4a46;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.filter-chip.active {
+  border-color: #236b63;
+  color: #ffffff;
+  background: #2f8f83;
+}
+
+.filter-chip.exclude.active {
+  border-color: #b94335;
+  background: #c84d4d;
+}
+
+.small-button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .row-actions {
   width: 1%;
   text-align: right;
@@ -349,6 +407,7 @@ input {
 }
 
 .field input,
+.field select,
 .upload-panel input {
   min-height: 40px;
   padding: 0 10px;
@@ -397,7 +456,9 @@ input {
   }
 
   .metric-grid,
-  .split-layout {
+  .split-layout,
+  .control-grid,
+  .filter-groups {
     grid-template-columns: 1fr;
   }
 
