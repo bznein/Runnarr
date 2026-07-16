@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
@@ -52,6 +52,21 @@ const themePreferenceStorageKey = "runnarr-theme-preference";
 const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
+const chartTooltipContentStyle: CSSProperties = {
+  border: "1px solid var(--color-border-control)",
+  borderRadius: 8,
+  background: "var(--color-surface)",
+  boxShadow: "var(--shadow-menu)",
+  color: "var(--color-text)"
+};
+const chartTooltipLabelStyle: CSSProperties = {
+  color: "var(--color-muted-strong)",
+  fontWeight: 700
+};
+const chartTooltipCursorStyle = {
+  fill: "var(--color-surface-soft)",
+  opacity: 0.72
+};
 const activityChartSeries: ActivityChartSeries[] = [
   { key: "elevationM", label: "Elevation", color: "#4664c9", defaultVisible: true, format: (value) => `${Math.round(value).toLocaleString()} m` },
   { key: "heartRate", label: "Heart rate", color: "#c84d4d", defaultVisible: true, format: (value) => `${Math.round(value)} bpm` },
@@ -289,7 +304,12 @@ function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="week" />
                 <YAxis width={42} />
-                <Tooltip formatter={(value) => [`${value} km`, "Distance"]} />
+                <Tooltip
+                  contentStyle={chartTooltipContentStyle}
+                  labelStyle={chartTooltipLabelStyle}
+                  cursor={chartTooltipCursorStyle}
+                  formatter={(value) => [`${value} km`, "Distance"]}
+                />
                 <Bar dataKey="km" fill="#2f8f83" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -1371,7 +1391,11 @@ function ActivityClimbsPanel({
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" minTickGap={26} />
                   <YAxis width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
-                  <Tooltip formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Height above start"]} />
+                  <Tooltip
+                    contentStyle={chartTooltipContentStyle}
+                    labelStyle={chartTooltipLabelStyle}
+                    formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Height above start"]}
+                  />
                   <Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -1907,7 +1931,11 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
                   tickFormatter={(value) => formatChartTick(Number(value), series)}
                 />
               ))}
-              <Tooltip formatter={(value, name, item) => formatChartTooltip(value, String(name), activeSeries, item)} />
+              <Tooltip
+                contentStyle={chartTooltipContentStyle}
+                labelStyle={chartTooltipLabelStyle}
+                formatter={(value, name, item) => formatChartTooltip(value, String(name), activeSeries, item)}
+              />
               {activeSeries.map((series) => (
                 <Line
                   key={series.key}
