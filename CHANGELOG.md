@@ -9,6 +9,10 @@
 - Settings now consolidates Garmin sync, display preferences, manual file import, and collapsed diagnostics.
 - Added a persistent light/dark/system theme preference.
 
+### Fixes
+
+- Climb profile charts now show height above the climb start instead of dipping below zero for relative elevation data.
+
 ## 0.2.0 - 2026-07-16
 
 ### Features
