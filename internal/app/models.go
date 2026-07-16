@@ -23,6 +23,7 @@ type Activity struct {
 	Samples             []ActivitySample `json:"samples,omitempty"`
 	Laps                []ActivityLap    `json:"laps,omitempty"`
 	Climbs              []ActivityClimb  `json:"climbs,omitempty"`
+	Media               []ActivityMedia  `json:"media,omitempty"`
 	CreatedAt           time.Time        `json:"createdAt"`
 }
 

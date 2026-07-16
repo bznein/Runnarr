@@ -1,4 +1,4 @@
-import type { Activity, ActivityTypeFilters, AppConfig, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
+import type { Activity, ActivityMedia, ActivityTypeFilters, AppConfig, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -83,6 +83,16 @@ export const api = {
       body: JSON.stringify({ name })
     }),
   deleteActivity: (id: string) => request<DeleteActivityResult>(`/api/activities/${id}`, { method: "DELETE" }),
+  uploadActivityMedia: (id: string, file: File) => {
+    const body = new FormData();
+    body.set("file", file);
+    return request<{ media: ActivityMedia }>(`/api/activities/${id}/media`, {
+      method: "POST",
+      body
+    });
+  },
+  deleteActivityMedia: (activityId: string, mediaId: string) =>
+    request<DeleteActivityMediaResult>(`/api/activities/${activityId}/media/${mediaId}`, { method: "DELETE" }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
   upload: (file: File) => {
     const body = new FormData();

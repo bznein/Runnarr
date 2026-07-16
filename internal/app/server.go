@@ -187,6 +187,13 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not get activity")
 		return
 	}
+	media, err := s.store.ListActivityMedia(r.Context(), activity.ID)
+	if err != nil {
+		s.logger.Error("list activity media", "activity_id", activity.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load activity media")
+		return
+	}
+	activity.Media = media
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})
 }
 
