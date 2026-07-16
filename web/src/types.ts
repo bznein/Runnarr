@@ -27,6 +27,8 @@ export type ActivityLap = {
   startTime?: string;
   elapsedTimeS: number;
   distanceM: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
 };
 
 export type ActivityClimb = {
@@ -64,6 +66,12 @@ export type Activity = {
   createdAt: string;
 };
 
+export type DeleteActivityResult = {
+  deleted: boolean;
+  excludedFromSync: boolean;
+  syncExclusionMessage?: string;
+};
+
 export type ActivitySortBy = "date" | "duration" | "distance" | "elevation_gain" | "avg_pace";
 export type ActivitySortOrder = "asc" | "desc";
 
@@ -96,4 +104,30 @@ export type ImportFile = {
   status: string;
   error?: string;
   createdAt: string;
+};
+
+export type ProviderStatus = {
+  configured: boolean;
+  connected: boolean;
+  connection: {
+    provider: string;
+    providerAccountId?: string;
+    displayName?: string;
+    scopes?: string[] | null;
+    tokenExpiresAt?: string;
+  };
+};
+
+export type GarminStatus = ProviderStatus;
+
+export type SyncJob = {
+  id: string;
+  provider: string;
+  kind: string;
+  status: string;
+  error?: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  payload?: Record<string, unknown>;
 };
