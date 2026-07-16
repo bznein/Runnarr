@@ -308,9 +308,18 @@ func applyGarminMetadata(activity *ImportedActivity, source GarminBridgeActivity
 	}
 	activity.Raw["provider"] = garminProvider
 	activity.Raw["garmin_id"] = source.ID
+	activity.OriginalProviderURL = garminActivityURL(source.ID)
 	if !source.StartTime.IsZero() {
 		activity.Raw["garmin_start_time"] = source.StartTime.Format(time.RFC3339)
 	}
+}
+
+func garminActivityURL(activityID string) string {
+	activityID = strings.TrimSpace(activityID)
+	if activityID == "" {
+		return ""
+	}
+	return "https://connect.garmin.com/modern/activity/" + activityID
 }
 
 type PythonGarminBridge struct {

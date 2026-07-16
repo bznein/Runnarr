@@ -52,4 +52,7 @@ func TestApplyGarminMetadata(t *testing.T) {
 	if activity.Raw["provider"] != garminProvider || activity.Raw["garmin_id"] != "123" {
 		t.Fatalf("raw metadata = %#v", activity.Raw)
 	}
+	if activity.OriginalProviderURL != "https://connect.garmin.com/modern/activity/123" {
+		t.Fatalf("original provider URL = %q", activity.OriginalProviderURL)
+	}
 }

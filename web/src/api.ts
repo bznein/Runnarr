@@ -77,6 +77,11 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  renameActivity: (id: string, name: string) =>
+    request<{ activity: Activity }>(`/api/activities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name })
+    }),
   deleteActivity: (id: string) => request<DeleteActivityResult>(`/api/activities/${id}`, { method: "DELETE" }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
   upload: (file: File) => {

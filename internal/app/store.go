@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -19,6 +20,7 @@ type Store struct {
 }
 
 var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
+var ErrInvalidActivityName = errors.New("activity name must be between 1 and 160 characters")
 
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
@@ -141,9 +143,9 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		insert into activities(
 			source, source_id, source_file_id, name, sport_type, start_time, distance_m,
 			moving_time_s, elapsed_time_s, elevation_gain_m, avg_heart_rate, max_heart_rate,
-			avg_pace_s_per_km, summary_polyline, raw
+			avg_pace_s_per_km, original_provider_url, summary_polyline, raw
 		)
-		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		on conflict (source, source_id) do update set
 			source_file_id = excluded.source_file_id,
 			name = excluded.name,
@@ -156,13 +158,17 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 			avg_heart_rate = excluded.avg_heart_rate,
 			max_heart_rate = excluded.max_heart_rate,
 			avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+			original_provider_url = case
+				when excluded.original_provider_url <> '' then excluded.original_provider_url
+				else activities.original_provider_url
+			end,
 			summary_polyline = excluded.summary_polyline,
 			raw = excluded.raw,
 			updated_at = now()
 		returning id::text
 	`, source, sourceID, sourceFileID, fallbackName(activity), activity.SportType, activity.StartTime,
 		activity.DistanceM, activity.MovingTimeS, activity.ElapsedTimeS, activity.ElevationGainM,
-		activity.AvgHeartRate, activity.MaxHeartRate, avgPace, activity.SummaryPolyline, rawBytes).Scan(&id)
+		activity.AvgHeartRate, activity.MaxHeartRate, avgPace, activity.OriginalProviderURL, activity.SummaryPolyline, rawBytes).Scan(&id)
 	if err != nil {
 		return "", err
 	}
@@ -306,6 +312,25 @@ func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityRe
 		return DeleteActivityResult{}, err
 	}
 	return result, nil
+}
+
+func (s *Store) RenameActivity(ctx context.Context, id, requestedName string) (Activity, error) {
+	var sourceName string
+	if err := s.db.QueryRow(ctx, `select name from activities where id = $1`, id).Scan(&sourceName); err != nil {
+		return Activity{}, err
+	}
+	localName, err := localActivityNameOverride(requestedName, sourceName)
+	if err != nil {
+		return Activity{}, err
+	}
+	if _, err := s.db.Exec(ctx, `
+		update activities
+		set local_name = $2, updated_at = now()
+		where id = $1
+	`, id, localName); err != nil {
+		return Activity{}, err
+	}
+	return s.GetActivity(ctx, id)
 }
 
 func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummaryStats, error) {
@@ -582,9 +607,9 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 }
 
 const activitySelectSQL = `
-	select id::text, source, source_id, name, sport_type, start_time, distance_m,
+	select id::text, source, source_id, coalesce(nullif(local_name, ''), name), name, local_name, sport_type, start_time, distance_m,
 		moving_time_s, elapsed_time_s, elevation_gain_m, avg_heart_rate, max_heart_rate,
-		avg_pace_s_per_km, summary_polyline, created_at
+		avg_pace_s_per_km, original_provider_url, summary_polyline, created_at
 	from activities
 `
 
@@ -607,9 +632,9 @@ func scanActivities(rows pgx.Rows) ([]Activity, error) {
 
 func scanActivity(row rowScanner, activity *Activity) error {
 	var avgHR, maxHR, avgPace sql.NullFloat64
-	if err := row.Scan(&activity.ID, &activity.Source, &activity.SourceID, &activity.Name, &activity.SportType,
+	if err := row.Scan(&activity.ID, &activity.Source, &activity.SourceID, &activity.Name, &activity.SourceName, &activity.LocalName, &activity.SportType,
 		&activity.StartTime, &activity.DistanceM, &activity.MovingTimeS, &activity.ElapsedTimeS,
-		&activity.ElevationGainM, &avgHR, &maxHR, &avgPace, &activity.SummaryPolyline, &activity.CreatedAt); err != nil {
+		&activity.ElevationGainM, &avgHR, &maxHR, &avgPace, &activity.OriginalProviderURL, &activity.SummaryPolyline, &activity.CreatedAt); err != nil {
 		return err
 	}
 	activity.AvgHeartRate = floatPtrFromNull(avgHR)
@@ -631,7 +656,7 @@ func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, 
 	args := make([]any, 0, 5)
 	nextArg := startArg
 	if strings.TrimSpace(filters.Search) != "" {
-		conditions = append(conditions, fmt.Sprintf("name ilike $%d", nextArg))
+		conditions = append(conditions, fmt.Sprintf("coalesce(nullif(local_name, ''), name) ilike $%d", nextArg))
 		args = append(args, "%"+strings.TrimSpace(filters.Search)+"%")
 		nextArg++
 	}
@@ -707,6 +732,20 @@ func averagePace(distanceM float64, movingTimeS int) *float64 {
 	}
 	value := float64(movingTimeS) / (distanceM / 1000)
 	return &value
+}
+
+func localActivityNameOverride(requestedName, sourceName string) (string, error) {
+	name := strings.TrimSpace(requestedName)
+	if name == "" {
+		return "", ErrInvalidActivityName
+	}
+	if name == strings.TrimSpace(sourceName) {
+		return "", nil
+	}
+	if utf8.RuneCountInString(name) > 160 {
+		return "", ErrInvalidActivityName
+	}
+	return name, nil
 }
 
 func nullTime(t time.Time) any {

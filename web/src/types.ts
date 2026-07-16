@@ -50,6 +50,8 @@ export type Activity = {
   source: string;
   sourceId: string;
   name: string;
+  sourceName: string;
+  localName?: string;
   sportType: string;
   startTime: string;
   distanceM: number;
@@ -59,6 +61,7 @@ export type Activity = {
   avgHeartRate?: number;
   maxHeartRate?: number;
   avgPaceSPKM?: number;
+  originalProviderUrl?: string;
   summaryPolyline?: string;
   samples?: ActivitySample[];
   laps?: ActivityLap[];

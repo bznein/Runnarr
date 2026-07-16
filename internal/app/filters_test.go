@@ -20,7 +20,7 @@ func TestActivityFiltersFromQuerySearch(t *testing.T) {
 func TestActivityFilterConditionsSearch(t *testing.T) {
 	conditions, args := activityFilterConditions(ActivityFilters{Search: " morning "}, 2)
 
-	wantConditions := []string{"name ilike $2"}
+	wantConditions := []string{"coalesce(nullif(local_name, ''), name) ilike $2"}
 	wantArgs := []any{"%morning%"}
 	if !reflect.DeepEqual(conditions, wantConditions) {
 		t.Fatalf("conditions = %#v, want %#v", conditions, wantConditions)
