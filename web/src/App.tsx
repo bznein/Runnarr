@@ -885,6 +885,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const climbMapSegments = climbMapSegmentsFor(item, climbs);
   const selectedClimbProfile = climbProfileFor(item, selectedClimb);
   const showLapElevation = (item.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
+  const showLapGap = (item.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
   const handleDelete = () => {
     setActionsOpen(false);
     if (window.confirm(deleteActivityConfirmation(item))) {
@@ -943,6 +944,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
         <Metric label="Pace" value={formatPace(item.avgPaceSPKM)} />
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
+        {item.avgGradeAdjustedPaceSPKM !== undefined && <Metric label="GAP" value={formatPace(item.avgGradeAdjustedPaceSPKM)} />}
         {item.caloriesKcal !== undefined && <Metric label="Calories" value={formatCalories(item.caloriesKcal)} />}
       </section>
 
@@ -996,6 +998,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                 <th>Distance</th>
                 <th>Time</th>
                 <th>Pace</th>
+                {showLapGap && <th>GAP</th>}
                 {showLapElevation && <th>Gain</th>}
                 {showLapElevation && <th>Loss</th>}
               </tr>
@@ -1007,6 +1010,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                   <td>{formatDistance(lap.distanceM)}</td>
                   <td>{formatDuration(lap.elapsedTimeS)}</td>
                   <td>{formatPace(lapPaceSPKM(lap))}</td>
+                  {showLapGap && <td>{lap.avgGradeAdjustedPaceSPKM !== undefined ? formatPace(lap.avgGradeAdjustedPaceSPKM) : ""}</td>}
                   {showLapElevation && <td>{lap.elevationGainM !== undefined ? `${Math.round(lap.elevationGainM).toLocaleString()} m` : "-"}</td>}
                   {showLapElevation && <td>{lap.elevationLossM !== undefined ? `${Math.round(lap.elevationLossM).toLocaleString()} m` : "-"}</td>}
                 </tr>

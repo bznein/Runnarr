@@ -3,29 +3,30 @@ package app
 import "time"
 
 type Activity struct {
-	ID                  string           `json:"id"`
-	Source              string           `json:"source"`
-	SourceID            string           `json:"sourceId"`
-	Name                string           `json:"name"`
-	SourceName          string           `json:"sourceName"`
-	LocalName           string           `json:"localName,omitempty"`
-	SportType           string           `json:"sportType"`
-	StartTime           time.Time        `json:"startTime"`
-	DistanceM           float64          `json:"distanceM"`
-	MovingTimeS         int              `json:"movingTimeS"`
-	ElapsedTimeS        int              `json:"elapsedTimeS"`
-	ElevationGainM      float64          `json:"elevationGainM"`
-	AvgHeartRate        *float64         `json:"avgHeartRate,omitempty"`
-	MaxHeartRate        *float64         `json:"maxHeartRate,omitempty"`
-	AvgPaceSPKM         *float64         `json:"avgPaceSPKM,omitempty"`
-	CaloriesKcal        *int             `json:"caloriesKcal,omitempty"`
-	OriginalProviderURL string           `json:"originalProviderUrl,omitempty"`
-	SummaryPolyline     string           `json:"summaryPolyline,omitempty"`
-	Samples             []ActivitySample `json:"samples,omitempty"`
-	Laps                []ActivityLap    `json:"laps,omitempty"`
-	Climbs              []ActivityClimb  `json:"climbs,omitempty"`
-	Media               []ActivityMedia  `json:"media,omitempty"`
-	CreatedAt           time.Time        `json:"createdAt"`
+	ID                       string           `json:"id"`
+	Source                   string           `json:"source"`
+	SourceID                 string           `json:"sourceId"`
+	Name                     string           `json:"name"`
+	SourceName               string           `json:"sourceName"`
+	LocalName                string           `json:"localName,omitempty"`
+	SportType                string           `json:"sportType"`
+	StartTime                time.Time        `json:"startTime"`
+	DistanceM                float64          `json:"distanceM"`
+	MovingTimeS              int              `json:"movingTimeS"`
+	ElapsedTimeS             int              `json:"elapsedTimeS"`
+	ElevationGainM           float64          `json:"elevationGainM"`
+	AvgHeartRate             *float64         `json:"avgHeartRate,omitempty"`
+	MaxHeartRate             *float64         `json:"maxHeartRate,omitempty"`
+	AvgPaceSPKM              *float64         `json:"avgPaceSPKM,omitempty"`
+	AvgGradeAdjustedPaceSPKM *float64         `json:"avgGradeAdjustedPaceSPKM,omitempty"`
+	CaloriesKcal             *int             `json:"caloriesKcal,omitempty"`
+	OriginalProviderURL      string           `json:"originalProviderUrl,omitempty"`
+	SummaryPolyline          string           `json:"summaryPolyline,omitempty"`
+	Samples                  []ActivitySample `json:"samples,omitempty"`
+	Laps                     []ActivityLap    `json:"laps,omitempty"`
+	Climbs                   []ActivityClimb  `json:"climbs,omitempty"`
+	Media                    []ActivityMedia  `json:"media,omitempty"`
+	CreatedAt                time.Time        `json:"createdAt"`
 }
 
 type DeleteActivityResult struct {
@@ -61,12 +62,13 @@ type ActivitySample struct {
 }
 
 type ActivityLap struct {
-	Index          int        `json:"index"`
-	StartTime      *time.Time `json:"startTime,omitempty"`
-	ElapsedTimeS   int        `json:"elapsedTimeS"`
-	DistanceM      float64    `json:"distanceM"`
-	ElevationGainM *float64   `json:"elevationGainM,omitempty"`
-	ElevationLossM *float64   `json:"elevationLossM,omitempty"`
+	Index                    int        `json:"index"`
+	StartTime                *time.Time `json:"startTime,omitempty"`
+	ElapsedTimeS             int        `json:"elapsedTimeS"`
+	DistanceM                float64    `json:"distanceM"`
+	ElevationGainM           *float64   `json:"elevationGainM,omitempty"`
+	ElevationLossM           *float64   `json:"elevationLossM,omitempty"`
+	AvgGradeAdjustedPaceSPKM *float64   `json:"avgGradeAdjustedPaceSPKM,omitempty"`
 }
 
 type ActivityClimb struct {
@@ -101,21 +103,22 @@ type ActivityMedia struct {
 }
 
 type ImportedActivity struct {
-	Name                string           `json:"name"`
-	SportType           string           `json:"sportType"`
-	StartTime           time.Time        `json:"startTime"`
-	DistanceM           float64          `json:"distanceM"`
-	MovingTimeS         int              `json:"movingTimeS"`
-	ElapsedTimeS        int              `json:"elapsedTimeS"`
-	ElevationGainM      float64          `json:"elevationGainM"`
-	AvgHeartRate        *float64         `json:"avgHeartRate,omitempty"`
-	MaxHeartRate        *float64         `json:"maxHeartRate,omitempty"`
-	CaloriesKcal        *int             `json:"caloriesKcal,omitempty"`
-	OriginalProviderURL string           `json:"originalProviderUrl,omitempty"`
-	SummaryPolyline     string           `json:"summaryPolyline,omitempty"`
-	Samples             []ActivitySample `json:"samples,omitempty"`
-	Laps                []ActivityLap    `json:"laps,omitempty"`
-	Raw                 map[string]any   `json:"raw,omitempty"`
+	Name                     string           `json:"name"`
+	SportType                string           `json:"sportType"`
+	StartTime                time.Time        `json:"startTime"`
+	DistanceM                float64          `json:"distanceM"`
+	MovingTimeS              int              `json:"movingTimeS"`
+	ElapsedTimeS             int              `json:"elapsedTimeS"`
+	ElevationGainM           float64          `json:"elevationGainM"`
+	AvgHeartRate             *float64         `json:"avgHeartRate,omitempty"`
+	MaxHeartRate             *float64         `json:"maxHeartRate,omitempty"`
+	AvgGradeAdjustedPaceSPKM *float64         `json:"avgGradeAdjustedPaceSPKM,omitempty"`
+	CaloriesKcal             *int             `json:"caloriesKcal,omitempty"`
+	OriginalProviderURL      string           `json:"originalProviderUrl,omitempty"`
+	SummaryPolyline          string           `json:"summaryPolyline,omitempty"`
+	Samples                  []ActivitySample `json:"samples,omitempty"`
+	Laps                     []ActivityLap    `json:"laps,omitempty"`
+	Raw                      map[string]any   `json:"raw,omitempty"`
 }
 
 type ActivityFilters struct {

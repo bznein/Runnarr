@@ -4,6 +4,7 @@
 
 ### Features
 
+- Garmin-synced activities now preserve grade-adjusted pace when provided and show GAP on activity details and laps.
 - Activity lap tables now show per-lap pace derived from lap distance and elapsed time.
 - Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
 
