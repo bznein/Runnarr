@@ -45,6 +45,21 @@ export type ActivityClimb = {
   endElevationM: number;
 };
 
+export type ActivityMedia = {
+  id: string;
+  activityId: string;
+  originalFilename: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  width: number;
+  height: number;
+  captureTime?: string;
+  latitude?: number;
+  longitude?: number;
+  createdAt: string;
+};
+
 export type Activity = {
   id: string;
   source: string;
@@ -66,6 +81,7 @@ export type Activity = {
   samples?: ActivitySample[];
   laps?: ActivityLap[];
   climbs?: ActivityClimb[];
+  media?: ActivityMedia[];
   createdAt: string;
 };
 
@@ -73,6 +89,10 @@ export type DeleteActivityResult = {
   deleted: boolean;
   excludedFromSync: boolean;
   syncExclusionMessage?: string;
+};
+
+export type DeleteActivityMediaResult = {
+  deleted: boolean;
 };
 
 export type ActivitySortBy = "date" | "duration" | "distance" | "elevation_gain" | "avg_pace";

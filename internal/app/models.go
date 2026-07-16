@@ -23,6 +23,7 @@ type Activity struct {
 	Samples             []ActivitySample `json:"samples,omitempty"`
 	Laps                []ActivityLap    `json:"laps,omitempty"`
 	Climbs              []ActivityClimb  `json:"climbs,omitempty"`
+	Media               []ActivityMedia  `json:"media,omitempty"`
 	CreatedAt           time.Time        `json:"createdAt"`
 }
 
@@ -30,6 +31,10 @@ type DeleteActivityResult struct {
 	Deleted              bool   `json:"deleted"`
 	ExcludedFromSync     bool   `json:"excludedFromSync"`
 	SyncExclusionMessage string `json:"syncExclusionMessage,omitempty"`
+}
+
+type DeleteActivityMediaResult struct {
+	Deleted bool `json:"deleted"`
 }
 
 type ActivitySample struct {
@@ -67,6 +72,23 @@ type ActivityClimb struct {
 	AvgGradePct      float64 `json:"avgGradePct"`
 	StartElevationM  float64 `json:"startElevationM"`
 	EndElevationM    float64 `json:"endElevationM"`
+}
+
+type ActivityMedia struct {
+	ID               string     `json:"id"`
+	ActivityID       string     `json:"activityId"`
+	OriginalFilename string     `json:"originalFilename"`
+	ContentType      string     `json:"contentType"`
+	SizeBytes        int64      `json:"sizeBytes"`
+	SHA256           string     `json:"sha256"`
+	OriginalPath     string     `json:"-"`
+	ThumbnailPath    string     `json:"-"`
+	Width            int        `json:"width"`
+	Height           int        `json:"height"`
+	CaptureTime      *time.Time `json:"captureTime,omitempty"`
+	Latitude         *float64   `json:"latitude,omitempty"`
+	Longitude        *float64   `json:"longitude,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
 }
 
 type ImportedActivity struct {

@@ -17,6 +17,7 @@ type Config struct {
 	SecretKey          string
 	MapTileURL         string
 	StaticDir          string
+	MediaDir           string
 	GarminBridgePython string
 	GarminBridgeScript string
 	GarminTokenDir     string
@@ -32,6 +33,7 @@ func LoadConfig() (Config, error) {
 		SecretKey:          env("RUNNARR_SECRET_KEY", ""),
 		MapTileURL:         env("MAP_TILE_URL", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"),
 		StaticDir:          env("RUNNARR_STATIC_DIR", "web/dist"),
+		MediaDir:           env("RUNNARR_MEDIA_DIR", "data/media"),
 		GarminBridgePython: env("RUNNARR_GARMIN_BRIDGE_PYTHON", "python3"),
 		GarminBridgeScript: env("RUNNARR_GARMIN_BRIDGE_SCRIPT", "internal/app/garmin_bridge.py"),
 		GarminTokenDir:     env("RUNNARR_GARMIN_TOKEN_DIR", "data/garmin_tokens"),

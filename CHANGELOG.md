@@ -4,6 +4,7 @@
 
 ### Features
 
+- Activity photo uploads with an authenticated gallery, thumbnails, EXIF metadata extraction, preview, and deletion.
 - Local activity renaming from the activity detail page. Renames are stored only in Runnarr and survive future provider syncs.
 - Original Garmin activity links on activity detail pages when a provider URL is available.
 - Compact activity-detail action menu for rename, open-original, and delete actions.

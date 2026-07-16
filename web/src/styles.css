@@ -536,6 +536,131 @@ input {
   min-width: 0;
 }
 
+.media-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.media-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.media-panel-header .panel-heading {
+  margin-bottom: 0;
+}
+
+.media-count {
+  color: #66706c;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.media-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.media-upload-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #cbd6d0;
+  border-radius: 6px;
+  color: #4d5753;
+  background: #f8faf9;
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.media-thumb-button {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid #d9e1dc;
+  border-radius: 6px;
+  background: #e8eeeb;
+  cursor: pointer;
+}
+
+.media-thumb-button:hover {
+  border-color: #9bb7ae;
+}
+
+.media-thumb-button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-preview-dialog {
+  width: min(100%, 920px);
+}
+
+.media-preview-dialog .dialog-header {
+  align-items: start;
+}
+
+.media-preview-dialog h2 {
+  overflow-wrap: anywhere;
+}
+
+.media-preview-stage {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.media-preview-nav {
+  width: 38px;
+  min-width: 38px;
+  height: 42px;
+}
+
+.media-preview-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  max-height: 65vh;
+  overflow: hidden;
+  border: 1px solid #d9e1dc;
+  border-radius: 8px;
+  background: #101715;
+}
+
+.media-preview-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+}
+
+.media-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: #66706c;
+  font-size: 13px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -994,6 +1119,24 @@ input {
   .provider-controls {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .media-preview-dialog {
+    max-height: calc(100vh - 36px);
+  }
+
+  .media-preview-stage {
+    gap: 8px;
+  }
+
+  .media-preview-nav {
+    width: 34px;
+    min-width: 34px;
+  }
+
+  .media-preview-image,
+  .media-preview-image img {
+    max-height: 56vh;
   }
 
   .dialog-backdrop {

@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Cloud, Database, ExternalLink, Filter, LogOut, Map, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivityClimb, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
+import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
@@ -97,7 +97,7 @@ function AuthenticatedApp() {
         </Link>
         <nav className="nav">
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
-          <NavItem to="/activities" icon={<Map size={18} />} label="Activities" />
+          <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/imports" icon={<Upload size={18} />} label="Imports" />
           <NavItem to="/settings" icon={<Cloud size={18} />} label="Providers" />
         </nav>
@@ -701,7 +701,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const activity = useQuery({ queryKey: ["activity", id], queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const activityQueryKey = ["activity", id] as const;
+  const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
   const deleteActivity = useMutation({
     mutationFn: api.deleteActivity,
     onSuccess: async () => {
@@ -724,16 +725,42 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setRenameOpen(false);
     }
   });
+  const uploadMedia = useMutation({
+    mutationFn: async (files: File[]) => {
+      const uploaded: Array<{ media: ActivityMedia }> = [];
+      for (const file of files) {
+        uploaded.push(await api.uploadActivityMedia(id!, file));
+      }
+      return uploaded;
+    },
+    onSuccess: (uploaded) => {
+      setMediaFileInputKey((key) => key + 1);
+      queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          activity: {
+            ...current.activity,
+            media: mergeActivityMedia(current.activity.media ?? [], uploaded.map((item) => item.media))
+          }
+        };
+      });
+    }
+  });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
   const [selectedClimbIndex, setSelectedClimbIndex] = useState(0);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
 
   useEffect(() => {
     setHighlightedSample(undefined);
     setSelectedClimbIndex(0);
     setActionsOpen(false);
     setRenameOpen(false);
+    uploadMedia.reset();
+    setMediaFileInputKey((key) => key + 1);
   }, [id]);
 
   if (activity.isLoading) {
@@ -744,6 +771,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }
 
   const item = activity.data.activity;
+  const mediaItems = item.media ?? [];
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
@@ -761,24 +789,38 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const handleRename = (name: string) => {
     renameActivity.mutate(name);
   };
+  const handleMediaFilesSelected = (files: File[]) => {
+    if (files.length === 0 || uploadMedia.isPending) {
+      return;
+    }
+    uploadMedia.reset();
+    uploadMedia.mutate(files);
+  };
 
   return (
     <Page
       title={item.name}
       eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}
       actions={
-        <ActivityDetailActions
-          activity={item}
-          open={actionsOpen}
-          deleting={deleteActivity.isPending}
-          onToggle={() => setActionsOpen((current) => !current)}
-          onRename={() => {
-            renameActivity.reset();
-            setRenameOpen(true);
-            setActionsOpen(false);
-          }}
-          onDelete={handleDelete}
-        />
+        <>
+          <ActivityMediaUploadAction
+            inputKey={mediaFileInputKey}
+            uploading={uploadMedia.isPending}
+            onFilesSelected={handleMediaFilesSelected}
+          />
+          <ActivityDetailActions
+            activity={item}
+            open={actionsOpen}
+            deleting={deleteActivity.isPending}
+            onToggle={() => setActionsOpen((current) => !current)}
+            onRename={() => {
+              renameActivity.reset();
+              setRenameOpen(true);
+              setActionsOpen(false);
+            }}
+            onDelete={handleDelete}
+          />
+        </>
       }
     >
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
@@ -797,6 +839,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <Metric label="Pace" value={formatPace(item.avgPaceSPKM)} />
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
       </section>
+
+      {mediaItems.length > 0 ? (
+        <ActivityMediaPanel activity={item} uploading={uploadMedia.isPending} uploadError={uploadMedia.error} />
+      ) : (
+        Boolean(uploadMedia.error) && <div className="error">{uploadMedia.error instanceof Error ? uploadMedia.error.message : "Upload failed"}</div>
+      )}
 
       {routePoints.length > 1 && (
         <section className="panel">
@@ -844,6 +892,200 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
     </Page>
+  );
+}
+
+function ActivityMediaUploadAction({
+  inputKey,
+  uploading,
+  onFilesSelected
+}: {
+  inputKey: number;
+  uploading: boolean;
+  onFilesSelected: (files: File[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <>
+      <button className="secondary-button" type="button" disabled={uploading} onClick={() => inputRef.current?.click()}>
+        <Upload size={16} />
+        {uploading ? "Uploading" : "Add photos"}
+      </button>
+      <input
+        key={inputKey}
+        ref={inputRef}
+        className="media-hidden-input"
+        type="file"
+        accept="image/jpeg,image/png"
+        multiple
+        disabled={uploading}
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.currentTarget.value = "";
+          onFilesSelected(files);
+        }}
+      />
+    </>
+  );
+}
+
+function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Activity; uploading: boolean; uploadError: unknown }) {
+  const queryClient = useQueryClient();
+  const media = activity.media ?? [];
+  const [previewMediaId, setPreviewMediaId] = useState<string>();
+  const previewMedia = media.find((item) => item.id === previewMediaId);
+  const previewMediaIndex = previewMediaId ? media.findIndex((item) => item.id === previewMediaId) : -1;
+  const previousMedia = previewMediaIndex > 0 ? media[previewMediaIndex - 1] : undefined;
+  const nextMedia = previewMediaIndex >= 0 && previewMediaIndex < media.length - 1 ? media[previewMediaIndex + 1] : undefined;
+  const deleteMedia = useMutation({
+    mutationFn: (mediaId: string) => api.deleteActivityMedia(activity.id, mediaId),
+    onSuccess: (_result, mediaId) => {
+      queryClient.setQueryData<{ activity: Activity }>(["activity", activity.id], (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          activity: {
+            ...current.activity,
+            media: (current.activity.media ?? []).filter((item) => item.id !== mediaId)
+          }
+        };
+      });
+    }
+  });
+  const mediaCountLabel = media.length === 1 ? "1 photo" : `${media.length} photos`;
+  const handleDeleteMedia = (item: ActivityMedia) => {
+    deleteMedia.reset();
+    if (window.confirm(`Delete "${item.originalFilename}" from this activity?`)) {
+      if (previewMediaId === item.id) {
+        const itemIndex = media.findIndex((candidate) => candidate.id === item.id);
+        const replacement = media[itemIndex + 1] ?? media[itemIndex - 1];
+        setPreviewMediaId(replacement?.id);
+      }
+      deleteMedia.mutate(item.id);
+    }
+  };
+
+  return (
+    <section className="panel media-panel">
+      <div className="media-panel-header">
+        <div className="panel-heading">Media</div>
+        <span className="media-count">{mediaCountLabel}</span>
+      </div>
+
+      {uploading && <div className="media-upload-status"><Upload size={16} /> Uploading photos</div>}
+      {Boolean(uploadError) && <div className="error">{uploadError instanceof Error ? uploadError.message : "Upload failed"}</div>}
+      {deleteMedia.error && <div className="error">{deleteMedia.error instanceof Error ? deleteMedia.error.message : "Delete failed"}</div>}
+
+      {media.length > 0 ? (
+        <div className="media-grid">
+          {media.map((item) => (
+            <button className="media-thumb-button" key={item.id} type="button" aria-label={`Open ${item.originalFilename}`} onClick={() => setPreviewMediaId(item.id)}>
+              <img src={activityMediaThumbnailURL(item.id)} alt={item.originalFilename} loading="lazy" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No photos attached" />
+      )}
+
+      {previewMedia && (
+        <ActivityMediaPreview
+          media={previewMedia}
+          deleting={deleteMedia.isPending}
+          onClose={() => setPreviewMediaId(undefined)}
+          onDelete={() => handleDeleteMedia(previewMedia)}
+          onPrevious={previousMedia ? () => setPreviewMediaId(previousMedia.id) : undefined}
+          onNext={nextMedia ? () => setPreviewMediaId(nextMedia.id) : undefined}
+        />
+      )}
+    </section>
+  );
+}
+
+function ActivityMediaPreview({
+  media,
+  deleting,
+  onClose,
+  onDelete,
+  onPrevious,
+  onNext
+}: {
+  media: ActivityMedia;
+  deleting: boolean;
+  onClose: () => void;
+  onDelete: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key === "ArrowLeft" && onPrevious) {
+        event.preventDefault();
+        onPrevious();
+      }
+      if (event.key === "ArrowRight" && onNext) {
+        event.preventDefault();
+        onNext();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, onNext, onPrevious]);
+
+  return (
+    <div
+      className="dialog-backdrop media-preview-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="filter-dialog media-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-media-preview-title">
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Media</div>
+            <h2 id="activity-media-preview-title">{media.originalFilename}</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close media preview" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="media-preview-stage">
+          <button className="icon-button media-preview-nav" type="button" aria-label="Previous photo" disabled={!onPrevious} onClick={onPrevious}>
+            <ChevronLeft size={20} />
+          </button>
+          <div className="media-preview-image">
+            <img src={activityMediaOriginalURL(media.id)} alt={media.originalFilename} />
+          </div>
+          <button className="icon-button media-preview-nav" type="button" aria-label="Next photo" disabled={!onNext} onClick={onNext}>
+            <ChevronRight size={20} />
+          </button>
+        </div>
+        <div className="media-preview-meta">
+          <span>{formatActivityMediaMeta(media)}</span>
+          {hasMediaLocation(media) && <span>{formatMediaLocation(media)}</span>}
+        </div>
+
+        <div className="dialog-actions">
+          <a className="secondary-button" href={activityMediaOriginalURL(media.id)} target="_blank" rel="noreferrer">
+            <ExternalLink size={16} />
+            Open original
+          </a>
+          <button className="danger-button" type="button" disabled={deleting} onClick={onDelete}>
+            <Trash2 size={16} />
+            Delete
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1901,6 +2143,65 @@ function decodePolyline(encoded: string): RoutePoint[] {
     coordinates.push([lat / 1e5, lng / 1e5]);
   }
   return coordinates;
+}
+
+function activityMediaThumbnailURL(mediaId: string) {
+  return `/api/activity-media/${encodeURIComponent(mediaId)}/thumbnail`;
+}
+
+function activityMediaOriginalURL(mediaId: string) {
+  return `/api/activity-media/${encodeURIComponent(mediaId)}/original`;
+}
+
+function mergeActivityMedia(current: ActivityMedia[], uploaded: ActivityMedia[]) {
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of uploaded) {
+    byId.set(item.id, item);
+  }
+  return Array.from(byId.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function formatActivityMediaMeta(media: ActivityMedia) {
+  const parts: string[] = [];
+  if (media.width > 0 && media.height > 0) {
+    parts.push(`${media.width} x ${media.height}`);
+  }
+  parts.push(formatFileSize(media.sizeBytes));
+  if (media.captureTime) {
+    parts.push(formatDate(media.captureTime));
+  }
+  if (hasMediaLocation(media)) {
+    parts.push("GPS");
+  }
+  return parts.join(" · ");
+}
+
+function hasMediaLocation(media: ActivityMedia) {
+  return typeof media.latitude === "number" && Number.isFinite(media.latitude) && typeof media.longitude === "number" && Number.isFinite(media.longitude);
+}
+
+function formatMediaLocation(media: ActivityMedia) {
+  const latitude = media.latitude;
+  const longitude = media.longitude;
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return "";
+  }
+  return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const precision = unitIndex === 0 || size >= 10 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
 }
 
 function LoadingRow() {
