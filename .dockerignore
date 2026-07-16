@@ -1,0 +1,8 @@
+.git
+.env
+tmp
+coverage
+web/node_modules
+web/dist
+*.log
+
