@@ -169,6 +169,46 @@ select {
   min-width: 0;
 }
 
+.chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.chart-header .panel-heading {
+  margin-bottom: 0;
+}
+
+.chart-toggle-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chart-toggle {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #cbd6d0;
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chart-toggle.active {
+  color: #ffffff;
+}
+
+.chart-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -378,6 +418,46 @@ select {
 .route-map {
   width: 100%;
   height: 100%;
+}
+
+.route-endpoint-marker-icon,
+.route-highlight-marker-icon {
+  border: 0;
+  background: transparent;
+}
+
+.route-endpoint-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(20, 28, 26, 0.28);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.route-endpoint-marker.start {
+  background: #2f8f83;
+}
+
+.route-endpoint-marker.end {
+  background: #c84d4d;
+}
+
+.route-highlight-marker {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(20, 28, 26, 0.32);
+  background: #202927;
 }
 
 .login-page {

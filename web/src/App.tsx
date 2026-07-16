@@ -3,13 +3,35 @@ import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity as ActivityIcon, BarChart3, Database, LogOut, Map, Trash2, Upload } from "lucide-react";
-import { MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
+import { divIcon } from "leaflet";
+import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
 import type { Activity, ActivitySample, ActivitySortBy, ActivitySortOrder, ActivityTypeFilters, AppConfig } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityTypeFiltersValue = ActivityTypeFilters;
+type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
+type ActivityChartPoint = {
+  index: number;
+  label: string;
+  distanceM?: number;
+  latitude?: number;
+  longitude?: number;
+  elevationM?: number;
+  heartRate?: number;
+  paceSPKM?: number;
+  rawPaceSPKM?: number;
+  power?: number;
+  cadence?: number;
+};
+type ActivityChartSeries = {
+  key: ActivityChartSeriesKey;
+  label: string;
+  color: string;
+  defaultVisible: boolean;
+  format: (value: number) => string;
+};
 
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
   sports: [],
@@ -20,6 +42,16 @@ const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
   sortBy: "date",
   sortOrder: "desc"
 };
+const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
+const ELEVATION_SMOOTHING_RADIUS_M = 150;
+const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
+const activityChartSeries: ActivityChartSeries[] = [
+  { key: "elevationM", label: "Elevation", color: "#4664c9", defaultVisible: true, format: (value) => `${Math.round(value).toLocaleString()} m` },
+  { key: "heartRate", label: "Heart rate", color: "#c84d4d", defaultVisible: true, format: (value) => `${Math.round(value)} bpm` },
+  { key: "paceSPKM", label: "Pace", color: "#2f8f83", defaultVisible: true, format: (value) => formatPace(value) },
+  { key: "power", label: "Power", color: "#b7791f", defaultVisible: false, format: (value) => `${Math.round(value)} W` },
+  { key: "cadence", label: "Cadence", color: "#7a4eb2", defaultVisible: false, format: (value) => `${Math.round(value)} spm` }
+];
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -381,6 +413,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       navigate("/activities");
     }
   });
+  const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
+
+  useEffect(() => {
+    setHighlightedSample(undefined);
+  }, [id]);
 
   if (activity.isLoading) {
     return <Page title="Activity"><LoadingRow /></Page>;
@@ -392,6 +429,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const item = activity.data.activity;
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
+  const highlightedPoint = routePointForChartPoint(highlightedSample);
   const handleDelete = () => {
     if (window.confirm(`Delete "${item.name}" from Runnarr?`)) {
       deleteActivity.mutate(item.id);
@@ -420,14 +458,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {routePoints.length > 1 && (
         <section className="panel">
           <div className="panel-heading">Route</div>
-          <ActivityMap points={routePoints} tileURL={config?.mapTileURL} />
+          <ActivityMap points={routePoints} tileURL={config?.mapTileURL} highlightedPoint={highlightedPoint} />
         </section>
       )}
 
-      <section className="split-layout">
-        <ChartPanel title="Elevation" data={chartData} dataKey="elevationM" unit="m" color="#4664c9" />
-        <ChartPanel title="Heart rate" data={chartData} dataKey="heartRate" unit="bpm" color="#c84d4d" />
-      </section>
+      <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
 
       {item.laps && item.laps.length > 0 && (
         <section className="panel">
@@ -540,20 +575,81 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ChartPanel({ title, data, dataKey, unit, color }: { title: string; data: Array<Record<string, number | string | undefined>>; dataKey: string; unit: string; color: string }) {
-  const hasData = data.some((item) => typeof item[dataKey] === "number");
+function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint[]; onHighlight: (point?: ActivityChartPoint) => void }) {
+  const availableSeries = activityChartSeries.filter((series) => data.some((item) => typeof item[series.key] === "number"));
+  const defaultVisible = availableSeries.filter((series) => series.defaultVisible).map((series) => series.key);
+  const initialVisible = defaultVisible.length > 0 ? defaultVisible : availableSeries.slice(0, 1).map((series) => series.key);
+  const [visibleSeries, setVisibleSeries] = useState<ActivityChartSeriesKey[]>(initialVisible);
+  const activeSeries = availableSeries.filter((series) => visibleSeries.includes(series.key));
+  const toggleSeries = (key: ActivityChartSeriesKey) => {
+    setVisibleSeries((current) => {
+      if (current.includes(key)) {
+        return current.length === 1 ? current : current.filter((item) => item !== key);
+      }
+      return [...current, key];
+    });
+  };
+
   return (
     <section className="panel">
-      <div className="panel-heading">{title}</div>
-      {hasData ? (
+      <div className="chart-header">
+        <div className="panel-heading">Activity graph</div>
+        {availableSeries.length > 0 && (
+          <div className="chart-toggle-list">
+            {availableSeries.map((series) => {
+              const active = visibleSeries.includes(series.key);
+              return (
+                <button
+                  key={series.key}
+                  className={`chart-toggle ${active ? "active" : ""}`}
+                  type="button"
+                  style={active ? { borderColor: series.color, backgroundColor: series.color } : { borderColor: series.color, color: series.color }}
+                  aria-pressed={active}
+                  disabled={active && visibleSeries.length === 1}
+                  onClick={() => toggleSeries(series.key)}
+                >
+                  {series.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {activeSeries.length > 0 ? (
         <div className="chart-area">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data}>
+            <LineChart
+              data={data}
+              onMouseMove={(state) => onHighlight(chartPointFromMouseState(state, data))}
+              onMouseLeave={() => onHighlight(undefined)}
+            >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" minTickGap={26} />
-              <YAxis width={42} />
-              <Tooltip formatter={(value) => [`${value} ${unit}`, title]} />
-              <Line type="monotone" dataKey={dataKey} stroke={color} dot={false} strokeWidth={2} connectNulls />
+              {activeSeries.map((series, index) => (
+                <YAxis
+                  key={series.key}
+                  yAxisId={series.key}
+                  orientation={index === 0 ? "left" : "right"}
+                  width={series.key === "paceSPKM" ? 58 : 46}
+                  domain={["auto", "auto"]}
+                  reversed={series.key === "paceSPKM"}
+                  tickFormatter={(value) => formatChartTick(Number(value), series)}
+                />
+              ))}
+              <Tooltip formatter={(value, name, item) => formatChartTooltip(value, String(name), activeSeries, item)} />
+              {activeSeries.map((series) => (
+                <Line
+                  key={series.key}
+                  type={series.key === "elevationM" ? "basis" : "monotone"}
+                  dataKey={series.key}
+                  name={series.label}
+                  yAxisId={series.key}
+                  stroke={series.color}
+                  dot={false}
+                  strokeWidth={2}
+                  connectNulls
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -564,13 +660,18 @@ function ChartPanel({ title, data, dataKey, unit, color }: { title: string; data
   );
 }
 
-function ActivityMap({ points, tileURL }: { points: RoutePoint[]; tileURL?: string }) {
+function ActivityMap({ points, tileURL, highlightedPoint }: { points: RoutePoint[]; tileURL?: string; highlightedPoint?: RoutePoint }) {
   const center = points[0] ?? [53.3498, -6.2603];
+  const start = points[0];
+  const end = points.length > 1 ? points[points.length - 1] : undefined;
   return (
     <div className="map-frame">
-      <MapContainer center={center} zoom={13} scrollWheelZoom={false} className="route-map">
+      <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
         <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
         <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />
+        {start && <Marker position={start} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
+        {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
+        {highlightedPoint && <Marker position={highlightedPoint} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
         <FitRoute points={points} />
       </MapContainer>
     </div>
@@ -587,6 +688,25 @@ function FitRoute({ points }: { points: RoutePoint[] }) {
   return null;
 }
 
+function routeEndpointIcon(kind: "start" | "end") {
+  const label = kind === "start" ? "Start" : "End";
+  return divIcon({
+    className: "route-endpoint-marker-icon",
+    html: `<span class="route-endpoint-marker ${kind}">${label}</span>`,
+    iconSize: [56, 26],
+    iconAnchor: [28, 13]
+  });
+}
+
+function routeHighlightIcon() {
+  return divIcon({
+    className: "route-highlight-marker-icon",
+    html: `<span class="route-highlight-marker"></span>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
+  });
+}
+
 function routeForActivity(activity: Activity): RoutePoint[] {
   const samplePoints = (activity.samples ?? [])
     .filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number")
@@ -600,12 +720,161 @@ function routeForActivity(activity: Activity): RoutePoint[] {
   return [];
 }
 
-function chartDataFor(samples: ActivitySample[]) {
-  return samples.map((sample, index) => ({
-    label: sample.distanceM !== undefined ? `${(sample.distanceM / 1000).toFixed(1)} km` : String(index + 1),
-    elevationM: sample.elevationM !== undefined ? Math.round(sample.elevationM) : undefined,
-    heartRate: sample.heartRate
-  }));
+function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
+  const points = samples.map((sample, index) => {
+    const rawPaceSPKM = sample.speedMPS && sample.speedMPS > 0 ? 1000 / sample.speedMPS : undefined;
+    return {
+      index: sample.index ?? index,
+      label: sample.distanceM !== undefined ? `${(sample.distanceM / 1000).toFixed(1)} km` : String(index + 1),
+      distanceM: typeof sample.distanceM === "number" ? sample.distanceM : undefined,
+      latitude: typeof sample.latitude === "number" ? sample.latitude : undefined,
+      longitude: typeof sample.longitude === "number" ? sample.longitude : undefined,
+      elevationM: typeof sample.elevationM === "number" ? sample.elevationM : undefined,
+      heartRate: sample.heartRate,
+      paceSPKM: rawPaceSPKM !== undefined ? Math.min(rawPaceSPKM, PACE_GRAPH_SLOW_CAP_S_PER_KM) : undefined,
+      rawPaceSPKM,
+      power: sample.power,
+      cadence: sample.cadence
+    };
+  });
+  return smoothElevationSeries(points);
+}
+
+function routePointForChartPoint(point?: ActivityChartPoint): RoutePoint | undefined {
+  if (typeof point?.latitude === "number" && Number.isFinite(point.latitude) && typeof point.longitude === "number" && Number.isFinite(point.longitude)) {
+    return [point.latitude, point.longitude];
+  }
+  return undefined;
+}
+
+function smoothElevationSeries(points: ActivityChartPoint[]): ActivityChartPoint[] {
+  if (points.length < 3 || !points.some((point) => typeof point.elevationM === "number")) {
+    return points;
+  }
+  if (hasMonotonicDistances(points)) {
+    return smoothElevationByDistance(points);
+  }
+  return smoothElevationBySampleWindow(points);
+}
+
+function hasMonotonicDistances(points: ActivityChartPoint[]) {
+  let previousDistance = -Infinity;
+  let seenDistance = false;
+  for (const point of points) {
+    if (typeof point.distanceM !== "number" || !Number.isFinite(point.distanceM)) {
+      return false;
+    }
+    if (point.distanceM < previousDistance) {
+      return false;
+    }
+    previousDistance = point.distanceM;
+    seenDistance = true;
+  }
+  return seenDistance;
+}
+
+function smoothElevationByDistance(points: ActivityChartPoint[]) {
+  let left = 0;
+  let right = 0;
+  let sum = 0;
+  let count = 0;
+  return points.map((point) => {
+    const center = point.distanceM!;
+    while (right < points.length) {
+      const rightPoint = points[right];
+      if (!rightPoint || rightPoint.distanceM! > center + ELEVATION_SMOOTHING_RADIUS_M) {
+        break;
+      }
+      if (typeof rightPoint.elevationM === "number") {
+        sum += rightPoint.elevationM;
+        count++;
+      }
+      right++;
+    }
+    while (left < points.length) {
+      const leftPoint = points[left];
+      if (!leftPoint || leftPoint.distanceM! >= center - ELEVATION_SMOOTHING_RADIUS_M) {
+        break;
+      }
+      if (typeof leftPoint.elevationM === "number") {
+        sum -= leftPoint.elevationM;
+        count--;
+      }
+      left++;
+    }
+    if (typeof point.elevationM !== "number" || count === 0) {
+      return point;
+    }
+    return { ...point, elevationM: sum / count };
+  });
+}
+
+function smoothElevationBySampleWindow(points: ActivityChartPoint[]) {
+  return points.map((point, index) => {
+    if (typeof point.elevationM !== "number") {
+      return point;
+    }
+    let sum = 0;
+    let count = 0;
+    const start = Math.max(0, index - ELEVATION_SMOOTHING_SAMPLE_RADIUS);
+    const end = Math.min(points.length - 1, index + ELEVATION_SMOOTHING_SAMPLE_RADIUS);
+    for (let i = start; i <= end; i++) {
+      const sample = points[i];
+      if (typeof sample?.elevationM === "number") {
+        sum += sample.elevationM;
+        count++;
+      }
+    }
+    return count > 0 ? { ...point, elevationM: sum / count } : point;
+  });
+}
+
+function chartPointFromMouseState(state: unknown, data: ActivityChartPoint[]): ActivityChartPoint | undefined {
+  if (!state || typeof state !== "object" || !("activeTooltipIndex" in state)) {
+    return undefined;
+  }
+  const tooltipIndex = (state as { activeTooltipIndex?: unknown }).activeTooltipIndex;
+  const index = typeof tooltipIndex === "number" ? tooltipIndex : typeof tooltipIndex === "string" ? Number(tooltipIndex) : NaN;
+  if (!Number.isInteger(index) || index < 0 || index >= data.length) {
+    return undefined;
+  }
+  return data[index];
+}
+
+function formatChartTick(value: number, series: ActivityChartSeries) {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  if (series.key === "paceSPKM") {
+    const minutes = Math.floor(value / 60);
+    const seconds = Math.round(value % 60);
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+  return String(Math.round(value));
+}
+
+function formatChartTooltip(value: unknown, name: string, seriesList: ActivityChartSeries[], item?: unknown) {
+  const series = seriesList.find((item) => item.label === name);
+  const numericValue = typeof value === "number" ? value : Number(value);
+  if (!series || !Number.isFinite(numericValue)) {
+    return [String(value), name];
+  }
+  const rawPace = series.key === "paceSPKM" ? chartPayloadNumber(item, "rawPaceSPKM") : undefined;
+  return [series.format(rawPace ?? numericValue), name];
+}
+
+function chartPayloadNumber(item: unknown, key: keyof ActivityChartPoint) {
+  const payload = chartPayload(item);
+  const value = payload?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function chartPayload(item: unknown): Partial<Record<keyof ActivityChartPoint, unknown>> | undefined {
+  if (!item || typeof item !== "object" || !("payload" in item)) {
+    return undefined;
+  }
+  const payload = (item as { payload?: Partial<Record<keyof ActivityChartPoint, unknown>> }).payload;
+  return payload && typeof payload === "object" ? payload : undefined;
 }
 
 function decodePolyline(encoded: string): RoutePoint[] {
