@@ -49,6 +49,19 @@ export type Activity = {
   createdAt: string;
 };
 
+export type ActivitySortBy = "date" | "duration" | "distance" | "elevation_gain" | "avg_pace";
+export type ActivitySortOrder = "asc" | "desc";
+
+export type ActivityTypeFilters = {
+  sports: string[];
+  excludeSports: string[];
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: ActivitySortBy;
+  sortOrder?: ActivitySortOrder;
+};
+
 export type SummaryStats = {
   activityCount: number;
   distanceM: number;

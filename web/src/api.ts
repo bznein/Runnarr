@@ -1,4 +1,4 @@
-import type { Activity, AppConfig, ImportFile, Session, SummaryStats } from "./types";
+import type { Activity, ActivityTypeFilters, AppConfig, ImportFile, Session, SummaryStats } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -13,6 +13,32 @@ let csrfToken = "";
 
 export function setCsrfToken(value?: string) {
   csrfToken = value ?? "";
+}
+
+function activityFilterQuery(filters?: ActivityTypeFilters) {
+  const params = new URLSearchParams();
+  for (const sport of filters?.sports ?? []) {
+    params.append("sport", sport);
+  }
+  for (const sport of filters?.excludeSports ?? []) {
+    params.append("excludeSport", sport);
+  }
+  if (filters?.search?.trim()) {
+    params.set("search", filters.search.trim());
+  }
+  if (filters?.dateFrom) {
+    params.set("dateFrom", filters.dateFrom);
+  }
+  if (filters?.dateTo) {
+    params.set("dateTo", filters.dateTo);
+  }
+  if (filters?.sortBy) {
+    params.set("sortBy", filters.sortBy);
+  }
+  if (filters?.sortOrder) {
+    params.set("sortOrder", filters.sortOrder);
+  }
+  return params.toString();
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -44,9 +70,14 @@ export const api = {
     }),
   logout: () => request<Session>("/api/session/logout", { method: "POST" }),
   config: () => request<AppConfig>("/api/config"),
-  summary: () => request<SummaryStats>("/api/stats/summary"),
-  activities: () => request<{ activities: Activity[] | null }>("/api/activities?limit=100"),
+  summary: (filters?: ActivityTypeFilters) => request<SummaryStats>(`/api/stats/summary?${activityFilterQuery(filters)}`),
+  activities: (filters?: ActivityTypeFilters) => {
+    const filtersQuery = activityFilterQuery(filters);
+    return request<{ activities: Activity[] | null }>(`/api/activities?limit=100${filtersQuery ? `&${filtersQuery}` : ""}`);
+  },
+  activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  deleteActivity: (id: string) => request<{ deleted: boolean }>(`/api/activities/${id}`, { method: "DELETE" }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
   upload: (file: File) => {
     const body = new FormData();

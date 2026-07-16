@@ -2,13 +2,24 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, BarChart3, Database, LogOut, Map, Upload } from "lucide-react";
+import { Activity as ActivityIcon, BarChart3, Database, LogOut, Map, Trash2, Upload } from "lucide-react";
 import { MapContainer, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivitySample, AppConfig } from "./types";
+import type { Activity, ActivitySample, ActivitySortBy, ActivitySortOrder, ActivityTypeFilters, AppConfig } from "./types";
 
 type RoutePoint = [number, number];
+type ActivityTypeFiltersValue = ActivityTypeFilters;
+
+const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
+  sports: [],
+  excludeSports: [],
+  search: "",
+  dateFrom: "",
+  dateTo: "",
+  sortBy: "date",
+  sortOrder: "desc"
+};
 
 export function App() {
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -127,7 +138,7 @@ function LoginPage() {
 }
 
 function Dashboard() {
-  const summary = useQuery({ queryKey: ["summary"], queryFn: api.summary });
+  const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.summary() });
 
   if (summary.isLoading) {
     return <Page title="Dashboard"><LoadingRow /></Page>;
@@ -176,17 +187,137 @@ function Dashboard() {
 }
 
 function ActivitiesPage() {
-  const activities = useQuery({ queryKey: ["activities"], queryFn: api.activities });
+  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
+  const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
+  const queryClient = useQueryClient();
+  const deleteActivity = useMutation({
+    mutationFn: api.deleteActivity,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-types"] })
+      ]);
+    }
+  });
+  const handleDelete = (activity: Activity) => {
+    if (window.confirm(`Delete "${activity.name}" from Runnarr?`)) {
+      deleteActivity.mutate(activity.id);
+    }
+  };
   return (
     <Page title="Activities">
+      <ActivityControls
+        activityTypes={activityTypes.data?.activityTypes ?? []}
+        filters={filters}
+        onChange={setFilters}
+      />
       {activities.isLoading && <LoadingRow />}
-      {activities.data && <ActivityTable activities={activities.data.activities ?? []} />}
+      {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
+      {activities.data && <ActivityTable activities={activities.data.activities ?? []} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
       {(activities.data?.activities ?? []).length === 0 && <EmptyState title="No activities yet" action={<Link className="secondary-button" to="/imports">Import a file</Link>} />}
     </Page>
   );
 }
 
-function ActivityTable({ activities, compact = false }: { activities: Activity[]; compact?: boolean }) {
+function ActivityControls({
+  activityTypes,
+  filters,
+  onChange
+}: {
+  activityTypes: string[];
+  filters: ActivityTypeFiltersValue;
+  onChange: (filters: ActivityTypeFiltersValue) => void;
+}) {
+  const includeSet = new Set(filters.sports);
+  const excludeSet = new Set(filters.excludeSports);
+  const clearFilters = () => onChange(emptyActivityTypeFilters);
+  const update = (partial: Partial<ActivityTypeFiltersValue>) => onChange({ ...filters, ...partial });
+  const toggleInclude = (sport: string) => {
+    const sports = includeSet.has(sport) ? filters.sports.filter((item) => item !== sport) : [...filters.sports, sport];
+    onChange({ ...filters, sports, excludeSports: filters.excludeSports.filter((item) => item !== sport) });
+  };
+  const toggleExclude = (sport: string) => {
+    const excludeSports = excludeSet.has(sport) ? filters.excludeSports.filter((item) => item !== sport) : [...filters.excludeSports, sport];
+    onChange({ ...filters, sports: filters.sports.filter((item) => item !== sport), excludeSports });
+  };
+
+  return (
+    <section className="panel activity-controls">
+      <div className="control-grid">
+        <label className="field">
+          <span>Search</span>
+          <input value={filters.search ?? ""} onChange={(event) => update({ search: event.target.value })} placeholder="Activity name" />
+        </label>
+        <label className="field">
+          <span>From</span>
+          <input type="date" value={filters.dateFrom ?? ""} onChange={(event) => update({ dateFrom: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>To</span>
+          <input type="date" value={filters.dateTo ?? ""} onChange={(event) => update({ dateTo: event.target.value })} />
+        </label>
+        <label className="field">
+          <span>Sort</span>
+          <select value={filters.sortBy ?? "date"} onChange={(event) => update({ sortBy: event.target.value as ActivitySortBy })}>
+            <option value="date">Date</option>
+            <option value="distance">Distance</option>
+            <option value="duration">Duration</option>
+            <option value="elevation_gain">Elevation</option>
+            <option value="avg_pace">Pace</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Direction</span>
+          <select value={filters.sortOrder ?? "desc"} onChange={(event) => update({ sortOrder: event.target.value as ActivitySortOrder })}>
+            <option value="desc">Descending</option>
+            <option value="asc">Ascending</option>
+          </select>
+        </label>
+      </div>
+      {activityTypes.length > 0 && (
+        <div className="filter-groups">
+          <div>
+            <div className="filter-label">Show only</div>
+            <div className="filter-chips">
+              {activityTypes.map((sport) => (
+                <button key={sport} className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`} type="button" onClick={() => toggleInclude(sport)}>
+                  {sport}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="filter-label">Exclude</div>
+            <div className="filter-chips">
+              {activityTypes.map((sport) => (
+                <button key={sport} className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`} type="button" onClick={() => toggleExclude(sport)}>
+                  {sport}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      <button className="secondary-button small-button" type="button" onClick={clearFilters}>
+        Clear
+      </button>
+    </section>
+  );
+}
+
+function ActivityTable({
+  activities,
+  compact = false,
+  onDelete,
+  deletingId
+}: {
+  activities: Activity[];
+  compact?: boolean;
+  onDelete?: (activity: Activity) => void;
+  deletingId?: string;
+}) {
   if (activities.length === 0) {
     return <EmptyState title="No activities found" />;
   }
@@ -201,6 +332,7 @@ function ActivityTable({ activities, compact = false }: { activities: Activity[]
             <th>Distance</th>
             <th>Time</th>
             {!compact && <th>Source</th>}
+            {onDelete && <th aria-label="Actions" />}
           </tr>
         </thead>
         <tbody>
@@ -212,6 +344,20 @@ function ActivityTable({ activities, compact = false }: { activities: Activity[]
               <td>{formatDistance(activity.distanceM)}</td>
               <td>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</td>
               {!compact && <td><span className="source-pill">{activity.source}</span></td>}
+              {onDelete && (
+                <td className="row-actions">
+                  <button
+                    className="icon-button danger"
+                    type="button"
+                    title="Delete activity"
+                    aria-label={`Delete ${activity.name}`}
+                    disabled={deletingId === activity.id}
+                    onClick={() => onDelete(activity)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -222,7 +368,19 @@ function ActivityTable({ activities, compact = false }: { activities: Activity[]
 
 function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const activity = useQuery({ queryKey: ["activity", id], queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const deleteActivity = useMutation({
+    mutationFn: api.deleteActivity,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+      navigate("/activities");
+    }
+  });
 
   if (activity.isLoading) {
     return <Page title="Activity"><LoadingRow /></Page>;
@@ -234,9 +392,24 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const item = activity.data.activity;
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
+  const handleDelete = () => {
+    if (window.confirm(`Delete "${item.name}" from Runnarr?`)) {
+      deleteActivity.mutate(item.id);
+    }
+  };
 
   return (
-    <Page title={item.name} eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}>
+    <Page
+      title={item.name}
+      eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}
+      actions={
+        <button className="danger-button" type="button" disabled={deleteActivity.isPending} onClick={handleDelete}>
+          <Trash2 size={16} />
+          Delete
+        </button>
+      }
+    >
+      {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />

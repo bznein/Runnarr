@@ -671,7 +671,8 @@ func normalizeImported(activity *ImportedActivity) {
 
 func normalizeSport(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
-	switch value {
+	compact := strings.ReplaceAll(value, " ", "")
+	switch compact {
 	case "run", "running":
 		return "Run"
 	case "ride", "virtualride", "cycling", "biking", "bike":
@@ -682,6 +683,8 @@ func normalizeSport(value string) string {
 		return "Walk"
 	case "hike", "hiking":
 		return "Hike"
+	case "strength", "strengthtraining", "weighttraining", "weightlifting", "workout":
+		return "Strength"
 	case "":
 		return "Run"
 	default:

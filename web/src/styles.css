@@ -21,7 +21,8 @@ a {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -236,7 +237,9 @@ input {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button,
+.icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -260,7 +263,36 @@ input {
   background: #ffffff;
 }
 
+.danger-button {
+  border: 1px solid #b94335;
+  color: #ffffff;
+  background: #c84d4d;
+}
+
+.icon-button {
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid #cbd6d0;
+  border-radius: 6px;
+  color: #4d5753;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.icon-button.danger {
+  color: #a33b2e;
+}
+
+.icon-button.danger:hover {
+  border-color: #e7b2a8;
+  background: #fff1ee;
+}
+
 .primary-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled,
+.icon-button:disabled,
 .secondary-button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
@@ -272,6 +304,68 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.activity-controls {
+  display: grid;
+  gap: 16px;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.filter-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.filter-label {
+  margin-bottom: 8px;
+  color: #66706c;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #cbd6d0;
+  border-radius: 999px;
+  color: #3e4a46;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.filter-chip.active {
+  border-color: #236b63;
+  color: #ffffff;
+  background: #2f8f83;
+}
+
+.filter-chip.exclude.active {
+  border-color: #b94335;
+  background: #c84d4d;
+}
+
+.small-button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.row-actions {
+  width: 1%;
+  text-align: right;
 }
 
 .map-frame {
@@ -313,6 +407,7 @@ input {
 }
 
 .field input,
+.field select,
 .upload-panel input {
   min-height: 40px;
   padding: 0 10px;
@@ -361,7 +456,9 @@ input {
   }
 
   .metric-grid,
-  .split-layout {
+  .split-layout,
+  .control-grid,
+  .filter-groups {
     grid-template-columns: 1fr;
   }
 
@@ -376,4 +473,3 @@ input {
     flex-direction: column;
   }
 }
-

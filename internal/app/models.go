@@ -59,6 +59,16 @@ type ImportedActivity struct {
 	Raw             map[string]any   `json:"raw,omitempty"`
 }
 
+type ActivityFilters struct {
+	SportTypes         []string
+	ExcludedSportTypes []string
+	Search             string
+	DateFrom           time.Time
+	DateTo             time.Time
+	SortBy             string
+	SortOrder          string
+}
+
 type ImportFile struct {
 	ID          string    `json:"id"`
 	Filename    string    `json:"filename"`

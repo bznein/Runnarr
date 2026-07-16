@@ -65,6 +65,8 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
 			r.Get("/activities/{id}", s.handleGetActivity)
+			r.Delete("/activities/{id}", s.handleDeleteActivity)
+			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/imports", s.handleListImports)
 			r.Post("/imports", s.handleImport)
@@ -140,13 +142,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	activities, err := s.store.ListActivities(r.Context(), limit, offset, r.URL.Query().Get("sport"))
+	activities, err := s.store.ListActivities(r.Context(), limit, offset, activityFiltersFromQuery(r))
 	if err != nil {
 		s.logger.Error("list activities", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not list activities")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activities": activities})
+}
+
+func (s *Server) handleActivityTypes(w http.ResponseWriter, r *http.Request) {
+	sports, err := s.store.ListSportTypes(r.Context())
+	if err != nil {
+		s.logger.Error("list activity types", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not list activity types")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activityTypes": sports})
 }
 
 func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
@@ -163,8 +175,22 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})
 }
 
+func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
+	err := s.store.DeleteActivity(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("delete activity", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not delete activity")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.store.Summary(r.Context())
+	stats, err := s.store.Summary(r.Context(), activityFiltersFromQuery(r))
 	if err != nil {
 		s.logger.Error("summary", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not load summary")
@@ -204,6 +230,49 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		"activity": activity,
 		"import":   importFile,
 	})
+}
+
+func activityFiltersFromQuery(r *http.Request) ActivityFilters {
+	values := r.URL.Query()
+	return ActivityFilters{
+		SportTypes:         compactQueryValues(values["sport"], values["sports"]),
+		ExcludedSportTypes: compactQueryValues(values["excludeSport"], values["excludeSports"]),
+		Search:             strings.TrimSpace(values.Get("search")),
+		DateFrom:           parseActivityFilterDate(values.Get("dateFrom")),
+		DateTo:             parseActivityFilterDate(values.Get("dateTo")),
+		SortBy:             strings.TrimSpace(values.Get("sortBy")),
+		SortOrder:          strings.TrimSpace(values.Get("sortOrder")),
+	}
+}
+
+func parseActivityFilterDate(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	date, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}
+	}
+	return date
+}
+
+func compactQueryValues(groups ...[]string) []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0)
+	for _, group := range groups {
+		for _, raw := range group {
+			for _, part := range strings.Split(raw, ",") {
+				value := strings.TrimSpace(part)
+				if value == "" || seen[value] {
+					continue
+				}
+				seen[value] = true
+				out = append(out, value)
+			}
+		}
+	}
+	return out
 }
 
 func (s *Server) requireSession(next http.Handler) http.Handler {
