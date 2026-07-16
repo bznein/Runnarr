@@ -44,12 +44,19 @@ type ClimbMapSegment = {
   points: RoutePoint[];
   start?: RoutePoint;
 };
+type PaceRouteSegment = {
+  points: RoutePoint[];
+  color: string;
+};
 
 const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
 const ACTIVITY_LIST_PAGE_SIZE = 100;
 const themePreferenceStorageKey = "runnarr-theme-preference";
 const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
+const PACE_ROUTE_COLORS = ["#2f6df6", "#168fd2", "#18a7a2", "#2f9e44", "#8fbf26", "#f6c432", "#f28c28", "#e85d35", "#cf3f35"];
+const PACE_ROUTE_LOW_PERCENTILE = 0.05;
+const PACE_ROUTE_HIGH_PERCENTILE = 0.95;
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
 const chartTooltipContentStyle: CSSProperties = {
@@ -878,6 +885,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
   const routePoints = routeForActivity(item);
+  const paceRouteSegments = paceRouteSegmentsForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
   const climbs = item.climbs ?? [];
@@ -886,6 +894,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimbProfile = climbProfileFor(item, selectedClimb);
   const showLapElevation = (item.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
   const showLapGap = (item.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  const handleSelectClimb = (climb: ActivityClimb) => {
+    setSelectedClimbIndex((current) => current === climb.index ? undefined : climb.index);
+  };
   const handleDelete = () => {
     setActionsOpen(false);
     if (window.confirm(deleteActivityConfirmation(item))) {
@@ -965,11 +976,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           <div className="panel-heading">Route</div>
           <ActivityMap
             points={routePoints}
+            paceSegments={paceRouteSegments}
             tileURL={config?.mapTileURL}
             highlightedPoint={highlightedPoint}
             climbSegments={climbMapSegments}
             selectedClimbIndex={selectedClimb?.index}
-            onSelectClimb={(climb) => setSelectedClimbIndex(climb.index)}
+            onSelectClimb={handleSelectClimb}
             mediaMarkers={locatedMedia}
             selectedMediaId={selectedMediaId}
             onSelectMedia={setSelectedMediaId}
@@ -982,7 +994,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           climbs={climbs}
           selectedClimb={selectedClimb}
           profileData={selectedClimbProfile}
-          onSelect={(climb) => setSelectedClimbIndex(climb.index)}
+          onSelect={handleSelectClimb}
         />
       )}
 
@@ -1970,6 +1982,7 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
 
 function ActivityMap({
   points,
+  paceSegments = [],
   tileURL,
   highlightedPoint,
   climbSegments = [],
@@ -1980,6 +1993,7 @@ function ActivityMap({
   onSelectMedia
 }: {
   points: RoutePoint[];
+  paceSegments?: PaceRouteSegment[];
   tileURL?: string;
   highlightedPoint?: RoutePoint;
   climbSegments?: ClimbMapSegment[];
@@ -1998,7 +2012,10 @@ function ActivityMap({
     <div className="map-frame">
       <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
         <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
-        {points.length > 1 && <Polyline pathOptions={{ color: "#d85c41", weight: 4 }} positions={points} />}
+        {points.length > 1 && <Polyline pathOptions={paceSegments.length > 0 ? { color: "#53635f", weight: 4, opacity: 0.18 } : { color: "#d85c41", weight: 4 }} positions={points} />}
+        {paceSegments.map((segment, index) => (
+          <Polyline key={`${index}-${segment.color}`} positions={segment.points} pathOptions={{ color: segment.color, weight: 6, opacity: 0.98 }} interactive={false} />
+        ))}
         <ActivityClimbMapSegments climbSegments={climbSegments} selectedClimbIndex={selectedClimbIndex} onSelectClimb={onSelectClimb} />
         {start && <Marker position={start} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
         {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
@@ -2006,6 +2023,17 @@ function ActivityMap({
         <ActivityMediaMapMarkers mediaMarkers={mediaMarkers} selectedMediaId={selectedMediaId} onSelectMedia={onSelectMedia} />
         <FitMapContent points={mapPoints} />
       </MapContainer>
+      {paceSegments.length > 0 && <ActivityPaceRouteLegend />}
+    </div>
+  );
+}
+
+function ActivityPaceRouteLegend() {
+  return (
+    <div className="pace-route-legend" aria-label="Route pace color legend">
+      <span>slowest</span>
+      <span className="pace-route-legend-gradient" style={{ background: `linear-gradient(to right, ${PACE_ROUTE_COLORS.join(", ")})` }} />
+      <span>fastest</span>
     </div>
   );
 }
@@ -2019,19 +2047,23 @@ function ActivityClimbMapSegments({
   selectedClimbIndex?: number;
   onSelectClimb?: (climb: ActivityClimb) => void;
 }) {
-  const unselectedSegments = climbSegments.filter((segment) => segment.climb.index !== selectedClimbIndex);
   const selectedSegment = climbSegments.find((segment) => segment.climb.index === selectedClimbIndex);
   return (
     <>
-      {unselectedSegments.map((segment) => (
-        <ClimbMapSegmentLayer key={segment.climb.index} segment={segment} selected={false} onSelectClimb={onSelectClimb} />
+      {climbSegments.map((segment) => (
+        <ClimbStartMarkerLayer
+          key={segment.climb.index}
+          segment={segment}
+          selected={segment.climb.index === selectedClimbIndex}
+          onSelectClimb={onSelectClimb}
+        />
       ))}
-      {selectedSegment && <ClimbMapSegmentLayer segment={selectedSegment} selected onSelectClimb={onSelectClimb} />}
+      {selectedSegment && <SelectedClimbMapSegmentLayer segment={selectedSegment} onSelectClimb={onSelectClimb} />}
     </>
   );
 }
 
-function ClimbMapSegmentLayer({
+function ClimbStartMarkerLayer({
   segment,
   selected,
   onSelectClimb
@@ -2041,25 +2073,37 @@ function ClimbMapSegmentLayer({
   onSelectClimb?: (climb: ActivityClimb) => void;
 }) {
   const eventHandlers = onSelectClimb ? { click: () => onSelectClimb(segment.climb) } : undefined;
+  if (!segment.start) {
+    return null;
+  }
   return (
-    <>
-      {segment.points.length > 1 && (
-        <Polyline
-          positions={segment.points}
-          pathOptions={selected ? { color: "#f6c432", weight: 8, opacity: 0.98 } : { color: "#2f8f83", weight: 6, opacity: 0.78 }}
-          eventHandlers={eventHandlers}
-        />
-      )}
-      {segment.start && (
-        <Marker
-          position={segment.start}
-          icon={climbStartMarkerIcon(selected)}
-          zIndexOffset={selected ? 1100 : 700}
-          title={`Climb ${segment.climb.index + 1}`}
-          eventHandlers={eventHandlers}
-        />
-      )}
-    </>
+    <Marker
+      position={segment.start}
+      icon={climbStartMarkerIcon(selected)}
+      zIndexOffset={selected ? 1100 : 700}
+      title={`Climb ${segment.climb.index + 1}`}
+      eventHandlers={eventHandlers}
+    />
+  );
+}
+
+function SelectedClimbMapSegmentLayer({
+  segment,
+  onSelectClimb
+}: {
+  segment: ClimbMapSegment;
+  onSelectClimb?: (climb: ActivityClimb) => void;
+}) {
+  const eventHandlers = onSelectClimb ? { click: () => onSelectClimb(segment.climb) } : undefined;
+  if (segment.points.length <= 1) {
+    return null;
+  }
+  return (
+    <Polyline
+      positions={segment.points}
+      pathOptions={{ color: "#f6c432", weight: 8, opacity: 0.98 }}
+      eventHandlers={eventHandlers}
+    />
   );
 }
 
@@ -2169,6 +2213,92 @@ function routeForActivity(activity: Activity): RoutePoint[] {
     return decodePolyline(activity.summaryPolyline);
   }
   return [];
+}
+
+function paceRouteSegmentsForActivity(activity: Activity): PaceRouteSegment[] {
+  const samples = (activity.samples ?? [])
+    .filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number")
+    .map((sample) => ({
+      point: [sample.latitude!, sample.longitude!] as RoutePoint,
+      speedMPS: typeof sample.speedMPS === "number" && Number.isFinite(sample.speedMPS) && sample.speedMPS > 0 ? sample.speedMPS : undefined
+    }));
+  if (samples.length < 2) {
+    return [];
+  }
+
+  const segments: Array<{ start: RoutePoint; end: RoutePoint; paceSPKM: number }> = [];
+  for (let index = 1; index < samples.length; index += 1) {
+    const paceSPKM = paceForRouteSegment(samples[index - 1].speedMPS, samples[index].speedMPS);
+    if (paceSPKM === undefined) {
+      continue;
+    }
+    segments.push({ start: samples[index - 1].point, end: samples[index].point, paceSPKM });
+  }
+  if (segments.length === 0) {
+    return [];
+  }
+
+  const scale = paceRouteScale(segments.map((segment) => segment.paceSPKM));
+  return segments.reduce<PaceRouteSegment[]>((grouped, segment) => {
+    const color = paceRouteColor(segment.paceSPKM, scale.minPace, scale.maxPace);
+    const previous = grouped[grouped.length - 1];
+    if (previous?.color === color && routePointsEqual(previous.points[previous.points.length - 1], segment.start)) {
+      previous.points.push(segment.end);
+      return grouped;
+    }
+    grouped.push({ color, points: [segment.start, segment.end] });
+    return grouped;
+  }, []);
+}
+
+function paceForRouteSegment(previousSpeedMPS?: number, currentSpeedMPS?: number) {
+  const speeds = [previousSpeedMPS, currentSpeedMPS].filter((speed): speed is number => typeof speed === "number" && speed > 0);
+  if (speeds.length === 0) {
+    return undefined;
+  }
+  const avgSpeedMPS = speeds.reduce((total, speed) => total + speed, 0) / speeds.length;
+  return Math.min(1000 / avgSpeedMPS, PACE_GRAPH_SLOW_CAP_S_PER_KM);
+}
+
+function paceRouteScale(pacesSPKM: number[]) {
+  const sorted = [...pacesSPKM].sort((left, right) => left - right);
+  const actualMin = sorted[0] ?? 0;
+  const actualMax = sorted[sorted.length - 1] ?? actualMin;
+  let minPace = routeQuantile(sorted, PACE_ROUTE_LOW_PERCENTILE);
+  let maxPace = routeQuantile(sorted, PACE_ROUTE_HIGH_PERCENTILE);
+  if (maxPace - minPace < 1 && actualMax - actualMin >= 1) {
+    minPace = actualMin;
+    maxPace = actualMax;
+  }
+  return { minPace, maxPace };
+}
+
+function routeQuantile(sortedValues: number[], quantile: number) {
+  if (sortedValues.length === 0) {
+    return 0;
+  }
+  const position = Math.max(0, Math.min(sortedValues.length - 1, quantile * (sortedValues.length - 1)));
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  if (lowerIndex === upperIndex) {
+    return sortedValues[lowerIndex];
+  }
+  const ratio = position - lowerIndex;
+  return sortedValues[lowerIndex] + (sortedValues[upperIndex] - sortedValues[lowerIndex]) * ratio;
+}
+
+function paceRouteColor(paceSPKM: number, minPace: number, maxPace: number) {
+  if (maxPace - minPace < 1) {
+    return PACE_ROUTE_COLORS[Math.floor(PACE_ROUTE_COLORS.length / 2)];
+  }
+  const clampedPace = Math.max(minPace, Math.min(maxPace, paceSPKM));
+  const normalized = (maxPace - clampedPace) / (maxPace - minPace);
+  const index = Math.max(0, Math.min(PACE_ROUTE_COLORS.length - 1, Math.round(normalized * (PACE_ROUTE_COLORS.length - 1))));
+  return PACE_ROUTE_COLORS[index];
+}
+
+function routePointsEqual(left?: RoutePoint, right?: RoutePoint) {
+  return Boolean(left && right && left[0] === right[0] && left[1] === right[1]);
 }
 
 function routeForClimb(activity: Activity, climb?: ActivityClimb): RoutePoint[] {
