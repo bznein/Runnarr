@@ -28,16 +28,19 @@ services:
       RUNNARR_ADMIN_PASSWORD_HASH: ${RUNNARR_ADMIN_PASSWORD_HASH:-}
       RUNNARR_SECRET_KEY: ${RUNNARR_SECRET_KEY:-change-this-to-a-long-random-secret-with-at-least-32-bytes}
       MAP_TILE_URL: ${MAP_TILE_URL:-https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png}
-      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
-      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
-      STRAVA_WEBHOOK_VERIFY_TOKEN: ${STRAVA_WEBHOOK_VERIFY_TOKEN:-}
+      RUNNARR_GARMIN_BRIDGE_PYTHON: ${RUNNARR_GARMIN_BRIDGE_PYTHON:-python3}
+      RUNNARR_GARMIN_BRIDGE_SCRIPT: ${RUNNARR_GARMIN_BRIDGE_SCRIPT:-/app/garmin_bridge.py}
+      RUNNARR_GARMIN_TOKEN_DIR: ${RUNNARR_GARMIN_TOKEN_DIR:-/app/data/garmin_tokens}
     ports:
       - "${RUNNARR_PORT:-37617}:8080"
+    volumes:
+      - app-data:/app/data
     networks:
       - runnarr
 
 volumes:
   postgres-data:
+  app-data:
 
 networks:
   runnarr:

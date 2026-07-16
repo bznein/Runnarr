@@ -1,4 +1,4 @@
-import type { Activity, ActivityTypeFilters, AppConfig, DeleteActivityResult, ImportFile, IntervalsStatus, Session, StravaStatus, SummaryStats, SyncJob } from "./types";
+import type { Activity, ActivityTypeFilters, AppConfig, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -87,16 +87,14 @@ export const api = {
       body
     });
   },
-  stravaStatus: () => request<StravaStatus>("/api/providers/strava/status"),
-  stravaSync: () => request<{ jobId: string; result: Record<string, unknown> }>("/api/providers/strava/sync", { method: "POST" }),
-  intervalsStatus: () => request<IntervalsStatus>("/api/providers/intervals/status"),
-  intervalsConnect: (apiKey: string) =>
-    request<{ connected: boolean; connection: IntervalsStatus["connection"] }>("/api/providers/intervals/connect", {
+  garminStatus: () => request<GarminStatus>("/api/providers/garmin/status"),
+  garminConnect: (body: { email: string; password: string; mfaCode?: string }) =>
+    request<{ connected: boolean; connection: GarminStatus["connection"] }>("/api/providers/garmin/connect", {
       method: "POST",
-      body: JSON.stringify({ apiKey })
+      body: JSON.stringify(body)
     }),
-  intervalsSync: (oldest: string) =>
-    request<{ jobId: string; status: string }>("/api/providers/intervals/sync", {
+  garminSync: (oldest: string) =>
+    request<{ jobId: string; status: string }>("/api/providers/garmin/sync", {
       method: "POST",
       body: JSON.stringify({ oldest })
     }),

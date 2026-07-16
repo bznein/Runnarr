@@ -775,6 +775,20 @@ input {
   background: #2f8f83;
 }
 
+.progress-bar.indeterminate span {
+  width: 42%;
+  animation: sync-progress-slide 1.15s ease-in-out infinite;
+}
+
+@keyframes sync-progress-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
 .map-frame {
   height: 440px;
   overflow: hidden;

@@ -5,7 +5,6 @@ export type Session = {
 
 export type AppConfig = {
   mapTileURL: string;
-  stravaConfigured: boolean;
   baseURL: string;
 };
 
@@ -28,6 +27,8 @@ export type ActivityLap = {
   startTime?: string;
   elapsedTimeS: number;
   distanceM: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
 };
 
 export type ActivityClimb = {
@@ -117,9 +118,7 @@ export type ProviderStatus = {
   };
 };
 
-export type StravaStatus = ProviderStatus;
-
-export type IntervalsStatus = ProviderStatus;
+export type GarminStatus = ProviderStatus;
 
 export type SyncJob = {
   id: string;

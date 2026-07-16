@@ -143,10 +143,8 @@ function deleteActivityConfirmation(activity: Activity) {
 
 function formatSourceName(source: string) {
   switch (source) {
-    case "intervals":
-      return "Intervals.icu";
-    case "strava":
-      return "Strava";
+    case "garmin":
+      return "Garmin Connect";
     case "file":
       return "manual upload";
     default:
@@ -738,6 +736,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimb = climbs[selectedClimbIndex] ?? climbs[0];
   const selectedClimbPoints = routeForClimb(item, selectedClimb);
   const selectedClimbProfile = climbProfileFor(item, selectedClimb);
+  const showLapElevation = (item.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
   const handleDelete = () => {
     if (window.confirm(deleteActivityConfirmation(item))) {
       deleteActivity.mutate(item.id);
@@ -790,6 +789,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                 <th>Lap</th>
                 <th>Distance</th>
                 <th>Time</th>
+                {showLapElevation && <th>Gain</th>}
+                {showLapElevation && <th>Loss</th>}
               </tr>
             </thead>
             <tbody>
@@ -798,6 +799,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                   <td>{lap.index + 1}</td>
                   <td>{formatDistance(lap.distanceM)}</td>
                   <td>{formatDuration(lap.elapsedTimeS)}</td>
+                  {showLapElevation && <td>{lap.elevationGainM !== undefined ? `${Math.round(lap.elevationGainM).toLocaleString()} m` : "-"}</td>}
+                  {showLapElevation && <td>{lap.elevationLossM !== undefined ? `${Math.round(lap.elevationLossM).toLocaleString()} m` : "-"}</td>}
                 </tr>
               ))}
             </tbody>
@@ -942,39 +945,30 @@ function ImportsPage() {
 
 function SettingsPage() {
   const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: ["strava-status"], queryFn: api.stravaStatus });
-  const intervalsStatus = useQuery({ queryKey: ["intervals-status"], queryFn: api.intervalsStatus });
+  const garminStatus = useQuery({ queryKey: ["garmin-status"], queryFn: api.garminStatus });
   const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
-  const [intervalsAPIKey, setIntervalsAPIKey] = useState("");
-  const [intervalsOldest, setIntervalsOldest] = useState("1970-01-01");
-  const latestIntervalsJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "intervals");
-  const intervalsSyncRunning = latestIntervalsJob?.status === "running";
-  const sync = useMutation({
-    mutationFn: api.stravaSync,
+  const [garminEmail, setGarminEmail] = useState("");
+  const [garminPassword, setGarminPassword] = useState("");
+  const [garminMFACode, setGarminMFACode] = useState("");
+  const [garminOldest, setGarminOldest] = useState("1970-01-01");
+  const latestGarminJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin");
+  const garminSyncRunning = latestGarminJob?.status === "running";
+  const garminConnect = useMutation({
+    mutationFn: api.garminConnect,
     onSuccess: async () => {
+      setGarminPassword("");
+      setGarminMFACode("");
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["strava-status"] }),
-        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
-        queryClient.invalidateQueries({ queryKey: ["activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["summary"] })
-      ]);
-    }
-  });
-  const intervalsConnect = useMutation({
-    mutationFn: api.intervalsConnect,
-    onSuccess: async () => {
-      setIntervalsAPIKey("");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["intervals-status"] }),
+        queryClient.invalidateQueries({ queryKey: ["garmin-status"] }),
         queryClient.invalidateQueries({ queryKey: ["sync-jobs"] })
       ]);
     }
   });
-  const intervalsSync = useMutation({
-    mutationFn: api.intervalsSync,
+  const garminSync = useMutation({
+    mutationFn: api.garminSync,
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["intervals-status"] }),
+        queryClient.invalidateQueries({ queryKey: ["garmin-status"] }),
         queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
         queryClient.invalidateQueries({ queryKey: ["activities"] }),
         queryClient.invalidateQueries({ queryKey: ["summary"] })
@@ -986,54 +980,46 @@ function SettingsPage() {
     <Page title="Providers">
       <section className="panel provider-panel">
         <div>
-          <div className="panel-heading">Strava</div>
-          {status.data?.configured ? (
-            <p className="muted">{status.data.connected ? `Connected as ${status.data.connection.displayName}` : "Configured but not connected."}</p>
-          ) : (
-            <p className="muted">Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET to enable OAuth.</p>
-          )}
-        </div>
-        <div className="actions">
-          <a className="secondary-button" href="/api/providers/strava/connect" aria-disabled={!status.data?.configured}>
-            <Cloud size={16} />
-            Connect
-          </a>
-          <button className="primary-button" type="button" disabled={!status.data?.connected || sync.isPending} onClick={() => sync.mutate()}>
-            <RefreshCw size={16} />
-            Sync
-          </button>
-        </div>
-      </section>
-      {sync.error && <div className="error">{sync.error instanceof Error ? sync.error.message : "Sync failed"}</div>}
-      <section className="panel provider-panel">
-        <div>
-          <div className="panel-heading">Intervals.icu</div>
-          <p className="muted">{intervalsStatus.data?.connected ? `Connected as ${intervalsStatus.data.connection.displayName}` : "Connect with a personal API key from Intervals.icu settings."}</p>
+          <div className="panel-heading">Garmin Connect</div>
+          <p className="muted">{garminStatus.data?.connected ? `Connected as ${garminStatus.data.connection.displayName}` : "Connect with your Garmin account. Credentials are used only to create Garmin Connect tokens."}</p>
         </div>
         <div className="provider-controls">
           <input
-            type="password"
-            placeholder="API key"
-            value={intervalsAPIKey}
-            onChange={(event) => setIntervalsAPIKey(event.target.value)}
+            type="email"
+            placeholder="Garmin email"
+            value={garminEmail}
+            onChange={(event) => setGarminEmail(event.target.value)}
           />
-          <button className="secondary-button" type="button" disabled={!intervalsAPIKey || intervalsConnect.isPending} onClick={() => intervalsConnect.mutate(intervalsAPIKey)}>
+          <input
+            type="password"
+            placeholder="Garmin password"
+            value={garminPassword}
+            onChange={(event) => setGarminPassword(event.target.value)}
+          />
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="MFA code"
+            value={garminMFACode}
+            onChange={(event) => setGarminMFACode(event.target.value)}
+          />
+          <button className="secondary-button" type="button" disabled={!garminEmail || !garminPassword || garminConnect.isPending} onClick={() => garminConnect.mutate({ email: garminEmail, password: garminPassword, mfaCode: garminMFACode })}>
             <Cloud size={16} />
             Connect
           </button>
           <label className="compact-field">
             <span>Oldest</span>
-            <input type="date" value={intervalsOldest} onChange={(event) => setIntervalsOldest(event.target.value)} />
+            <input type="date" value={garminOldest} onChange={(event) => setGarminOldest(event.target.value)} />
           </label>
-          <button className="primary-button" type="button" disabled={!intervalsStatus.data?.connected || intervalsSync.isPending || intervalsSyncRunning} onClick={() => intervalsSync.mutate(intervalsOldest)}>
+          <button className="primary-button" type="button" disabled={!garminStatus.data?.connected || garminSync.isPending || garminSyncRunning} onClick={() => garminSync.mutate(garminOldest)}>
             <RefreshCw size={16} />
-            {intervalsSyncRunning ? "Syncing" : "Sync"}
+            {garminSyncRunning ? "Syncing" : "Sync"}
           </button>
         </div>
       </section>
-      <SyncProgressCard job={latestIntervalsJob} />
-      {intervalsConnect.error && <div className="error">{intervalsConnect.error instanceof Error ? intervalsConnect.error.message : "Intervals.icu connection failed"}</div>}
-      {intervalsSync.error && <div className="error">{intervalsSync.error instanceof Error ? intervalsSync.error.message : "Intervals.icu sync failed"}</div>}
+      <SyncProgressCard job={latestGarminJob} />
+      {garminConnect.error && <div className="error">{garminConnect.error instanceof Error ? garminConnect.error.message : "Garmin connection failed"}</div>}
+      {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       <section className="panel">
         <div className="panel-heading">Sync jobs</div>
         {jobs.isLoading && <LoadingRow />}
@@ -1069,7 +1055,7 @@ function SettingsPage() {
 }
 
 function SyncProgressCard({ job }: { job?: SyncJob }) {
-  if (!job || job.provider !== "intervals") {
+  if (!job || job.provider !== "garmin") {
     return null;
   }
   const payload = job.payload ?? {};
@@ -1079,28 +1065,42 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   const failed = payloadNumber(payload, "failed");
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const stage = payloadText(payload, "stage") || job.status;
-  const currentWindowStart = payloadText(payload, "currentWindowStart");
-  const currentWindowEnd = payloadText(payload, "currentWindowEnd");
+  const listing = isSyncListingStage(stage);
+  const fetchedPages = payloadNumber(payload, "fetchedPages");
+  const oldest = payloadText(payload, "oldest");
+  const currentActivityName = payloadText(payload, "currentActivityName");
   const warnings = payloadList(payload, "warnings");
   const firstErrors = payloadList(payload, "firstErrors");
-  const windowText = currentWindowStart && currentWindowEnd ? `${currentWindowStart} to ${currentWindowEnd}` : "Waiting for first window";
+  const foundLabel = activities === 1 ? "activity" : "activities";
+  const detailText = syncProgressDetailText(job, stage, currentActivityName, oldest, activities);
 
   return (
     <section className="panel sync-progress-panel">
       <div className="filter-header">
-        <div className="panel-heading">Intervals.icu sync progress</div>
+        <div className="panel-heading">Garmin sync progress</div>
         <span className={`status ${job.status}`}>{job.status}</span>
       </div>
       <SyncProgressBar job={job} />
       <div className="sync-progress-grid">
-        <SyncStat label="Imported" value={imported.toLocaleString()} />
-        <SyncStat label="Processed" value={`${processed.toLocaleString()} / ${activities.toLocaleString()}`} />
-        <SyncStat label="Failed" value={failed.toLocaleString()} />
-        <SyncStat label="Ignored" value={skippedExcluded.toLocaleString()} />
+        {listing ? (
+          <>
+            <SyncStat label="Found" value={`${activities.toLocaleString()} ${foundLabel}`} />
+            <SyncStat label="Pages" value={fetchedPages.toLocaleString()} />
+            <SyncStat label="Imported" value={imported.toLocaleString()} />
+            <SyncStat label="Failed" value={failed.toLocaleString()} />
+          </>
+        ) : (
+          <>
+            <SyncStat label="Completed" value={`${processed.toLocaleString()} / ${activities.toLocaleString()}`} />
+            <SyncStat label="Imported" value={imported.toLocaleString()} />
+            <SyncStat label="Ignored" value={skippedExcluded.toLocaleString()} />
+            <SyncStat label="Failed" value={failed.toLocaleString()} />
+          </>
+        )}
       </div>
       <div className="sync-progress-details">
         <span>{stage}</span>
-        <span>{windowText}</span>
+        <span>{detailText}</span>
         <span>{formatSyncJobDetails(job)}</span>
       </div>
       {(warnings.length > 0 || firstErrors.length > 0) && (
@@ -1126,13 +1126,16 @@ function SyncProgressBar({ job }: { job: SyncJob }) {
   const payload = job.payload ?? {};
   const processed = payloadNumber(payload, "processed");
   const activities = payloadNumber(payload, "activities");
-  const percent = activities > 0 ? Math.min(100, Math.round((processed / activities) * 100)) : 0;
+  const stage = payloadText(payload, "stage");
+  const listing = job.status === "running" && isSyncListingStage(stage);
+  const hasKnownTotal = activities > 0 && !listing;
+  const percent = hasKnownTotal ? Math.min(100, Math.round((processed / activities) * 100)) : 0;
   return (
     <div className="progress-cell">
-      <div className="progress-bar" aria-label={`Sync progress ${percent}%`}>
-        <span style={{ width: `${percent}%` }} />
+      <div className={`progress-bar${listing ? " indeterminate" : ""}`} aria-label={listing ? "Listing Garmin activities" : `Sync progress ${percent}%`}>
+        <span style={listing ? undefined : { width: `${percent}%` }} />
       </div>
-      <span>{activities > 0 ? `${percent}%` : job.status}</span>
+      <span>{listing ? "Listing" : hasKnownTotal ? `${percent}%` : job.status}</span>
     </div>
   );
 }
@@ -1140,15 +1143,26 @@ function SyncProgressBar({ job }: { job: SyncJob }) {
 function formatSyncJobDetails(job: SyncJob) {
   const payload = job.payload ?? {};
   const imported = payloadNumber(payload, "imported");
+  const processed = payloadNumber(payload, "processed");
   const failed = payloadNumber(payload, "failed");
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const activities = payloadNumber(payload, "activities");
-  const windows = payloadNumber(payload, "fetchedWindows");
-  const splitWindows = payloadNumber(payload, "splitWindows");
-  const currentWindowStart = payloadText(payload, "currentWindowStart");
-  const currentWindowEnd = payloadText(payload, "currentWindowEnd");
+  const fetchedPages = payloadNumber(payload, "fetchedPages");
+  const stage = payloadText(payload, "stage");
   const parts = [];
-  if (activities > 0 || imported > 0 || failed > 0) {
+  if (isSyncListingStage(stage)) {
+    if (activities > 0) {
+      parts.push(`${activities} found`);
+    }
+    if (fetchedPages > 0) {
+      parts.push(`${fetchedPages} pages`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "listing";
+  }
+  if (activities > 0) {
+    parts.push(`${processed}/${activities} processed`);
+  }
+  if (imported > 0 || failed > 0) {
     parts.push(`${imported}/${activities} imported`);
   }
   if (failed > 0) {
@@ -1157,16 +1171,24 @@ function formatSyncJobDetails(job: SyncJob) {
   if (skippedExcluded > 0) {
     parts.push(`${skippedExcluded} ignored`);
   }
-  if (windows > 0) {
-    parts.push(`${windows} windows`);
-  }
-  if (splitWindows > 0) {
-    parts.push(`${splitWindows} split`);
-  }
-  if (currentWindowStart && currentWindowEnd && job.status === "running") {
-    parts.push(`${currentWindowStart} to ${currentWindowEnd}`);
-  }
   return parts.length > 0 ? parts.join(" · ") : "-";
+}
+
+function isSyncListingStage(stage: string) {
+  return stage.toLowerCase().includes("listing");
+}
+
+function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, oldest: string, activities: number) {
+  if (isSyncListingStage(stage)) {
+    return oldest ? `Searching from ${oldest}` : "Searching Garmin Connect";
+  }
+  if (currentActivityName) {
+    return currentActivityName;
+  }
+  if (job.status === "completed") {
+    return activities > 0 ? "Sync finished" : "No activities found";
+  }
+  return "Waiting for first activity";
 }
 
 function payloadNumber(payload: Record<string, unknown>, key: string) {

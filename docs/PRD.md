@@ -4,22 +4,21 @@
 
 Runnarr is a self-hosted activity hub for endurance data. It imports activities from provider APIs and local files, normalizes them into a provider-independent schema, and presents a private, useful view of training history with maps, charts, and race context.
 
-The first release is intentionally not a full training science platform. It should make the data easy to own, browse, verify, and extend. Deep analysis similar to Runalyze or intervals.icu is future scope.
+The first release is intentionally not a full training science platform. It should make the data easy to own, browse, verify, and extend. Deep training analysis is future scope.
 
 ## 2. Goals
 
 - Provide a Dockerized service that can run on a home server, NAS, VPS, or local machine.
-- Connect to Strava through OAuth and import the authenticated athlete's activities.
-- Provide a subscription-free Strava import path using the user's Strava data export or downloaded activity files.
+- Connect to Garmin Connect and import the authenticated user's activities without requiring official Garmin API approval.
 - Import local activity files with an extensible parser architecture.
-- Store activities in a canonical schema that is independent from Strava or any one file format.
+- Store activities in a canonical schema that is independent from Garmin or any one file format.
 - Render a useful activity dashboard, activity list, detail view, route map, and basic charts.
 - Establish a durable architecture for future providers, import formats, races, analytics, and multi-user support.
 
 ## 3. Non-Goals for V1
 
-- Public social feed, public sharing, comments, kudos, leaderboards, or Strava-like community features.
-- Writing activities back to Strava or other providers.
+- Public social feed, public sharing, comments, kudos, leaderboards, or third-party community features.
+- Writing activities back to Garmin or other providers.
 - Deep physiological analytics, training load modeling, interval detection, structured workouts, or coach workflows.
 - Full multi-user account management.
 - Native mobile apps.
@@ -45,14 +44,12 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - The UI must require a local admin login.
 - Sessions must use HTTP-only cookies.
 - Mutating API calls must require CSRF protection.
-- Provider tokens must be encrypted at rest.
-- Strava data must only be displayed to the local authenticated admin.
+- Provider tokens or token files must be stored with restricted access.
+- Imported activity data must only be displayed to the local authenticated admin.
 
 ### Activity Imports
 
 - V1 must import GPX, TCX, and FIT files.
-- V1 must import Strava account bulk export archives so users can migrate their Strava history without a paid Strava API/developer subscription.
-- Strava archive import must locate supported activity files inside the archive, import each supported activity, and report unsupported files without failing the entire archive.
 - Manual file/archive import must remain available, but should be a secondary workflow rather than a primary navigation item or prominent dashboard action.
 - The importer must deduplicate repeated uploads by file hash and provider source identifiers.
 - The import pipeline must normalize:
@@ -69,19 +66,17 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Provider imports should preserve a link to the original provider activity when the source exposes a stable activity URL or enough source metadata to construct one.
 - The parser architecture must allow new formats without touching API handlers.
 
-### Strava Provider
+### Garmin Provider
 
-- OAuth/API sync is an optional convenience path, not the only way to import Strava data.
-- The Strava integration must support OAuth connect and callback.
-- Strava setup must be driven by `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, and `RUNNARR_BASE_URL`; for the default local port, the OAuth callback URL is `http://localhost:37617/api/providers/strava/callback`.
-- It must store accepted scopes and provider account metadata.
-- It must refresh short-lived access tokens using the latest refresh token.
-- It must support manual sync.
-- Manual sync must backfill accessible Strava activities from the athlete activity feed, not only activities created since the last sync.
-- Re-running sync must update existing Strava activities by provider activity ID and add newly discovered activities without creating duplicates.
-- The provider settings UI should make clear that importing requires connecting Strava first, then triggering sync.
-- It must track rate-limit response headers where available.
-- Webhook endpoints may exist in v1, but polling/manual sync is acceptable for self-hosted local deployments without public callback URLs.
+- Garmin Connect is the primary automatic import path for v1.
+- The Garmin integration may use an unofficial Garmin Connect client because official Garmin Activity API access requires approval.
+- It must support Garmin login from Settings, including MFA when Garmin requires it.
+- It must store reusable Garmin token files and provider account metadata without storing the Garmin password.
+- It must support manual sync with an oldest-date selector for full historical backfill.
+- It must support scheduled/background sync for newly uploaded Garmin activities.
+- Re-running sync must update existing Garmin activities by Garmin activity ID and add newly discovered activities without creating duplicates.
+- Garmin original activity downloads should be parsed from FIT where available, including session-level elevation gain and lap data.
+- The provider settings UI should make clear that importing requires connecting Garmin first, then triggering sync.
 
 ### Provider Sync Status
 
@@ -121,7 +116,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity detail should hide elevation charts for activity types where elevation is not meaningful, such as swimming, strength training, indoor workouts, and similar non-route activities.
 - Activity detail should detect meaningful climbs from distance/elevation samples and summarize each climb with distance, ascent, average grade, difficulty, and map/profile highlighting.
 - Climb detection thresholds should start with sensible defaults and may later become user-configurable settings.
-- Activity laps imported from providers should preserve provider interval metadata where available, including Intervals.icu `type` and `label` fields from `icu_intervals`.
+- Activity laps imported from providers should preserve provider interval metadata where available, including Garmin workout step or lap category fields if exposed by the source data.
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.
 - Route maps should show start and end markers, and should eventually support well-designed direction indicators along the route without cluttering the map.
@@ -131,7 +126,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Media thumbnail markers should be unobtrusive and should open or highlight the corresponding media item when selected.
 - The admin must be able to delete activities from Runnarr, including their samples and laps, without deleting provider connections or source files outside the app.
 - Settings must make the data pipeline visible enough to debug failed imports or syncs without making manual import the dominant workflow.
-- Provider imports should populate calories/energy expenditure on activities when the provider exposes it, including Intervals.icu where available.
+- Provider imports should populate calories/energy expenditure on activities when the provider exposes it.
 
 ## 6. UX Principles
 
@@ -153,7 +148,7 @@ The storage model should separate canonical activity fields from provider/raw de
 - `activity_laps`: lap or split summaries from providers/files.
 - `activity_media`: media attached to activities, including file metadata, thumbnail paths, capture time, and optional EXIF-derived latitude/longitude.
 - `import_files`: uploaded file metadata and parser status.
-- `provider_connections`: external provider accounts and encrypted tokens.
+- `provider_connections`: external provider account metadata; provider token files or credentials must be protected with restricted storage access.
 - `sync_jobs`: provider sync/backfill job state.
 - `auth_sessions`: local admin sessions and CSRF token state.
 
@@ -163,7 +158,6 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 
 ### Providers
 
-- Garmin Connect or Garmin export ingestion.
 - Wahoo, COROS, Polar, Suunto, Zwift, Komoot, TrainingPeaks, and direct device sync where practical.
 - Provider-specific metadata preservation without polluting canonical activity fields.
 
@@ -250,7 +244,6 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - The UI automatically follows the system light/dark preference and supports a persistent manual theme override.
 - The admin can reach a Settings page for provider connections, display preferences, data import tools, and diagnostics.
 - The admin can upload a sample GPX, TCX, or FIT file from the secondary manual import area.
-- The admin can upload a Strava account export archive from the secondary manual import area and import supported activities without configuring Strava OAuth/API credentials.
 - Uploaded activities appear in the dashboard and activity list.
 - The admin can change the dashboard time scale and see activity totals/charts update for the selected scale.
 - The admin can search activities by name, filter by type/source/metrics/location, and sort the activity list by date, name, type, source, distance, time, and elevation.
@@ -258,8 +251,8 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - A GPS activity detail page renders a map and charts.
 - The admin can zoom an activity route map with the mouse wheel.
 - The admin can delete an activity and it no longer appears in the dashboard, activity list, or detail view.
-- Strava OAuth routes are present and report clear configuration errors when credentials are missing.
-- With Strava credentials configured, the admin can connect Strava and trigger a manual import.
-- Strava sync imports historical accessible activities as well as new activities, while repeated syncs avoid duplicate activity rows.
+- The admin can connect Garmin from Settings and trigger a manual sync.
+- Garmin sync imports historical accessible activities as well as new activities, while repeated syncs avoid duplicate activity rows.
+- Scheduled Garmin sync imports newly uploaded activities after initial connection.
 - The admin can see whether provider sync is running, completed, or failed, including the latest result and error details.
 - Duplicate imports do not create duplicate activities.

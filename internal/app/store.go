@@ -189,9 +189,9 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 
 	for _, lap := range activity.Laps {
 		_, err = tx.Exec(ctx, `
-			insert into activity_laps(activity_id, lap_index, start_time, elapsed_time_s, distance_m)
-			values($1,$2,$3,$4,$5)
-		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.DistanceM)
+			insert into activity_laps(activity_id, lap_index, start_time, elapsed_time_s, distance_m, elevation_gain_m, elevation_loss_m)
+			values($1,$2,$3,$4,$5,$6,$7)
+		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.DistanceM, lap.ElevationGainM, lap.ElevationLossM)
 		if err != nil {
 			return "", err
 		}
@@ -553,7 +553,7 @@ func (s *Store) listSamples(ctx context.Context, activityID string) ([]ActivityS
 
 func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap, error) {
 	rows, err := s.db.Query(ctx, `
-		select lap_index, start_time, elapsed_time_s, distance_m
+		select lap_index, start_time, elapsed_time_s, distance_m, elevation_gain_m, elevation_loss_m
 		from activity_laps
 		where activity_id = $1
 		order by lap_index
@@ -567,12 +567,15 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 	for rows.Next() {
 		var lap ActivityLap
 		var ts pgtype.Timestamptz
-		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.DistanceM); err != nil {
+		var gain, loss sql.NullFloat64
+		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.DistanceM, &gain, &loss); err != nil {
 			return nil, err
 		}
 		if ts.Valid {
 			lap.StartTime = &ts.Time
 		}
+		lap.ElevationGainM = floatPtrFromNull(gain)
+		lap.ElevationLossM = floatPtrFromNull(loss)
 		laps = append(laps, lap)
 	}
 	return laps, rows.Err()

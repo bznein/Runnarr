@@ -418,6 +418,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 	var distance float64
 	var moving int
 	var elapsed int
+	var sessionElevationGain *float64
 	if len(activityFile.Sessions) > 0 {
 		session := activityFile.Sessions[0]
 		sport = normalizeSport(session.Sport.String())
@@ -429,6 +430,10 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		}
 		if value := session.GetTotalElapsedTimeScaled(); !math.IsNaN(value) {
 			elapsed = int(value)
+		}
+		if session.TotalAscent != 0xFFFF {
+			value := float64(session.TotalAscent)
+			sessionElevationGain = &value
 		}
 	}
 	if sport == "" {
@@ -544,6 +549,45 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		start = *firstTime
 	}
 	avgHR, maxHR := heartRateSummary(heartRates)
+	sampleElevationGain := elevationGain
+	if sessionElevationGain != nil {
+		elevationGain = *sessionElevationGain
+	}
+
+	laps := make([]ActivityLap, 0, len(activityFile.Laps))
+	for lapIndex, sourceLap := range activityFile.Laps {
+		var lapStart *time.Time
+		if !sourceLap.StartTime.IsZero() {
+			start := sourceLap.StartTime
+			lapStart = &start
+		}
+		lapElapsed := 0
+		if value := sourceLap.GetTotalElapsedTimeScaled(); !math.IsNaN(value) {
+			lapElapsed = int(value)
+		}
+		lapDistance := 0.0
+		if value := sourceLap.GetTotalDistanceScaled(); !math.IsNaN(value) {
+			lapDistance = value
+		}
+		var lapGain *float64
+		if sourceLap.TotalAscent != 0xFFFF {
+			value := float64(sourceLap.TotalAscent)
+			lapGain = &value
+		}
+		var lapLoss *float64
+		if sourceLap.TotalDescent != 0xFFFF {
+			value := float64(sourceLap.TotalDescent)
+			lapLoss = &value
+		}
+		laps = append(laps, ActivityLap{
+			Index:          lapIndex,
+			StartTime:      lapStart,
+			ElapsedTimeS:   lapElapsed,
+			DistanceM:      lapDistance,
+			ElevationGainM: lapGain,
+			ElevationLossM: lapLoss,
+		})
+	}
 
 	return ImportedActivity{
 		Name:           strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename)),
@@ -556,7 +600,13 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		AvgHeartRate:   avgHR,
 		MaxHeartRate:   maxHR,
 		Samples:        samples,
-		Raw:            map[string]any{"format": "fit", "record_count": len(activityFile.Records)},
+		Laps:           laps,
+		Raw: map[string]any{
+			"format":                  "fit",
+			"record_count":            len(activityFile.Records),
+			"lap_count":               len(activityFile.Laps),
+			"sample_elevation_gain_m": sampleElevationGain,
+		},
 	}, nil
 }
 
