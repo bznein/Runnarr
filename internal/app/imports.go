@@ -264,8 +264,14 @@ func (TCXParser) Parse(_ context.Context, filename string, data []byte) (Importe
 	var elevationGain float64
 	var lastElevation *float64
 	var heartRates []int
+	var caloriesKcal int
+	var hasCalories bool
 
 	for lapIndex, lap := range source.Laps {
+		if lap.Calories != nil {
+			caloriesKcal += *lap.Calories
+			hasCalories = true
+		}
 		var lapStart *time.Time
 		if lap.StartTime != "" {
 			if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(lap.StartTime)); err == nil {
@@ -380,6 +386,10 @@ func (TCXParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		}
 	}
 	avgHR, maxHR := heartRateSummary(heartRates)
+	var calories *int
+	if hasCalories {
+		calories = &caloriesKcal
+	}
 
 	return ImportedActivity{
 		Name:           name,
@@ -391,6 +401,7 @@ func (TCXParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		ElevationGainM: elevationGain,
 		AvgHeartRate:   avgHR,
 		MaxHeartRate:   maxHR,
+		CaloriesKcal:   calories,
 		Samples:        samples,
 		Laps:           laps,
 		Raw:            map[string]any{"format": "tcx", "lap_count": len(source.Laps)},
@@ -400,6 +411,17 @@ func (TCXParser) Parse(_ context.Context, filename string, data []byte) (Importe
 type FITParser struct{}
 
 func (FITParser) Name() string { return "fit" }
+
+func fitSessionCaloriesKcal(session *fit.SessionMsg) *int {
+	if session == nil {
+		return nil
+	}
+	if session.TotalCalories == 0xFFFF {
+		return nil
+	}
+	value := int(session.TotalCalories)
+	return &value
+}
 
 func (FITParser) Parse(_ context.Context, filename string, data []byte) (ImportedActivity, error) {
 	decoded, err := fit.Decode(bytes.NewReader(data))
@@ -419,6 +441,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 	var moving int
 	var elapsed int
 	var sessionElevationGain *float64
+	var calories *int
 	if len(activityFile.Sessions) > 0 {
 		session := activityFile.Sessions[0]
 		sport = normalizeSport(session.Sport.String())
@@ -435,6 +458,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 			value := float64(session.TotalAscent)
 			sessionElevationGain = &value
 		}
+		calories = fitSessionCaloriesKcal(session)
 	}
 	if sport == "" {
 		sport = "Run"
@@ -599,6 +623,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		ElevationGainM: elevationGain,
 		AvgHeartRate:   avgHR,
 		MaxHeartRate:   maxHR,
+		CaloriesKcal:   calories,
 		Samples:        samples,
 		Laps:           laps,
 		Raw: map[string]any{
@@ -653,6 +678,7 @@ type tcxLap struct {
 	StartTime        string     `xml:"StartTime,attr"`
 	TotalTimeSeconds float64    `xml:"TotalTimeSeconds"`
 	DistanceMeters   float64    `xml:"DistanceMeters"`
+	Calories         *int       `xml:"Calories"`
 	Tracks           []tcxTrack `xml:"Track"`
 }
 

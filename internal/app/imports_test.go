@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"testing"
+
+	fit "github.com/tormoder/fit"
 )
 
 func TestGPXParser(t *testing.T) {
@@ -55,6 +57,7 @@ func TestTCXParser(t *testing.T) {
       <Lap StartTime="2026-07-01T06:00:00Z">
         <TotalTimeSeconds>60</TotalTimeSeconds>
         <DistanceMeters>200</DistanceMeters>
+        <Calories>64</Calories>
         <Track>
           <Trackpoint>
             <Time>2026-07-01T06:00:00Z</Time>
@@ -72,6 +75,11 @@ func TestTCXParser(t *testing.T) {
           </Trackpoint>
         </Track>
       </Lap>
+      <Lap StartTime="2026-07-01T06:01:00Z">
+        <TotalTimeSeconds>30</TotalTimeSeconds>
+        <DistanceMeters>50</DistanceMeters>
+        <Calories>36</Calories>
+      </Lap>
     </Activity>
   </Activities>
 </TrainingCenterDatabase>`)
@@ -86,11 +94,24 @@ func TestTCXParser(t *testing.T) {
 	if activity.DistanceM != 200 {
 		t.Fatalf("distance = %f", activity.DistanceM)
 	}
-	if len(activity.Laps) != 1 {
+	if len(activity.Laps) != 2 {
 		t.Fatalf("laps = %d", len(activity.Laps))
+	}
+	if activity.CaloriesKcal == nil || *activity.CaloriesKcal != 100 {
+		t.Fatalf("calories = %#v", activity.CaloriesKcal)
 	}
 	if activity.MaxHeartRate == nil || *activity.MaxHeartRate != 150 {
 		t.Fatalf("max heart rate = %#v", activity.MaxHeartRate)
+	}
+}
+
+func TestFITSessionCaloriesKcal(t *testing.T) {
+	valid := fitSessionCaloriesKcal(&fit.SessionMsg{TotalCalories: 321})
+	if valid == nil || *valid != 321 {
+		t.Fatalf("valid calories = %#v", valid)
+	}
+	if invalid := fitSessionCaloriesKcal(&fit.SessionMsg{TotalCalories: 0xFFFF}); invalid != nil {
+		t.Fatalf("invalid calories = %#v", invalid)
 	}
 }
 
