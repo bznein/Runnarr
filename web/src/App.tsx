@@ -4,7 +4,7 @@ import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSear
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
-import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
 import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
@@ -1790,12 +1790,6 @@ function ActivityMediaMapMarkers({
   selectedMediaId?: string;
   onSelectMedia?: (mediaId: string) => void;
 }) {
-  const map = useMap();
-  const [zoom, setZoom] = useState(() => map.getZoom());
-  useMapEvents({
-    zoomend: () => setZoom(map.getZoom())
-  });
-
   return (
     <>
       {mediaMarkers.map((item) => {
@@ -1808,7 +1802,7 @@ function ActivityMediaMapMarkers({
           <Marker
             key={item.id}
             position={point}
-            icon={mediaMapMarkerIcon(item, selected, zoom)}
+            icon={mediaMapMarkerIcon(item, selected)}
             zIndexOffset={selected ? 1200 : 800}
             title={item.originalFilename}
             eventHandlers={onSelectMedia ? { click: () => onSelectMedia(item.id) } : undefined}
@@ -1858,20 +1852,14 @@ function routeHighlightIcon() {
   });
 }
 
-function mediaMapMarkerIcon(media: ActivityMedia, selected: boolean, zoom: number) {
-  const size = mediaMapMarkerSize(zoom, selected);
+function mediaMapMarkerIcon(media: ActivityMedia, selected: boolean) {
+  const size = selected ? 52 : 44;
   return divIcon({
     className: `media-map-marker-icon${selected ? " selected" : ""}`,
     html: `<span class="media-map-marker" style="--media-marker-size:${size}px"><span class="media-map-marker-image" style="background-image:url('${activityMediaThumbnailURL(media.id)}')"></span></span>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2]
   });
-}
-
-function mediaMapMarkerSize(zoom: number, selected: boolean) {
-  const normalizedZoom = Number.isFinite(zoom) ? zoom : 13;
-  const baseSize = Math.round(Math.min(72, Math.max(32, 38 + (normalizedZoom - 12) * 4)));
-  return selected ? Math.min(84, baseSize + 10) : baseSize;
 }
 
 function routePointsKey(points: RoutePoint[]) {
