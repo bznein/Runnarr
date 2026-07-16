@@ -1370,9 +1370,9 @@ function ActivityClimbsPanel({
                 <AreaChart data={profileData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="label" minTickGap={26} />
-                  <YAxis width={44} domain={["auto", "auto"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
-                  <Tooltip formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Elevation"]} />
-                  <Area type="basis" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
+                  <YAxis width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
+                  <Tooltip formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Height above start"]} />
+                  <Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -2153,7 +2153,7 @@ function climbProfileFor(activity: Activity, climb?: ActivityClimb): ClimbProfil
   if (!climb) {
     return [];
   }
-  return chartDataFor(samplesForClimb(activity, climb))
+  const points = chartDataFor(samplesForClimb(activity, climb))
     .filter((sample) => typeof sample.distanceM === "number" && typeof sample.elevationM === "number")
     .map((sample) => {
       const distanceKm = Math.max(0, (sample.distanceM! - climb.startDistanceM) / 1000);
@@ -2163,6 +2163,18 @@ function climbProfileFor(activity: Activity, climb?: ActivityClimb): ClimbProfil
         elevationM: sample.elevationM!
       };
     });
+  return normalizeClimbProfileElevation(points);
+}
+
+function normalizeClimbProfileElevation(points: ClimbProfilePoint[]): ClimbProfilePoint[] {
+  const baseline = points[0]?.elevationM;
+  if (baseline === undefined) {
+    return points;
+  }
+  return points.map((point) => ({
+    ...point,
+    elevationM: Math.max(0, point.elevationM - baseline)
+  }));
 }
 
 function samplesForClimb(activity: Activity, climb?: ActivityClimb) {
