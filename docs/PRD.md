@@ -114,7 +114,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Pace should be formatted by activity type, for example min/km for running, speed for cycling where appropriate, and min/100 m for swimming.
 - Each supported activity type should be reviewed for which metrics are meaningful to show, hide, or rename, including distance, pace/speed, elevation, cadence, power, laps, intervals, heart rate, and route maps.
 - Activity detail should hide elevation charts for activity types where elevation is not meaningful, such as swimming, strength training, indoor workouts, and similar non-route activities.
-- Activity detail should detect meaningful climbs from distance/elevation samples and summarize each climb with distance, ascent, average grade, difficulty, and map/profile highlighting.
+- Activity detail should detect meaningful climbs from distance/elevation samples and summarize each climb with distance, ascent, average grade, average pace, Grade Adjusted Pace (GAP) where available, difficulty, and map/profile highlighting.
 - Climb detection thresholds should start with sensible defaults and may later become user-configurable settings.
 - Activity laps imported from providers should preserve provider interval metadata where available, including Garmin workout step or lap category fields if exposed by the source data.
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
@@ -189,7 +189,7 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - Dashboard analytics should summarize heart-rate zone distribution across the active time scale and activity filters where enough data exists.
 - Health metrics such as resting HR, HRV, sleep, body weight, and subjective notes if provider support exists.
 - Video attachments for activities, without requiring EXIF or location metadata support.
-- Grade Adjusted Pace (GAP), sourced directly from provider/workout data when available and computed from route grade and pace when not.
+- Grade Adjusted Pace (GAP), sourced directly from provider/workout data when available and computed from route grade and pace when not; climb summaries should use the same GAP source/calculation so climb-level GAP is comparable with activity-level GAP.
 - Interactive chart zooming and panning for inspecting specific sections of an activity.
 - Activity detail charts should allow collapsing separate metric graphs into one overlaid inspection graph where that improves comparison.
 - Selection tools on elevation/profile charts to calculate distance, elevation gain/loss, average grade, pace/speed, heart rate, and other available metrics for the selected range.

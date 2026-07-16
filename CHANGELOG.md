@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Features
+
+- Settings now consolidates Garmin sync, display preferences, manual file import, and collapsed diagnostics.
+- Added a persistent light/dark/system theme preference.
+
 ## 0.2.0 - 2026-07-16
 
 ### Features
