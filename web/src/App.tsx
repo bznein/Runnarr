@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Cloud, Database, Filter, LogOut, Map, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Cloud, Database, ExternalLink, Filter, LogOut, Map, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -713,12 +713,27 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       navigate("/activities");
     }
   });
+  const renameActivity = useMutation({
+    mutationFn: (name: string) => api.renameActivity(id!, name),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activity", id] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+      setRenameOpen(false);
+    }
+  });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
   const [selectedClimbIndex, setSelectedClimbIndex] = useState(0);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
 
   useEffect(() => {
     setHighlightedSample(undefined);
     setSelectedClimbIndex(0);
+    setActionsOpen(false);
+    setRenameOpen(false);
   }, [id]);
 
   if (activity.isLoading) {
@@ -738,9 +753,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimbProfile = climbProfileFor(item, selectedClimb);
   const showLapElevation = (item.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
   const handleDelete = () => {
+    setActionsOpen(false);
     if (window.confirm(deleteActivityConfirmation(item))) {
       deleteActivity.mutate(item.id);
     }
+  };
+  const handleRename = (name: string) => {
+    renameActivity.mutate(name);
   };
 
   return (
@@ -748,13 +767,30 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       title={item.name}
       eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}
       actions={
-        <button className="danger-button" type="button" disabled={deleteActivity.isPending} onClick={handleDelete}>
-          <Trash2 size={16} />
-          Delete
-        </button>
+        <ActivityDetailActions
+          activity={item}
+          open={actionsOpen}
+          deleting={deleteActivity.isPending}
+          onToggle={() => setActionsOpen((current) => !current)}
+          onRename={() => {
+            renameActivity.reset();
+            setRenameOpen(true);
+            setActionsOpen(false);
+          }}
+          onDelete={handleDelete}
+        />
       }
     >
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
+      {renameOpen && (
+        <ActivityRenameDialog
+          activity={item}
+          saving={renameActivity.isPending}
+          error={renameActivity.error}
+          onSave={handleRename}
+          onClose={() => setRenameOpen(false)}
+        />
+      )}
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
@@ -808,6 +844,127 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
     </Page>
+  );
+}
+
+function ActivityDetailActions({
+  activity,
+  open,
+  deleting,
+  onToggle,
+  onRename,
+  onDelete
+}: {
+  activity: Activity;
+  open: boolean;
+  deleting: boolean;
+  onToggle: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="action-menu-wrap">
+      <button className="icon-button" type="button" aria-label="Activity actions" aria-expanded={open} onClick={onToggle}>
+        <MoreVertical size={18} />
+      </button>
+      {open && (
+        <div className="action-menu" role="menu">
+          <button className="action-menu-item" type="button" role="menuitem" onClick={onRename}>
+            <Pencil size={16} />
+            Rename
+          </button>
+          {activity.originalProviderUrl && (
+            <a className="action-menu-item" role="menuitem" href={activity.originalProviderUrl} target="_blank" rel="noreferrer">
+              <ExternalLink size={16} />
+              Open original
+            </a>
+          )}
+          <button className="action-menu-item danger" type="button" role="menuitem" disabled={deleting} onClick={onDelete}>
+            <Trash2 size={16} />
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityRenameDialog({
+  activity,
+  saving,
+  error,
+  onSave,
+  onClose
+}: {
+  activity: Activity;
+  saving: boolean;
+  error: unknown;
+  onSave: (name: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(activity.name);
+  const trimmedName = name.trim();
+  const valid = trimmedName.length > 0 && Array.from(trimmedName).length <= 160;
+  const changed = trimmedName !== activity.name;
+  const canRestore = Boolean(activity.localName && activity.sourceName);
+  const message = error instanceof Error ? error.message : "";
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <form
+        className="filter-dialog rename-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="activity-rename-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid && changed) {
+            onSave(trimmedName);
+          }
+        }}
+      >
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Activity</div>
+            <h2 id="activity-rename-title">Rename</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close rename" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <label className="field">
+          <span>Name</span>
+          <input autoFocus type="text" maxLength={160} value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        <p className="muted rename-note">This only changes the name in Runnarr. The original provider activity will not be renamed.</p>
+        {canRestore && <div className="muted">Original: {activity.sourceName}</div>}
+        {!valid && <div className="row-error">Name must be between 1 and 160 characters.</div>}
+        {message && <div className="error">{message}</div>}
+
+        <div className="dialog-actions">
+          {canRestore && (
+            <button className="secondary-button" type="button" disabled={saving} onClick={() => onSave(activity.sourceName)}>
+              <RotateCcw size={16} />
+              Restore original
+            </button>
+          )}
+          <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="submit" disabled={saving || !valid || !changed}>
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

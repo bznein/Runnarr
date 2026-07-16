@@ -262,7 +262,7 @@ input {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 2000;
   display: grid;
   align-items: start;
   justify-items: center;
@@ -601,6 +601,60 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.action-menu-wrap {
+  position: relative;
+}
+
+.action-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  min-width: 180px;
+  padding: 6px;
+  border: 1px solid #d7e1dc;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(20, 28, 26, 0.16);
+}
+
+.action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #202927;
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.action-menu-item:hover {
+  background: #eef2ef;
+}
+
+.action-menu-item.danger {
+  color: #a33b2e;
+}
+
+.action-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rename-dialog {
+  width: min(100%, 460px);
+}
+
+.rename-note {
+  margin: 0;
 }
 
 .primary-button,

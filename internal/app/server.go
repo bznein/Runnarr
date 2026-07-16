@@ -68,6 +68,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
 			r.Get("/activities/{id}", s.handleGetActivity)
+			r.Patch("/activities/{id}", s.handleRenameActivity)
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
 			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
@@ -194,6 +195,31 @@ func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	activity, err := s.store.RenameActivity(r.Context(), chi.URLParam(r, "id"), body.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if errors.Is(err, ErrInvalidActivityName) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.logger.Error("rename activity", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not rename activity")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
