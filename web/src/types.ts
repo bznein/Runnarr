@@ -29,6 +29,7 @@ export type ActivityLap = {
   distanceM: number;
   elevationGainM?: number;
   elevationLossM?: number;
+  avgGradeAdjustedPaceSPKM?: number;
 };
 
 export type ActivityClimb = {
@@ -76,6 +77,7 @@ export type Activity = {
   avgHeartRate?: number;
   maxHeartRate?: number;
   avgPaceSPKM?: number;
+  avgGradeAdjustedPaceSPKM?: number;
   caloriesKcal?: number;
   originalProviderUrl?: string;
   summaryPolyline?: string;

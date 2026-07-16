@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import base64
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -68,6 +69,50 @@ def normalize_activity(item):
         "name": str(item.get("activityName") or item.get("name") or ""),
         "sportType": str(activity_type.get("typeKey") or activity_type.get("typeId") or ""),
         "startTime": parse_garmin_time(start_time),
+        "avgGradeAdjustedSpeed": item.get("avgGradeAdjustedSpeed"),
+    }
+
+
+def parse_number(value):
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def parse_int(value):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_lap(item, fallback_index):
+    if not isinstance(item, dict):
+        return {
+            "index": fallback_index,
+            "avgGradeAdjustedSpeed": None,
+        }
+
+    index = fallback_index
+    lap_index = parse_int(item.get("lapIndex"))
+    if lap_index is not None:
+        index = max(lap_index - 1, 0)
+    else:
+        message_index = parse_int(item.get("messageIndex"))
+        if message_index is not None:
+            index = message_index
+
+    return {
+        "index": index,
+        "avgGradeAdjustedSpeed": parse_number(item.get("avgGradeAdjustedSpeed")),
     }
 
 
@@ -115,6 +160,17 @@ def main():
             raise RuntimeError("missing activityId")
         content = download_bytes(client, activity_id)
         print(json.dumps({"contentBase64": base64.b64encode(content).decode("ascii")}))
+        return
+
+    if action == "splits":
+        activity_id = str(request.get("activityId") or "")
+        if not activity_id:
+            raise RuntimeError("missing activityId")
+        response = client.get_activity_splits(activity_id)
+        lap_items = response.get("lapDTOs") if isinstance(response, dict) else []
+        if not isinstance(lap_items, list):
+            lap_items = []
+        print(json.dumps({"laps": [normalize_lap(item, index) for index, item in enumerate(lap_items)]}))
         return
 
     raise RuntimeError(f"unsupported action: {action}")

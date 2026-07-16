@@ -143,9 +143,9 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		insert into activities(
 			source, source_id, source_file_id, name, sport_type, start_time, distance_m,
 			moving_time_s, elapsed_time_s, elevation_gain_m, avg_heart_rate, max_heart_rate,
-			avg_pace_s_per_km, calories_kcal, original_provider_url, summary_polyline, raw
+			avg_pace_s_per_km, avg_grade_adjusted_pace_s_per_km, calories_kcal, original_provider_url, summary_polyline, raw
 		)
-		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		on conflict (source, source_id) do update set
 			source_file_id = excluded.source_file_id,
 			name = excluded.name,
@@ -158,6 +158,7 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 			avg_heart_rate = excluded.avg_heart_rate,
 			max_heart_rate = excluded.max_heart_rate,
 			avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+			avg_grade_adjusted_pace_s_per_km = excluded.avg_grade_adjusted_pace_s_per_km,
 			calories_kcal = excluded.calories_kcal,
 			original_provider_url = case
 				when excluded.original_provider_url <> '' then excluded.original_provider_url
@@ -169,7 +170,8 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		returning id::text
 	`, source, sourceID, sourceFileID, fallbackName(activity), activity.SportType, activity.StartTime,
 		activity.DistanceM, activity.MovingTimeS, activity.ElapsedTimeS, activity.ElevationGainM,
-		activity.AvgHeartRate, activity.MaxHeartRate, avgPace, activity.CaloriesKcal, activity.OriginalProviderURL, activity.SummaryPolyline, rawBytes).Scan(&id)
+		activity.AvgHeartRate, activity.MaxHeartRate, avgPace, activity.AvgGradeAdjustedPaceSPKM,
+		activity.CaloriesKcal, activity.OriginalProviderURL, activity.SummaryPolyline, rawBytes).Scan(&id)
 	if err != nil {
 		return "", err
 	}
@@ -196,9 +198,13 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 
 	for _, lap := range activity.Laps {
 		_, err = tx.Exec(ctx, `
-			insert into activity_laps(activity_id, lap_index, start_time, elapsed_time_s, distance_m, elevation_gain_m, elevation_loss_m)
-			values($1,$2,$3,$4,$5,$6,$7)
-		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.DistanceM, lap.ElevationGainM, lap.ElevationLossM)
+			insert into activity_laps(
+				activity_id, lap_index, start_time, elapsed_time_s, distance_m,
+				elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
+			)
+			values($1,$2,$3,$4,$5,$6,$7,$8)
+		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.DistanceM,
+			lap.ElevationGainM, lap.ElevationLossM, lap.AvgGradeAdjustedPaceSPKM)
 		if err != nil {
 			return "", err
 		}
@@ -685,7 +691,8 @@ func (s *Store) listSamples(ctx context.Context, activityID string) ([]ActivityS
 
 func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap, error) {
 	rows, err := s.db.Query(ctx, `
-		select lap_index, start_time, elapsed_time_s, distance_m, elevation_gain_m, elevation_loss_m
+		select lap_index, start_time, elapsed_time_s, distance_m,
+			elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
 		from activity_laps
 		where activity_id = $1
 		order by lap_index
@@ -699,8 +706,8 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 	for rows.Next() {
 		var lap ActivityLap
 		var ts pgtype.Timestamptz
-		var gain, loss sql.NullFloat64
-		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.DistanceM, &gain, &loss); err != nil {
+		var gain, loss, avgGradeAdjustedPace sql.NullFloat64
+		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.DistanceM, &gain, &loss, &avgGradeAdjustedPace); err != nil {
 			return nil, err
 		}
 		if ts.Valid {
@@ -708,6 +715,7 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 		}
 		lap.ElevationGainM = floatPtrFromNull(gain)
 		lap.ElevationLossM = floatPtrFromNull(loss)
+		lap.AvgGradeAdjustedPaceSPKM = floatPtrFromNull(avgGradeAdjustedPace)
 		laps = append(laps, lap)
 	}
 	return laps, rows.Err()
@@ -716,7 +724,7 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 const activitySelectSQL = `
 	select id::text, source, source_id, coalesce(nullif(local_name, ''), name), name, local_name, sport_type, start_time, distance_m,
 		moving_time_s, elapsed_time_s, elevation_gain_m, avg_heart_rate, max_heart_rate,
-		avg_pace_s_per_km, calories_kcal, original_provider_url, summary_polyline, created_at
+		avg_pace_s_per_km, avg_grade_adjusted_pace_s_per_km, calories_kcal, original_provider_url, summary_polyline, created_at
 	from activities
 `
 
@@ -738,16 +746,18 @@ func scanActivities(rows pgx.Rows) ([]Activity, error) {
 }
 
 func scanActivity(row rowScanner, activity *Activity) error {
-	var avgHR, maxHR, avgPace sql.NullFloat64
+	var avgHR, maxHR, avgPace, avgGradeAdjustedPace sql.NullFloat64
 	var calories sql.NullInt32
 	if err := row.Scan(&activity.ID, &activity.Source, &activity.SourceID, &activity.Name, &activity.SourceName, &activity.LocalName, &activity.SportType,
 		&activity.StartTime, &activity.DistanceM, &activity.MovingTimeS, &activity.ElapsedTimeS,
-		&activity.ElevationGainM, &avgHR, &maxHR, &avgPace, &calories, &activity.OriginalProviderURL, &activity.SummaryPolyline, &activity.CreatedAt); err != nil {
+		&activity.ElevationGainM, &avgHR, &maxHR, &avgPace, &avgGradeAdjustedPace, &calories,
+		&activity.OriginalProviderURL, &activity.SummaryPolyline, &activity.CreatedAt); err != nil {
 		return err
 	}
 	activity.AvgHeartRate = floatPtrFromNull(avgHR)
 	activity.MaxHeartRate = floatPtrFromNull(maxHR)
 	activity.AvgPaceSPKM = floatPtrFromNull(avgPace)
+	activity.AvgGradeAdjustedPaceSPKM = floatPtrFromNull(avgGradeAdjustedPace)
 	activity.CaloriesKcal = intPtrFromNull(calories)
 	return nil
 }

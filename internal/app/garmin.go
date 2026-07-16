@@ -30,6 +30,7 @@ type GarminService struct {
 type GarminBridge interface {
 	Connect(ctx context.Context, tokenStore, email, password, mfaCode string) (GarminBridgeProfile, error)
 	ListActivities(ctx context.Context, tokenStore string, start, limit int) ([]GarminBridgeActivity, error)
+	ListActivitySplits(ctx context.Context, tokenStore, activityID string) ([]GarminBridgeLap, error)
 	DownloadActivity(ctx context.Context, tokenStore, activityID string) ([]byte, error)
 }
 
@@ -41,10 +42,16 @@ type GarminBridgeProfile struct {
 }
 
 type GarminBridgeActivity struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	SportType string    `json:"sportType"`
-	StartTime time.Time `json:"startTime"`
+	ID                       string    `json:"id"`
+	Name                     string    `json:"name"`
+	SportType                string    `json:"sportType"`
+	StartTime                time.Time `json:"startTime"`
+	AvgGradeAdjustedSpeedMPS *float64  `json:"avgGradeAdjustedSpeed,omitempty"`
+}
+
+type GarminBridgeLap struct {
+	Index                    int      `json:"index"`
+	AvgGradeAdjustedSpeedMPS *float64 `json:"avgGradeAdjustedSpeed,omitempty"`
 }
 
 type GarminSyncOptions struct {
@@ -177,6 +184,11 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			continue
 		}
 		applyGarminMetadata(&importedActivity, source)
+		if len(importedActivity.Laps) > 0 && source.AvgGradeAdjustedSpeedMPS != nil {
+			if laps, err := s.bridge.ListActivitySplits(ctx, s.tokenDir, source.ID); err == nil {
+				applyGarminLapMetadata(&importedActivity, laps)
+			}
+		}
 		if _, err := s.store.SaveImportedActivity(ctx, garminProvider, source.ID, nil, importedActivity); err != nil {
 			if errors.Is(err, ErrActivitySyncExcluded) {
 				skippedExcluded++
@@ -312,6 +324,40 @@ func applyGarminMetadata(activity *ImportedActivity, source GarminBridgeActivity
 	if !source.StartTime.IsZero() {
 		activity.Raw["garmin_start_time"] = source.StartTime.Format(time.RFC3339)
 	}
+	if gap := gradeAdjustedPaceFromSpeedMPS(source.AvgGradeAdjustedSpeedMPS); gap != nil {
+		activity.AvgGradeAdjustedPaceSPKM = gap
+		activity.Raw["garmin_avg_grade_adjusted_speed_mps"] = *source.AvgGradeAdjustedSpeedMPS
+	}
+}
+
+func applyGarminLapMetadata(activity *ImportedActivity, sourceLaps []GarminBridgeLap) {
+	if len(activity.Laps) == 0 || len(sourceLaps) == 0 {
+		return
+	}
+
+	gapByIndex := make(map[int]*float64, len(sourceLaps))
+	for _, sourceLap := range sourceLaps {
+		if sourceLap.Index < 0 {
+			continue
+		}
+		if pace := gradeAdjustedPaceFromSpeedMPS(sourceLap.AvgGradeAdjustedSpeedMPS); pace != nil {
+			gapByIndex[sourceLap.Index] = pace
+		}
+	}
+
+	for index := range activity.Laps {
+		if pace, ok := gapByIndex[activity.Laps[index].Index]; ok {
+			activity.Laps[index].AvgGradeAdjustedPaceSPKM = pace
+		}
+	}
+}
+
+func gradeAdjustedPaceFromSpeedMPS(speed *float64) *float64 {
+	if speed == nil || *speed <= 0 {
+		return nil
+	}
+	value := 1000 / *speed
+	return &value
 }
 
 func garminActivityURL(activityID string) string {
@@ -350,6 +396,18 @@ func (b PythonGarminBridge) ListActivities(ctx context.Context, tokenStore strin
 		"limit":      limit,
 	}, &response)
 	return response.Activities, err
+}
+
+func (b PythonGarminBridge) ListActivitySplits(ctx context.Context, tokenStore, activityID string) ([]GarminBridgeLap, error) {
+	var response struct {
+		Laps []GarminBridgeLap `json:"laps"`
+	}
+	err := b.run(ctx, map[string]any{
+		"action":     "splits",
+		"tokenStore": tokenStore,
+		"activityId": activityID,
+	}, &response)
+	return response.Laps, err
 }
 
 func (b PythonGarminBridge) DownloadActivity(ctx context.Context, tokenStore, activityID string) ([]byte, error) {
