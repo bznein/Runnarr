@@ -98,6 +98,12 @@ func TestActivityOrderBy(t *testing.T) {
 			want:      "order by coalesce(avg_pace_s_per_km, 0) desc, start_time desc, id desc",
 		},
 		{
+			name:      "calories desc",
+			sortBy:    "calories",
+			sortOrder: "desc",
+			want:      "order by coalesce(calories_kcal, 0) desc, start_time desc, id desc",
+		},
+		{
 			name:      "invalid values",
 			sortBy:    "drop table",
 			sortOrder: "sideways",
