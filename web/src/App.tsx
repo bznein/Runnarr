@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, MoreVertical, Pencil, RefreshCw, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -97,7 +97,7 @@ function AuthenticatedApp() {
         </Link>
         <nav className="nav">
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
-          <NavItem to="/activities" icon={<Map size={18} />} label="Activities" />
+          <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/imports" icon={<Upload size={18} />} label="Imports" />
           <NavItem to="/settings" icon={<Cloud size={18} />} label="Providers" />
         </nav>
@@ -701,7 +701,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const activity = useQuery({ queryKey: ["activity", id], queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const activityQueryKey = ["activity", id] as const;
+  const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
   const deleteActivity = useMutation({
     mutationFn: api.deleteActivity,
     onSuccess: async () => {
@@ -732,11 +733,19 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       }
       return uploaded;
     },
-    onSuccess: () => {
+    onSuccess: (uploaded) => {
       setMediaFileInputKey((key) => key + 1);
-    },
-    onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["activity", id] });
+      queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          activity: {
+            ...current.activity,
+            media: mergeActivityMedia(current.activity.media ?? [], uploaded.map((item) => item.media))
+          }
+        };
+      });
     }
   });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
@@ -830,7 +839,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
       </section>
 
-      <ActivityMediaPanel key={item.id} activity={item} uploading={uploadMedia.isPending} uploadError={uploadMedia.error} />
+      <ActivityMediaPanel activity={item} uploading={uploadMedia.isPending} uploadError={uploadMedia.error} />
 
       {routePoints.length > 1 && (
         <section className="panel">
@@ -926,8 +935,18 @@ function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Ac
   const nextMedia = previewMediaIndex >= 0 && previewMediaIndex < media.length - 1 ? media[previewMediaIndex + 1] : undefined;
   const deleteMedia = useMutation({
     mutationFn: (mediaId: string) => api.deleteActivityMedia(activity.id, mediaId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["activity", activity.id] });
+    onSuccess: (_result, mediaId) => {
+      queryClient.setQueryData<{ activity: Activity }>(["activity", activity.id], (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          activity: {
+            ...current.activity,
+            media: (current.activity.media ?? []).filter((item) => item.id !== mediaId)
+          }
+        };
+      });
     }
   });
   const mediaCountLabel = media.length === 1 ? "1 photo" : `${media.length} photos`;
@@ -2127,6 +2146,14 @@ function activityMediaThumbnailURL(mediaId: string) {
 
 function activityMediaOriginalURL(mediaId: string) {
   return `/api/activity-media/${encodeURIComponent(mediaId)}/original`;
+}
+
+function mergeActivityMedia(current: ActivityMedia[], uploaded: ActivityMedia[]) {
+  const byId = new Map(current.map((item) => [item.id, item]));
+  for (const item of uploaded) {
+    byId.set(item.id, item);
+  }
+  return Array.from(byId.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 function formatActivityMediaMeta(media: ActivityMedia) {
