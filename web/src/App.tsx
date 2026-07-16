@@ -771,6 +771,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }
 
   const item = activity.data.activity;
+  const mediaItems = item.media ?? [];
   const routePoints = routeForActivity(item);
   const chartData = chartDataFor(item.samples ?? []);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
@@ -839,7 +840,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
       </section>
 
-      <ActivityMediaPanel activity={item} uploading={uploadMedia.isPending} uploadError={uploadMedia.error} />
+      {mediaItems.length > 0 ? (
+        <ActivityMediaPanel activity={item} uploading={uploadMedia.isPending} uploadError={uploadMedia.error} />
+      ) : (
+        Boolean(uploadMedia.error) && <div className="error">{uploadMedia.error instanceof Error ? uploadMedia.error.message : "Upload failed"}</div>
+      )}
 
       {routePoints.length > 1 && (
         <section className="panel">
