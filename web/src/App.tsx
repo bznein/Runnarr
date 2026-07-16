@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -724,16 +724,34 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setRenameOpen(false);
     }
   });
+  const uploadMedia = useMutation({
+    mutationFn: async (files: File[]) => {
+      const uploaded: Array<{ media: ActivityMedia }> = [];
+      for (const file of files) {
+        uploaded.push(await api.uploadActivityMedia(id!, file));
+      }
+      return uploaded;
+    },
+    onSuccess: () => {
+      setMediaFileInputKey((key) => key + 1);
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["activity", id] });
+    }
+  });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
   const [selectedClimbIndex, setSelectedClimbIndex] = useState(0);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
 
   useEffect(() => {
     setHighlightedSample(undefined);
     setSelectedClimbIndex(0);
     setActionsOpen(false);
     setRenameOpen(false);
+    uploadMedia.reset();
+    setMediaFileInputKey((key) => key + 1);
   }, [id]);
 
   if (activity.isLoading) {
@@ -761,24 +779,38 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const handleRename = (name: string) => {
     renameActivity.mutate(name);
   };
+  const handleMediaFilesSelected = (files: File[]) => {
+    if (files.length === 0 || uploadMedia.isPending) {
+      return;
+    }
+    uploadMedia.reset();
+    uploadMedia.mutate(files);
+  };
 
   return (
     <Page
       title={item.name}
       eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}
       actions={
-        <ActivityDetailActions
-          activity={item}
-          open={actionsOpen}
-          deleting={deleteActivity.isPending}
-          onToggle={() => setActionsOpen((current) => !current)}
-          onRename={() => {
-            renameActivity.reset();
-            setRenameOpen(true);
-            setActionsOpen(false);
-          }}
-          onDelete={handleDelete}
-        />
+        <>
+          <ActivityMediaUploadAction
+            inputKey={mediaFileInputKey}
+            uploading={uploadMedia.isPending}
+            onFilesSelected={handleMediaFilesSelected}
+          />
+          <ActivityDetailActions
+            activity={item}
+            open={actionsOpen}
+            deleting={deleteActivity.isPending}
+            onToggle={() => setActionsOpen((current) => !current)}
+            onRename={() => {
+              renameActivity.reset();
+              setRenameOpen(true);
+              setActionsOpen(false);
+            }}
+            onDelete={handleDelete}
+          />
+        </>
       }
     >
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
@@ -798,7 +830,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
       </section>
 
-      <ActivityMediaPanel key={item.id} activity={item} />
+      <ActivityMediaPanel key={item.id} activity={item} uploading={uploadMedia.isPending} uploadError={uploadMedia.error} />
 
       {routePoints.length > 1 && (
         <section className="panel">
@@ -849,29 +881,46 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   );
 }
 
-function ActivityMediaPanel({ activity }: { activity: Activity }) {
+function ActivityMediaUploadAction({
+  inputKey,
+  uploading,
+  onFilesSelected
+}: {
+  inputKey: number;
+  uploading: boolean;
+  onFilesSelected: (files: File[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <>
+      <button className="secondary-button" type="button" disabled={uploading} onClick={() => inputRef.current?.click()}>
+        <Upload size={16} />
+        {uploading ? "Uploading" : "Add photos"}
+      </button>
+      <input
+        key={inputKey}
+        ref={inputRef}
+        className="media-hidden-input"
+        type="file"
+        accept="image/jpeg,image/png"
+        multiple
+        disabled={uploading}
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.currentTarget.value = "";
+          onFilesSelected(files);
+        }}
+      />
+    </>
+  );
+}
+
+function ActivityMediaPanel({ activity, uploading, uploadError }: { activity: Activity; uploading: boolean; uploadError: unknown }) {
   const queryClient = useQueryClient();
   const media = activity.media ?? [];
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [fileInputKey, setFileInputKey] = useState(0);
   const [previewMediaId, setPreviewMediaId] = useState<string>();
   const previewMedia = media.find((item) => item.id === previewMediaId);
-  const uploadMedia = useMutation({
-    mutationFn: async (files: File[]) => {
-      const uploaded: Array<{ media: ActivityMedia }> = [];
-      for (const file of files) {
-        uploaded.push(await api.uploadActivityMedia(activity.id, file));
-      }
-      return uploaded;
-    },
-    onSuccess: () => {
-      setSelectedFiles([]);
-      setFileInputKey((key) => key + 1);
-    },
-    onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["activity", activity.id] });
-    }
-  });
   const deleteMedia = useMutation({
     mutationFn: (mediaId: string) => api.deleteActivityMedia(activity.id, mediaId),
     onSuccess: async (_result, mediaId) => {
@@ -882,7 +931,6 @@ function ActivityMediaPanel({ activity }: { activity: Activity }) {
     }
   });
   const deletingMediaId = deleteMedia.isPending ? deleteMedia.variables : undefined;
-  const uploadLabel = selectedFiles.length > 1 ? `Upload ${selectedFiles.length} photos` : "Upload";
   const mediaCountLabel = media.length === 1 ? "1 photo" : `${media.length} photos`;
   const handleDeleteMedia = (item: ActivityMedia) => {
     deleteMedia.reset();
@@ -898,34 +946,8 @@ function ActivityMediaPanel({ activity }: { activity: Activity }) {
         <span className="media-count">{mediaCountLabel}</span>
       </div>
 
-      <div className="media-toolbar">
-        <label className="field media-file-field">
-          <span>Photos</span>
-          <input
-            key={fileInputKey}
-            type="file"
-            accept="image/jpeg,image/png"
-            multiple
-            disabled={uploadMedia.isPending}
-            onChange={(event) => {
-              uploadMedia.reset();
-              setSelectedFiles(Array.from(event.target.files ?? []));
-            }}
-          />
-        </label>
-        <button
-          className="primary-button"
-          type="button"
-          disabled={selectedFiles.length === 0 || uploadMedia.isPending}
-          onClick={() => uploadMedia.mutate(selectedFiles)}
-        >
-          <Upload size={16} />
-          {uploadMedia.isPending ? "Uploading" : uploadLabel}
-        </button>
-      </div>
-
-      {selectedFiles.length > 0 && <div className="muted media-selection">{formatSelectedFiles(selectedFiles)}</div>}
-      {uploadMedia.error && <div className="error">{uploadMedia.error instanceof Error ? uploadMedia.error.message : "Upload failed"}</div>}
+      {uploading && <div className="media-upload-status"><Upload size={16} /> Uploading photos</div>}
+      {Boolean(uploadError) && <div className="error">{uploadError instanceof Error ? uploadError.message : "Upload failed"}</div>}
       {deleteMedia.error && <div className="error">{deleteMedia.error instanceof Error ? deleteMedia.error.message : "Delete failed"}</div>}
 
       {media.length > 0 ? (
@@ -2086,13 +2108,6 @@ function activityMediaThumbnailURL(mediaId: string) {
 
 function activityMediaOriginalURL(mediaId: string) {
   return `/api/activity-media/${encodeURIComponent(mediaId)}/original`;
-}
-
-function formatSelectedFiles(files: File[]) {
-  if (files.length === 1) {
-    return files[0]?.name ?? "1 file selected";
-  }
-  return `${files.length} files selected`;
 }
 
 function formatActivityMediaMeta(media: ActivityMedia) {
