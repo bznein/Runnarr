@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-07-16
 
 ### Features
 
@@ -11,6 +11,7 @@
 
 ### Fixes
 
+- Dashboard chart tooltips now inherit the active theme instead of using the default light tooltip in dark mode.
 - Climb profile charts now show height above the climb start instead of dipping below zero for relative elevation data.
 
 ## 0.2.0 - 2026-07-16
