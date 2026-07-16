@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ type Server struct {
 	store     *Store
 	imports   *ImportService
 	garmin    *GarminService
+	media     *MediaService
 	logger    *slog.Logger
 	adminHash []byte
 }
@@ -45,6 +47,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		store:     store,
 		imports:   NewImportService(store),
 		garmin:    NewGarminService(cfg, store),
+		media:     NewMediaService(cfg, store),
 		logger:    logger,
 		adminHash: adminHash,
 	}, nil
@@ -70,6 +73,10 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activities/{id}", s.handleGetActivity)
 			r.Patch("/activities/{id}", s.handleRenameActivity)
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
+			r.Post("/activities/{id}/media", s.handleUploadActivityMedia)
+			r.Delete("/activities/{id}/media/{mediaId}", s.handleDeleteActivityMedia)
+			r.Get("/activity-media/{mediaId}/original", s.handleServeOriginalMedia)
+			r.Get("/activity-media/{mediaId}/thumbnail", s.handleServeThumbnailMedia)
 			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/imports", s.handleListImports)
@@ -184,7 +191,13 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
-	result, err := s.store.DeleteActivity(r.Context(), chi.URLParam(r, "id"))
+	activityID := chi.URLParam(r, "id")
+	mediaItems, mediaErr := s.store.ListActivityMedia(r.Context(), activityID)
+	if mediaErr != nil {
+		s.logger.Warn("list activity media before delete", "activity_id", activityID, "error", mediaErr)
+	}
+
+	result, err := s.store.DeleteActivity(r.Context(), activityID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity not found")
 		return
@@ -194,7 +207,97 @@ func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not delete activity")
 		return
 	}
+	if mediaErr == nil {
+		s.media.RemoveActivityMediaFiles(mediaItems)
+	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleUploadActivityMedia(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(maxMediaUploadBytes + 1); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart upload")
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "missing file field")
+		return
+	}
+	defer file.Close()
+
+	media, err := s.media.UploadActivityMedia(r.Context(), chi.URLParam(r, "id"), header.Filename, file)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if isMediaClientError(err) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.logger.Error("upload activity media", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not upload media")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"media": media})
+}
+
+func (s *Server) handleDeleteActivityMedia(w http.ResponseWriter, r *http.Request) {
+	_, err := s.media.DeleteActivityMedia(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "mediaId"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "media not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("delete activity media", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not delete media")
+		return
+	}
+	writeJSON(w, http.StatusOK, DeleteActivityMediaResult{Deleted: true})
+}
+
+func (s *Server) handleServeOriginalMedia(w http.ResponseWriter, r *http.Request) {
+	s.handleServeActivityMedia(w, r, false)
+}
+
+func (s *Server) handleServeThumbnailMedia(w http.ResponseWriter, r *http.Request) {
+	s.handleServeActivityMedia(w, r, true)
+}
+
+func (s *Server) handleServeActivityMedia(w http.ResponseWriter, r *http.Request, thumbnail bool) {
+	media, err := s.store.GetActivityMedia(r.Context(), chi.URLParam(r, "mediaId"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "media not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("get activity media", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load media")
+		return
+	}
+
+	var path string
+	contentType := media.ContentType
+	filename := media.OriginalFilename
+	if thumbnail {
+		path, err = s.media.ThumbnailFilePath(media)
+		contentType = "image/jpeg"
+		filename = strings.TrimSuffix(media.OriginalFilename, filepath.Ext(media.OriginalFilename)) + "-thumbnail.jpg"
+	} else {
+		path, err = s.media.OriginalFilePath(media)
+	}
+	if err != nil {
+		s.logger.Error("resolve activity media path", "media_id", media.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load media")
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		writeError(w, http.StatusNotFound, "media file not found")
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	http.ServeFile(w, r, path)
 }
 
 func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
@@ -537,6 +640,12 @@ func isMutating(method string) bool {
 	default:
 		return false
 	}
+}
+
+func isMediaClientError(err error) bool {
+	return errors.Is(err, ErrEmptyMediaFile) ||
+		errors.Is(err, ErrMediaFileTooLarge) ||
+		errors.Is(err, ErrUnsupportedMediaType)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

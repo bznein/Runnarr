@@ -4,6 +4,7 @@
 
 ### Features
 
+- Media storage foundation for authenticated JPEG and PNG photo attachments, including thumbnails and EXIF metadata extraction.
 - Local activity renaming from the activity detail page. Renames are stored only in Runnarr and survive future provider syncs.
 - Original Garmin activity links on activity detail pages when a provider URL is available.
 - Compact activity-detail action menu for rename, open-original, and delete actions.

@@ -263,6 +263,12 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	return activity, nil
 }
 
+func (s *Store) ActivityExists(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(ctx, `select exists(select 1 from activities where id = $1)`, id).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityResult, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -312,6 +318,80 @@ func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityRe
 		return DeleteActivityResult{}, err
 	}
 	return result, nil
+}
+
+func (s *Store) CreateActivityMedia(ctx context.Context, media ActivityMedia) (ActivityMedia, error) {
+	var saved ActivityMedia
+	row := s.db.QueryRow(ctx, `
+		insert into activity_media(
+			activity_id, original_filename, content_type, size_bytes, sha256,
+			original_path, thumbnail_path, width, height, capture_time, latitude, longitude
+		)
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		on conflict(activity_id, sha256) do update set
+			original_filename = activity_media.original_filename
+		returning id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
+			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
+	`, media.ActivityID, media.OriginalFilename, media.ContentType, media.SizeBytes, media.SHA256,
+		media.OriginalPath, media.ThumbnailPath, media.Width, media.Height, media.CaptureTime, media.Latitude, media.Longitude)
+	return saved, scanActivityMedia(row, &saved)
+}
+
+func (s *Store) ListActivityMedia(ctx context.Context, activityID string) ([]ActivityMedia, error) {
+	rows, err := s.db.Query(ctx, `
+		select id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
+			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
+		from activity_media
+		where activity_id = $1
+		order by coalesce(capture_time, created_at) asc, created_at asc
+	`, activityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]ActivityMedia, 0)
+	for rows.Next() {
+		var media ActivityMedia
+		if err := scanActivityMedia(rows, &media); err != nil {
+			return nil, err
+		}
+		out = append(out, media)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetActivityMedia(ctx context.Context, id string) (ActivityMedia, error) {
+	var media ActivityMedia
+	row := s.db.QueryRow(ctx, `
+		select id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
+			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
+		from activity_media
+		where id = $1
+	`, id)
+	return media, scanActivityMedia(row, &media)
+}
+
+func (s *Store) GetActivityMediaByHash(ctx context.Context, activityID, hash string) (ActivityMedia, error) {
+	var media ActivityMedia
+	row := s.db.QueryRow(ctx, `
+		select id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
+			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
+		from activity_media
+		where activity_id = $1 and sha256 = $2
+	`, activityID, hash)
+	return media, scanActivityMedia(row, &media)
+}
+
+func (s *Store) DeleteActivityMedia(ctx context.Context, activityID, mediaID string) (ActivityMedia, error) {
+	var media ActivityMedia
+	row := s.db.QueryRow(ctx, `
+		delete from activity_media
+		where activity_id = $1 and id = $2
+		returning id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
+			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
+	`, activityID, mediaID)
+	return media, scanActivityMedia(row, &media)
 }
 
 func (s *Store) RenameActivity(ctx context.Context, id, requestedName string) (Activity, error) {
@@ -640,6 +720,22 @@ func scanActivity(row rowScanner, activity *Activity) error {
 	activity.AvgHeartRate = floatPtrFromNull(avgHR)
 	activity.MaxHeartRate = floatPtrFromNull(maxHR)
 	activity.AvgPaceSPKM = floatPtrFromNull(avgPace)
+	return nil
+}
+
+func scanActivityMedia(row rowScanner, media *ActivityMedia) error {
+	var capture pgtype.Timestamptz
+	var latitude, longitude sql.NullFloat64
+	if err := row.Scan(&media.ID, &media.ActivityID, &media.OriginalFilename, &media.ContentType, &media.SizeBytes,
+		&media.SHA256, &media.OriginalPath, &media.ThumbnailPath, &media.Width, &media.Height,
+		&capture, &latitude, &longitude, &media.CreatedAt); err != nil {
+		return err
+	}
+	if capture.Valid {
+		media.CaptureTime = &capture.Time
+	}
+	media.Latitude = floatPtrFromNull(latitude)
+	media.Longitude = floatPtrFromNull(longitude)
 	return nil
 }
 

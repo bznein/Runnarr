@@ -120,7 +120,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.
 - Route maps should show start and end markers, and should eventually support well-designed direction indicators along the route without cluttering the map.
-- Activity detail should allow attaching media such as photos to an activity.
+- Activity detail should allow attaching photo media to an activity.
 - Attached media should preserve useful metadata, including capture time and EXIF GPS coordinates when present.
 - Activity detail should show attached media in a gallery; media with EXIF location should also appear on the activity map as small thumbnail markers at the recorded location.
 - Media thumbnail markers should be unobtrusive and should open or highlight the corresponding media item when selected.
@@ -188,6 +188,7 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - Activity detail should show time in heart-rate zones for activities with heart-rate samples.
 - Dashboard analytics should summarize heart-rate zone distribution across the active time scale and activity filters where enough data exists.
 - Health metrics such as resting HR, HRV, sleep, body weight, and subjective notes if provider support exists.
+- Video attachments for activities, without requiring EXIF or location metadata support.
 - Grade Adjusted Pace (GAP), sourced directly from provider/workout data when available and computed from route grade and pace when not.
 - Interactive chart zooming and panning for inspecting specific sections of an activity.
 - Activity detail charts should allow collapsing separate metric graphs into one overlaid inspection graph where that improves comparison.
