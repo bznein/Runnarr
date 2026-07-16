@@ -7,6 +7,8 @@ import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
+import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
+import type { PaceDisplayScale } from "./paceDisplay";
 import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, ImportFile, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
@@ -53,10 +55,6 @@ const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
 const ACTIVITY_LIST_PAGE_SIZE = 100;
 const themePreferenceStorageKey = "runnarr-theme-preference";
-const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
-const PACE_ROUTE_COLORS = ["#2f6df6", "#168fd2", "#18a7a2", "#2f9e44", "#8fbf26", "#f6c432", "#f28c28", "#e85d35", "#cf3f35"];
-const PACE_ROUTE_LOW_PERCENTILE = 0.05;
-const PACE_ROUTE_HIGH_PERCENTILE = 0.95;
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
 const chartTooltipContentStyle: CSSProperties = {
@@ -885,8 +883,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
   const routePoints = routeForActivity(item);
-  const paceRouteSegments = paceRouteSegmentsForActivity(item);
-  const chartData = chartDataFor(item.samples ?? []);
+  const paceScale = paceScaleForActivity(item);
+  const paceRouteSegments = paceRouteSegmentsForActivity(item, paceScale);
+  const chartData = chartDataFor(item.samples ?? [], paceScale);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
   const climbs = item.climbs ?? [];
   const selectedClimb = selectedClimbIndex === undefined ? undefined : climbs.find((climb) => climb.index === selectedClimbIndex);
@@ -2215,7 +2214,11 @@ function routeForActivity(activity: Activity): RoutePoint[] {
   return [];
 }
 
-function paceRouteSegmentsForActivity(activity: Activity): PaceRouteSegment[] {
+function paceScaleForActivity(activity: Activity) {
+  return paceScaleFromSpeeds((activity.samples ?? []).map((sample) => sample.speedMPS));
+}
+
+function paceRouteSegmentsForActivity(activity: Activity, paceScale?: PaceDisplayScale): PaceRouteSegment[] {
   const samples = (activity.samples ?? [])
     .filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number")
     .map((sample) => ({
@@ -2238,9 +2241,8 @@ function paceRouteSegmentsForActivity(activity: Activity): PaceRouteSegment[] {
     return [];
   }
 
-  const scale = paceRouteScale(segments.map((segment) => segment.paceSPKM));
   return segments.reduce<PaceRouteSegment[]>((grouped, segment) => {
-    const color = paceRouteColor(segment.paceSPKM, scale.minPace, scale.maxPace);
+    const color = paceScale ? paceColorForPace(segment.paceSPKM, paceScale) : PACE_ROUTE_COLORS[Math.floor(PACE_ROUTE_COLORS.length / 2)];
     const previous = grouped[grouped.length - 1];
     if (previous?.color === color && routePointsEqual(previous.points[previous.points.length - 1], segment.start)) {
       previous.points.push(segment.end);
@@ -2257,44 +2259,7 @@ function paceForRouteSegment(previousSpeedMPS?: number, currentSpeedMPS?: number
     return undefined;
   }
   const avgSpeedMPS = speeds.reduce((total, speed) => total + speed, 0) / speeds.length;
-  return Math.min(1000 / avgSpeedMPS, PACE_GRAPH_SLOW_CAP_S_PER_KM);
-}
-
-function paceRouteScale(pacesSPKM: number[]) {
-  const sorted = [...pacesSPKM].sort((left, right) => left - right);
-  const actualMin = sorted[0] ?? 0;
-  const actualMax = sorted[sorted.length - 1] ?? actualMin;
-  let minPace = routeQuantile(sorted, PACE_ROUTE_LOW_PERCENTILE);
-  let maxPace = routeQuantile(sorted, PACE_ROUTE_HIGH_PERCENTILE);
-  if (maxPace - minPace < 1 && actualMax - actualMin >= 1) {
-    minPace = actualMin;
-    maxPace = actualMax;
-  }
-  return { minPace, maxPace };
-}
-
-function routeQuantile(sortedValues: number[], quantile: number) {
-  if (sortedValues.length === 0) {
-    return 0;
-  }
-  const position = Math.max(0, Math.min(sortedValues.length - 1, quantile * (sortedValues.length - 1)));
-  const lowerIndex = Math.floor(position);
-  const upperIndex = Math.ceil(position);
-  if (lowerIndex === upperIndex) {
-    return sortedValues[lowerIndex];
-  }
-  const ratio = position - lowerIndex;
-  return sortedValues[lowerIndex] + (sortedValues[upperIndex] - sortedValues[lowerIndex]) * ratio;
-}
-
-function paceRouteColor(paceSPKM: number, minPace: number, maxPace: number) {
-  if (maxPace - minPace < 1) {
-    return PACE_ROUTE_COLORS[Math.floor(PACE_ROUTE_COLORS.length / 2)];
-  }
-  const clampedPace = Math.max(minPace, Math.min(maxPace, paceSPKM));
-  const normalized = (maxPace - clampedPace) / (maxPace - minPace);
-  const index = Math.max(0, Math.min(PACE_ROUTE_COLORS.length - 1, Math.round(normalized * (PACE_ROUTE_COLORS.length - 1))));
-  return PACE_ROUTE_COLORS[index];
+  return speedToPaceSPKM(avgSpeedMPS);
 }
 
 function routePointsEqual(left?: RoutePoint, right?: RoutePoint) {
@@ -2495,9 +2460,9 @@ function dateRangesMatch(left: ActivityDateRange, right: ActivityDateRange) {
   return (left.dateFrom ?? "") === (right.dateFrom ?? "") && (left.dateTo ?? "") === (right.dateTo ?? "");
 }
 
-function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
+function chartDataFor(samples: ActivitySample[], paceScale = paceScaleFromSpeeds(samples.map((sample) => sample.speedMPS))): ActivityChartPoint[] {
   const points = samples.map((sample, index) => {
-    const rawPaceSPKM = sample.speedMPS && sample.speedMPS > 0 ? 1000 / sample.speedMPS : undefined;
+    const rawPaceSPKM = speedToPaceSPKM(sample.speedMPS);
     return {
       index: sample.index ?? index,
       label: sample.distanceM !== undefined ? `${(sample.distanceM / 1000).toFixed(1)} km` : String(index + 1),
@@ -2506,7 +2471,7 @@ function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
       longitude: typeof sample.longitude === "number" ? sample.longitude : undefined,
       elevationM: typeof sample.elevationM === "number" ? sample.elevationM : undefined,
       heartRate: sample.heartRate,
-      paceSPKM: rawPaceSPKM !== undefined ? Math.min(rawPaceSPKM, PACE_GRAPH_SLOW_CAP_S_PER_KM) : undefined,
+      paceSPKM: clampPaceToScale(rawPaceSPKM, paceScale),
       rawPaceSPKM,
       power: sample.power,
       cadence: sample.cadence
