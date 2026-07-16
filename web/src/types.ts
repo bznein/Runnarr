@@ -76,6 +76,7 @@ export type Activity = {
   avgHeartRate?: number;
   maxHeartRate?: number;
   avgPaceSPKM?: number;
+  caloriesKcal?: number;
   originalProviderUrl?: string;
   summaryPolyline?: string;
   samples?: ActivitySample[];
@@ -95,7 +96,7 @@ export type DeleteActivityMediaResult = {
   deleted: boolean;
 };
 
-export type ActivitySortBy = "date" | "duration" | "distance" | "elevation_gain" | "avg_pace";
+export type ActivitySortBy = "date" | "duration" | "distance" | "elevation_gain" | "avg_pace" | "calories";
 export type ActivitySortOrder = "asc" | "desc";
 
 export type ActivityTypeFilters = {
