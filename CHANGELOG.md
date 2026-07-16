@@ -4,6 +4,7 @@
 
 ### Features
 
+- Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
 - Settings now consolidates Garmin sync, display preferences, manual file import, and collapsed diagnostics.
 - Added a persistent light/dark/system theme preference.
 

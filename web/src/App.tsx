@@ -712,6 +712,7 @@ function ActivityTable({
             {!compact && <th>Type</th>}
             <th>Distance</th>
             <th>Time</th>
+            {!compact && <th>Calories</th>}
             {!compact && <th>Source</th>}
             {onDelete && <th aria-label="Actions" />}
           </tr>
@@ -724,6 +725,7 @@ function ActivityTable({
               {!compact && <td>{activity.sportType}</td>}
               <td>{formatDistance(activity.distanceM)}</td>
               <td>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</td>
+              {!compact && <td>{formatCalories(activity.caloriesKcal)}</td>}
               {!compact && <td><span className="source-pill">{activity.source}</span></td>}
               {onDelete && (
                 <td className="row-actions">
@@ -891,6 +893,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
         <Metric label="Pace" value={formatPace(item.avgPaceSPKM)} />
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
+        {item.caloriesKcal !== undefined && <Metric label="Calories" value={formatCalories(item.caloriesKcal)} />}
       </section>
 
       {mediaItems.length > 0 ? (
@@ -2154,7 +2157,8 @@ function activitySortOptions(): Array<{ value: ActivitySortBy; label: string }> 
     { value: "duration", label: "Duration" },
     { value: "distance", label: "Distance" },
     { value: "elevation_gain", label: "Elevation gain" },
-    { value: "avg_pace", label: "Avg pace" }
+    { value: "avg_pace", label: "Avg pace" },
+    { value: "calories", label: "Calories" }
   ];
 }
 
@@ -2518,4 +2522,11 @@ function formatPace(secondsPerKm?: number) {
   const minutes = Math.floor(secondsPerKm / 60);
   const seconds = Math.round(secondsPerKm % 60);
   return `${minutes}:${String(seconds).padStart(2, "0")} /km`;
+}
+
+function formatCalories(value?: number) {
+  if (value === undefined || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${Math.round(value).toLocaleString()} kcal`;
 }

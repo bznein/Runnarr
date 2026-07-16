@@ -18,6 +18,7 @@ type Activity struct {
 	AvgHeartRate        *float64         `json:"avgHeartRate,omitempty"`
 	MaxHeartRate        *float64         `json:"maxHeartRate,omitempty"`
 	AvgPaceSPKM         *float64         `json:"avgPaceSPKM,omitempty"`
+	CaloriesKcal        *int             `json:"caloriesKcal,omitempty"`
 	OriginalProviderURL string           `json:"originalProviderUrl,omitempty"`
 	SummaryPolyline     string           `json:"summaryPolyline,omitempty"`
 	Samples             []ActivitySample `json:"samples,omitempty"`
@@ -101,6 +102,7 @@ type ImportedActivity struct {
 	ElevationGainM      float64          `json:"elevationGainM"`
 	AvgHeartRate        *float64         `json:"avgHeartRate,omitempty"`
 	MaxHeartRate        *float64         `json:"maxHeartRate,omitempty"`
+	CaloriesKcal        *int             `json:"caloriesKcal,omitempty"`
 	OriginalProviderURL string           `json:"originalProviderUrl,omitempty"`
 	SummaryPolyline     string           `json:"summaryPolyline,omitempty"`
 	Samples             []ActivitySample `json:"samples,omitempty"`
