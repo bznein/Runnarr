@@ -4,6 +4,7 @@
 
 ### Features
 
+- Activity lap tables now show per-lap pace derived from lap distance and elapsed time.
 - Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
 
 ## 0.3.0 - 2026-07-16

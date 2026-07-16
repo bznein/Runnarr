@@ -995,6 +995,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                 <th>Lap</th>
                 <th>Distance</th>
                 <th>Time</th>
+                <th>Pace</th>
                 {showLapElevation && <th>Gain</th>}
                 {showLapElevation && <th>Loss</th>}
               </tr>
@@ -1005,6 +1006,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                   <td>{lap.index + 1}</td>
                   <td>{formatDistance(lap.distanceM)}</td>
                   <td>{formatDuration(lap.elapsedTimeS)}</td>
+                  <td>{formatPace(lapPaceSPKM(lap))}</td>
                   {showLapElevation && <td>{lap.elevationGainM !== undefined ? `${Math.round(lap.elevationGainM).toLocaleString()} m` : "-"}</td>}
                   {showLapElevation && <td>{lap.elevationLossM !== undefined ? `${Math.round(lap.elevationLossM).toLocaleString()} m` : "-"}</td>}
                 </tr>
@@ -2660,6 +2662,13 @@ function formatDuration(totalSeconds: number) {
     return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function lapPaceSPKM(lap: NonNullable<Activity["laps"]>[number]) {
+  if (lap.distanceM <= 0 || lap.elapsedTimeS <= 0) {
+    return undefined;
+  }
+  return lap.elapsedTimeS / (lap.distanceM / 1000);
 }
 
 function formatPace(secondsPerKm?: number) {
