@@ -4,6 +4,7 @@
 
 ### Features
 
+- Activity maps now show every detected climb with start markers, and clicking a climb on the map or in the list selects it.
 - Activity browsing now loads additional pages on demand instead of stopping at the first 100 activities.
 - Settings now consolidates Garmin sync, display preferences, manual file import, and collapsed diagnostics.
 - Added a persistent light/dark/system theme preference.
