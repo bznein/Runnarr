@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, BarChart3, Database, LogOut, Map, Trash2, Upload } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Cloud, Database, Filter, LogOut, Map, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
-import type { Activity, ActivityClimb, ActivitySample, ActivitySortBy, ActivitySortOrder, ActivityTypeFilters, AppConfig } from "./types";
+import type { Activity, ActivityClimb, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
-type ActivityTypeFiltersValue = ActivityTypeFilters;
+type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
+type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityChartPoint = {
   index: number;
@@ -38,15 +39,8 @@ type ClimbProfilePoint = {
   elevationM: number;
 };
 
-const emptyActivityTypeFilters: ActivityTypeFiltersValue = {
-  sports: [],
-  excludeSports: [],
-  search: "",
-  dateFrom: "",
-  dateTo: "",
-  sortBy: "date",
-  sortOrder: "desc"
-};
+const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
+const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
 const PACE_GRAPH_SLOW_CAP_S_PER_KM = 600;
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
@@ -105,6 +99,7 @@ function AuthenticatedApp() {
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<Map size={18} />} label="Activities" />
           <NavItem to="/imports" icon={<Upload size={18} />} label="Imports" />
+          <NavItem to="/settings" icon={<Cloud size={18} />} label="Providers" />
         </nav>
         <button className="nav-button" type="button" onClick={() => logout.mutate()}>
           <LogOut size={18} />
@@ -117,6 +112,7 @@ function AuthenticatedApp() {
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
           <Route path="/imports" element={<ImportsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -131,6 +127,29 @@ function NavItem({ to, icon, label }: { to: string; icon: JSX.Element; label: st
       <span>{label}</span>
     </NavLink>
   );
+}
+
+function deleteActivityConfirmation(activity: Activity) {
+  if (activity.source === "file") {
+    return `Delete "${activity.name}" from Runnarr?`;
+  }
+  const source = formatSourceName(activity.source);
+  return [
+    `Remove "${activity.name}" from Runnarr?`,
+    `Because this came from ${source}, Runnarr will remember it as ignored and will not import it again during future syncs.`,
+    `This will not delete it from ${source}.`
+  ].join("\n\n");
+}
+
+function formatSourceName(source: string) {
+  switch (source) {
+    case "garmin":
+      return "Garmin Connect";
+    case "file":
+      return "manual upload";
+    default:
+      return source;
+  }
 }
 
 function LoginPage() {
@@ -175,7 +194,9 @@ function LoginPage() {
 }
 
 function Dashboard() {
-  const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.summary() });
+  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
+  const summary = useQuery({ queryKey: ["summary", filters], queryFn: () => api.summary(filters) });
 
   if (summary.isLoading) {
     return <Page title="Dashboard"><LoadingRow /></Page>;
@@ -191,6 +212,11 @@ function Dashboard() {
 
   return (
     <Page title="Dashboard" actions={<Link className="secondary-button" to="/imports"><Upload size={16} /> Import</Link>}>
+      <ActivityTypeFilterPanel
+        activityTypes={activityTypes.data?.activityTypes ?? []}
+        filters={filters}
+        onChange={setFilters}
+      />
       <section className="metric-grid">
         <Metric label="Activities" value={summary.data.activityCount.toLocaleString()} />
         <Metric label="Distance" value={formatDistance(summary.data.distanceM)} />
@@ -224,7 +250,13 @@ function Dashboard() {
 }
 
 function ActivitiesPage() {
-  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = activityFiltersFromSearchParams(searchParams);
+  const setFilters = (nextFilters: ActivityTypeFiltersValue) => {
+    setSearchParams(activityFiltersToSearchParams(nextFilters), { replace: true });
+  };
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
   const activities = useQuery({ queryKey: ["activities", filters], queryFn: () => api.activities(filters) });
   const queryClient = useQueryClient();
@@ -239,26 +271,294 @@ function ActivitiesPage() {
     }
   });
   const handleDelete = (activity: Activity) => {
-    if (window.confirm(`Delete "${activity.name}" from Runnarr?`)) {
+    if (window.confirm(deleteActivityConfirmation(activity))) {
       deleteActivity.mutate(activity.id);
     }
   };
+  const activityList = activities.data?.activities ?? [];
+  const dateFiltersActive = hasDateFilters(filters);
+  const anyFiltersActive = hasActivityFilters(filters);
+  const currentSort = normalizedActivitySort(filters);
+  const sortActive = !activitySortsMatch(currentSort, defaultActivitySort);
   return (
-    <Page title="Activities">
-      <ActivityControls
+    <Page
+      title="Activities"
+      actions={
+        <>
+          <button
+            className={`secondary-button ${dateFiltersActive ? "active-filter-button" : ""}`}
+            type="button"
+            onClick={() => setFiltersOpen(true)}
+          >
+            <Filter size={16} />
+            Filter
+            {dateFiltersActive && <span className="button-badge">1</span>}
+          </button>
+          <button
+            className={`secondary-button ${sortActive ? "active-filter-button" : ""}`}
+            type="button"
+            onClick={() => setSortOpen(true)}
+          >
+            <ArrowUpDown size={16} />
+            Sort
+          </button>
+        </>
+      }
+    >
+      {filtersOpen && (
+        <ActivityFiltersDialog
+          filters={filters}
+          onApply={setFilters}
+          onClose={() => setFiltersOpen(false)}
+        />
+      )}
+      {sortOpen && (
+        <ActivitySortDialog
+          filters={filters}
+          onApply={setFilters}
+          onClose={() => setSortOpen(false)}
+        />
+      )}
+      <ActivitySearchPanel
+        value={filters.search ?? ""}
+        onChange={(search) => setFilters({ ...filters, search })}
+      />
+      <ActivityTypeFilterPanel
         activityTypes={activityTypes.data?.activityTypes ?? []}
         filters={filters}
         onChange={setFilters}
       />
       {activities.isLoading && <LoadingRow />}
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
-      {activities.data && <ActivityTable activities={activities.data.activities ?? []} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
-      {(activities.data?.activities ?? []).length === 0 && <EmptyState title="No activities yet" action={<Link className="secondary-button" to="/imports">Import a file</Link>} />}
+      {activities.data && activityList.length > 0 && <ActivityTable activities={activityList} onDelete={handleDelete} deletingId={deleteActivity.variables} />}
+      {activities.data && activityList.length === 0 && (
+        <EmptyState
+          title={anyFiltersActive ? "No activities found" : "No activities yet"}
+          action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/imports">Import a file</Link>}
+        />
+      )}
     </Page>
   );
 }
 
-function ActivityControls({
+function ActivitySearchPanel({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <section className="panel search-panel">
+      <label className="field search-field">
+        <span>Search by name</span>
+        <input
+          type="search"
+          placeholder="Activity name"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+      <button className="secondary-button small-button" type="button" disabled={value.length === 0} onClick={() => onChange("")}>
+        Clear
+      </button>
+    </section>
+  );
+}
+
+function ActivityFiltersDialog({
+  filters,
+  onApply,
+  onClose
+}: {
+  filters: ActivityTypeFiltersValue;
+  onApply: (filters: ActivityTypeFiltersValue) => void;
+  onClose: () => void;
+}) {
+  const [draftDates, setDraftDates] = useState<ActivityDateRange>({
+    dateFrom: filters.dateFrom ?? "",
+    dateTo: filters.dateTo ?? ""
+  });
+  const presets = dateFilterPresets();
+  const activePreset = presets.find((preset) => dateRangesMatch(draftDates, preset.range));
+  const dateRangeInvalid = Boolean(draftDates.dateFrom && draftDates.dateTo && draftDates.dateFrom > draftDates.dateTo);
+  const applyDates = () => {
+    if (dateRangeInvalid) {
+      return;
+    }
+    onApply({
+      ...filters,
+      dateFrom: draftDates.dateFrom ?? "",
+      dateTo: draftDates.dateTo ?? ""
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-filters-title">
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Filters</div>
+            <h2 id="activity-filters-title">Date</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close filters" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Preset</div>
+          <div className="date-preset-grid">
+            {presets.map((preset) => (
+              <button
+                key={preset.id}
+                className={`filter-chip ${activePreset?.id === preset.id ? "active" : ""}`}
+                type="button"
+                onClick={() => setDraftDates(preset.range)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Custom range</div>
+          <div className="date-range-grid">
+            <label className="field">
+              <span>From</span>
+              <input
+                type="date"
+                value={draftDates.dateFrom ?? ""}
+                max={draftDates.dateTo || undefined}
+                onChange={(event) => setDraftDates({ ...draftDates, dateFrom: event.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>To</span>
+              <input
+                type="date"
+                value={draftDates.dateTo ?? ""}
+                min={draftDates.dateFrom || undefined}
+                onChange={(event) => setDraftDates({ ...draftDates, dateTo: event.target.value })}
+              />
+            </label>
+          </div>
+          {dateRangeInvalid && <div className="row-error">End date must be after start date.</div>}
+        </div>
+
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={() => setDraftDates({ dateFrom: "", dateTo: "" })}>
+            Clear dates
+          </button>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" disabled={dateRangeInvalid} onClick={applyDates}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ActivitySortDialog({
+  filters,
+  onApply,
+  onClose
+}: {
+  filters: ActivityTypeFiltersValue;
+  onApply: (filters: ActivityTypeFiltersValue) => void;
+  onClose: () => void;
+}) {
+  const [draftSort, setDraftSort] = useState<ActivitySort>(normalizedActivitySort(filters));
+  const applySort = () => {
+    onApply({
+      ...filters,
+      sortBy: draftSort.sortBy,
+      sortOrder: draftSort.sortOrder
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-sort-title">
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Sort</div>
+            <h2 id="activity-sort-title">Activities</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close sort" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Sort by</div>
+          <div className="sort-option-grid">
+            {activitySortOptions().map((option) => (
+              <button
+                key={option.value}
+                className={`sort-choice ${draftSort.sortBy === option.value ? "active" : ""}`}
+                type="button"
+                onClick={() => setDraftSort({ ...draftSort, sortBy: option.value })}
+              >
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Direction</div>
+          <div className="segmented-control">
+            <button
+              className={draftSort.sortOrder === "desc" ? "active" : ""}
+              type="button"
+              onClick={() => setDraftSort({ ...draftSort, sortOrder: "desc" })}
+            >
+              <ArrowDown size={15} />
+              Desc
+            </button>
+            <button
+              className={draftSort.sortOrder === "asc" ? "active" : ""}
+              type="button"
+              onClick={() => setDraftSort({ ...draftSort, sortOrder: "asc" })}
+            >
+              <ArrowUp size={15} />
+              Asc
+            </button>
+          </div>
+        </div>
+
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={() => setDraftSort(defaultActivitySort)}>
+            Reset
+          </button>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" onClick={applySort}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ActivityTypeFilterPanel({
   activityTypes,
   filters,
   onChange
@@ -269,77 +569,71 @@ function ActivityControls({
 }) {
   const includeSet = new Set(filters.sports);
   const excludeSet = new Set(filters.excludeSports);
-  const clearFilters = () => onChange(emptyActivityTypeFilters);
-  const update = (partial: Partial<ActivityTypeFiltersValue>) => onChange({ ...filters, ...partial });
+  if (activityTypes.length === 0) {
+    return null;
+  }
+
   const toggleInclude = (sport: string) => {
-    const sports = includeSet.has(sport) ? filters.sports.filter((item) => item !== sport) : [...filters.sports, sport];
-    onChange({ ...filters, sports, excludeSports: filters.excludeSports.filter((item) => item !== sport) });
+    const nextSports = includeSet.has(sport)
+      ? filters.sports.filter((item) => item !== sport)
+      : [...filters.sports, sport];
+    onChange({
+      ...filters,
+      sports: nextSports,
+      excludeSports: filters.excludeSports.filter((item) => item !== sport)
+    });
   };
   const toggleExclude = (sport: string) => {
-    const excludeSports = excludeSet.has(sport) ? filters.excludeSports.filter((item) => item !== sport) : [...filters.excludeSports, sport];
-    onChange({ ...filters, sports: filters.sports.filter((item) => item !== sport), excludeSports });
+    const nextExcluded = excludeSet.has(sport)
+      ? filters.excludeSports.filter((item) => item !== sport)
+      : [...filters.excludeSports, sport];
+    onChange({
+      ...filters,
+      sports: filters.sports.filter((item) => item !== sport),
+      excludeSports: nextExcluded
+    });
   };
+  const clearFilters = () => onChange({ ...filters, sports: [], excludeSports: [] });
+  const hasFilters = filters.sports.length > 0 || filters.excludeSports.length > 0;
 
   return (
-    <section className="panel activity-controls">
-      <div className="control-grid">
-        <label className="field">
-          <span>Search</span>
-          <input value={filters.search ?? ""} onChange={(event) => update({ search: event.target.value })} placeholder="Activity name" />
-        </label>
-        <label className="field">
-          <span>From</span>
-          <input type="date" value={filters.dateFrom ?? ""} onChange={(event) => update({ dateFrom: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>To</span>
-          <input type="date" value={filters.dateTo ?? ""} onChange={(event) => update({ dateTo: event.target.value })} />
-        </label>
-        <label className="field">
-          <span>Sort</span>
-          <select value={filters.sortBy ?? "date"} onChange={(event) => update({ sortBy: event.target.value as ActivitySortBy })}>
-            <option value="date">Date</option>
-            <option value="distance">Distance</option>
-            <option value="duration">Duration</option>
-            <option value="elevation_gain">Elevation</option>
-            <option value="avg_pace">Pace</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>Direction</span>
-          <select value={filters.sortOrder ?? "desc"} onChange={(event) => update({ sortOrder: event.target.value as ActivitySortOrder })}>
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
-          </select>
-        </label>
+    <section className="panel filter-panel">
+      <div className="filter-header">
+        <div className="panel-heading">Activity types</div>
+        <button className="secondary-button small-button" type="button" disabled={!hasFilters} onClick={clearFilters}>Clear</button>
       </div>
-      {activityTypes.length > 0 && (
-        <div className="filter-groups">
-          <div>
-            <div className="filter-label">Show only</div>
-            <div className="filter-chips">
-              {activityTypes.map((sport) => (
-                <button key={sport} className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`} type="button" onClick={() => toggleInclude(sport)}>
-                  {sport}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="filter-label">Exclude</div>
-            <div className="filter-chips">
-              {activityTypes.map((sport) => (
-                <button key={sport} className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`} type="button" onClick={() => toggleExclude(sport)}>
-                  {sport}
-                </button>
-              ))}
-            </div>
+      <div className="filter-grid">
+        <div className="filter-group">
+          <div className="filter-label">Show only</div>
+          <div className="chip-list">
+            {activityTypes.map((sport) => (
+              <button
+                key={`include-${sport}`}
+                className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleInclude(sport)}
+              >
+                {sport}
+              </button>
+            ))}
           </div>
         </div>
-      )}
-      <button className="secondary-button small-button" type="button" onClick={clearFilters}>
-        Clear
-      </button>
+        <div className="filter-group">
+          <div className="filter-label">Exclude</div>
+          <div className="chip-list">
+            {activityTypes.map((sport) => (
+              <button
+                key={`exclude-${sport}`}
+                className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`}
+                type="button"
+                onClick={() => toggleExclude(sport)}
+              >
+                {sport}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -413,7 +707,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["summary"] })
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-types"] })
       ]);
       navigate("/activities");
     }
@@ -441,8 +736,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimb = climbs[selectedClimbIndex] ?? climbs[0];
   const selectedClimbPoints = routeForClimb(item, selectedClimb);
   const selectedClimbProfile = climbProfileFor(item, selectedClimb);
+  const showLapElevation = (item.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
   const handleDelete = () => {
-    if (window.confirm(`Delete "${item.name}" from Runnarr?`)) {
+    if (window.confirm(deleteActivityConfirmation(item))) {
       deleteActivity.mutate(item.id);
     }
   };
@@ -493,6 +789,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                 <th>Lap</th>
                 <th>Distance</th>
                 <th>Time</th>
+                {showLapElevation && <th>Gain</th>}
+                {showLapElevation && <th>Loss</th>}
               </tr>
             </thead>
             <tbody>
@@ -501,6 +799,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                   <td>{lap.index + 1}</td>
                   <td>{formatDistance(lap.distanceM)}</td>
                   <td>{formatDuration(lap.elapsedTimeS)}</td>
+                  {showLapElevation && <td>{lap.elevationGainM !== undefined ? `${Math.round(lap.elevationGainM).toLocaleString()} m` : "-"}</td>}
+                  {showLapElevation && <td>{lap.elevationLossM !== undefined ? `${Math.round(lap.elevationLossM).toLocaleString()} m` : "-"}</td>}
                 </tr>
               ))}
             </tbody>
@@ -641,6 +941,269 @@ function ImportsPage() {
       </section>
     </Page>
   );
+}
+
+function SettingsPage() {
+  const queryClient = useQueryClient();
+  const garminStatus = useQuery({ queryKey: ["garmin-status"], queryFn: api.garminStatus });
+  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
+  const [garminEmail, setGarminEmail] = useState("");
+  const [garminPassword, setGarminPassword] = useState("");
+  const [garminMFACode, setGarminMFACode] = useState("");
+  const [garminOldest, setGarminOldest] = useState("1970-01-01");
+  const latestGarminJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin");
+  const garminSyncRunning = latestGarminJob?.status === "running";
+  const garminConnect = useMutation({
+    mutationFn: api.garminConnect,
+    onSuccess: async () => {
+      setGarminPassword("");
+      setGarminMFACode("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["garmin-status"] }),
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] })
+      ]);
+    }
+  });
+  const garminSync = useMutation({
+    mutationFn: api.garminSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["garmin-status"] }),
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
+
+  return (
+    <Page title="Providers">
+      <section className="panel provider-panel">
+        <div>
+          <div className="panel-heading">Garmin Connect</div>
+          <p className="muted">{garminStatus.data?.connected ? `Connected as ${garminStatus.data.connection.displayName}` : "Connect with your Garmin account. Credentials are used only to create Garmin Connect tokens."}</p>
+        </div>
+        <div className="provider-controls">
+          <input
+            type="email"
+            placeholder="Garmin email"
+            value={garminEmail}
+            onChange={(event) => setGarminEmail(event.target.value)}
+          />
+          <input
+            type="password"
+            placeholder="Garmin password"
+            value={garminPassword}
+            onChange={(event) => setGarminPassword(event.target.value)}
+          />
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="MFA code"
+            value={garminMFACode}
+            onChange={(event) => setGarminMFACode(event.target.value)}
+          />
+          <button className="secondary-button" type="button" disabled={!garminEmail || !garminPassword || garminConnect.isPending} onClick={() => garminConnect.mutate({ email: garminEmail, password: garminPassword, mfaCode: garminMFACode })}>
+            <Cloud size={16} />
+            Connect
+          </button>
+          <label className="compact-field">
+            <span>Oldest</span>
+            <input type="date" value={garminOldest} onChange={(event) => setGarminOldest(event.target.value)} />
+          </label>
+          <button className="primary-button" type="button" disabled={!garminStatus.data?.connected || garminSync.isPending || garminSyncRunning} onClick={() => garminSync.mutate(garminOldest)}>
+            <RefreshCw size={16} />
+            {garminSyncRunning ? "Syncing" : "Sync"}
+          </button>
+        </div>
+      </section>
+      <SyncProgressCard job={latestGarminJob} />
+      {garminConnect.error && <div className="error">{garminConnect.error instanceof Error ? garminConnect.error.message : "Garmin connection failed"}</div>}
+      {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
+      <section className="panel">
+        <div className="panel-heading">Sync jobs</div>
+        {jobs.isLoading && <LoadingRow />}
+        {jobs.data && (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Kind</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Details</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(jobs.data.jobs ?? []).map((job) => (
+                <tr key={job.id}>
+                  <td>{job.provider}</td>
+                  <td>{job.kind}</td>
+                  <td><span className={`status ${job.status}`}>{job.status}</span>{job.error && <span className="row-error">{job.error}</span>}</td>
+                  <td><SyncProgressBar job={job} /></td>
+                  <td>{formatSyncJobDetails(job)}</td>
+                  <td>{formatDate(job.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </Page>
+  );
+}
+
+function SyncProgressCard({ job }: { job?: SyncJob }) {
+  if (!job || job.provider !== "garmin") {
+    return null;
+  }
+  const payload = job.payload ?? {};
+  const imported = payloadNumber(payload, "imported");
+  const processed = payloadNumber(payload, "processed");
+  const activities = payloadNumber(payload, "activities");
+  const failed = payloadNumber(payload, "failed");
+  const skippedExcluded = payloadNumber(payload, "skippedExcluded");
+  const stage = payloadText(payload, "stage") || job.status;
+  const listing = isSyncListingStage(stage);
+  const fetchedPages = payloadNumber(payload, "fetchedPages");
+  const oldest = payloadText(payload, "oldest");
+  const currentActivityName = payloadText(payload, "currentActivityName");
+  const warnings = payloadList(payload, "warnings");
+  const firstErrors = payloadList(payload, "firstErrors");
+  const foundLabel = activities === 1 ? "activity" : "activities";
+  const detailText = syncProgressDetailText(job, stage, currentActivityName, oldest, activities);
+
+  return (
+    <section className="panel sync-progress-panel">
+      <div className="filter-header">
+        <div className="panel-heading">Garmin sync progress</div>
+        <span className={`status ${job.status}`}>{job.status}</span>
+      </div>
+      <SyncProgressBar job={job} />
+      <div className="sync-progress-grid">
+        {listing ? (
+          <>
+            <SyncStat label="Found" value={`${activities.toLocaleString()} ${foundLabel}`} />
+            <SyncStat label="Pages" value={fetchedPages.toLocaleString()} />
+            <SyncStat label="Imported" value={imported.toLocaleString()} />
+            <SyncStat label="Failed" value={failed.toLocaleString()} />
+          </>
+        ) : (
+          <>
+            <SyncStat label="Completed" value={`${processed.toLocaleString()} / ${activities.toLocaleString()}`} />
+            <SyncStat label="Imported" value={imported.toLocaleString()} />
+            <SyncStat label="Ignored" value={skippedExcluded.toLocaleString()} />
+            <SyncStat label="Failed" value={failed.toLocaleString()} />
+          </>
+        )}
+      </div>
+      <div className="sync-progress-details">
+        <span>{stage}</span>
+        <span>{detailText}</span>
+        <span>{formatSyncJobDetails(job)}</span>
+      </div>
+      {(warnings.length > 0 || firstErrors.length > 0) && (
+        <div className="sync-progress-messages">
+          {warnings.map((message) => <span key={`warning-${message}`}>{message}</span>)}
+          {firstErrors.map((message) => <span key={`error-${message}`}>{message}</span>)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SyncStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="sync-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function SyncProgressBar({ job }: { job: SyncJob }) {
+  const payload = job.payload ?? {};
+  const processed = payloadNumber(payload, "processed");
+  const activities = payloadNumber(payload, "activities");
+  const stage = payloadText(payload, "stage");
+  const listing = job.status === "running" && isSyncListingStage(stage);
+  const hasKnownTotal = activities > 0 && !listing;
+  const percent = hasKnownTotal ? Math.min(100, Math.round((processed / activities) * 100)) : 0;
+  return (
+    <div className="progress-cell">
+      <div className={`progress-bar${listing ? " indeterminate" : ""}`} aria-label={listing ? "Listing Garmin activities" : `Sync progress ${percent}%`}>
+        <span style={listing ? undefined : { width: `${percent}%` }} />
+      </div>
+      <span>{listing ? "Listing" : hasKnownTotal ? `${percent}%` : job.status}</span>
+    </div>
+  );
+}
+
+function formatSyncJobDetails(job: SyncJob) {
+  const payload = job.payload ?? {};
+  const imported = payloadNumber(payload, "imported");
+  const processed = payloadNumber(payload, "processed");
+  const failed = payloadNumber(payload, "failed");
+  const skippedExcluded = payloadNumber(payload, "skippedExcluded");
+  const activities = payloadNumber(payload, "activities");
+  const fetchedPages = payloadNumber(payload, "fetchedPages");
+  const stage = payloadText(payload, "stage");
+  const parts = [];
+  if (isSyncListingStage(stage)) {
+    if (activities > 0) {
+      parts.push(`${activities} found`);
+    }
+    if (fetchedPages > 0) {
+      parts.push(`${fetchedPages} pages`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "listing";
+  }
+  if (activities > 0) {
+    parts.push(`${processed}/${activities} processed`);
+  }
+  if (imported > 0 || failed > 0) {
+    parts.push(`${imported}/${activities} imported`);
+  }
+  if (failed > 0) {
+    parts.push(`${failed} failed`);
+  }
+  if (skippedExcluded > 0) {
+    parts.push(`${skippedExcluded} ignored`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "-";
+}
+
+function isSyncListingStage(stage: string) {
+  return stage.toLowerCase().includes("listing");
+}
+
+function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, oldest: string, activities: number) {
+  if (isSyncListingStage(stage)) {
+    return oldest ? `Searching from ${oldest}` : "Searching Garmin Connect";
+  }
+  if (currentActivityName) {
+    return currentActivityName;
+  }
+  if (job.status === "completed") {
+    return activities > 0 ? "Sync finished" : "No activities found";
+  }
+  return "Waiting for first activity";
+}
+
+function payloadNumber(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function payloadText(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
+}
+
+function payloadList(payload: Record<string, unknown>, key: string) {
+  const value = payload[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function Page({ title, eyebrow, actions, children }: { title: string; eyebrow?: string; actions?: ReactNode; children: ReactNode }) {
@@ -851,6 +1414,149 @@ function samplesForClimb(activity: Activity, climb?: ActivityClimb) {
     return [];
   }
   return (activity.samples ?? []).filter((sample) => sample.index >= climb.startSampleIndex && sample.index <= climb.endSampleIndex);
+}
+
+function hasActivityFilters(filters: ActivityTypeFiltersValue) {
+  return Boolean(
+    filters.search?.trim() ||
+    filters.dateFrom ||
+    filters.dateTo ||
+    filters.sports.length > 0 ||
+    filters.excludeSports.length > 0
+  );
+}
+
+function hasDateFilters(filters: ActivityTypeFiltersValue) {
+  return Boolean(filters.dateFrom || filters.dateTo);
+}
+
+function activityFiltersFromSearchParams(params: URLSearchParams): ActivityTypeFiltersValue {
+  const filters: ActivityTypeFiltersValue = {
+    ...emptyActivityTypeFilters,
+    sports: compactSearchParamValues(params, "sport", "sports"),
+    excludeSports: compactSearchParamValues(params, "excludeSport", "excludeSports"),
+    search: params.get("search")?.trim() ?? "",
+    dateFrom: params.get("dateFrom") ?? "",
+    dateTo: params.get("dateTo") ?? "",
+    sortBy: parseActivitySortBy(params.get("sortBy")),
+    sortOrder: parseActivitySortOrder(params.get("sortOrder"))
+  };
+  return {
+    ...filters,
+    ...normalizedActivitySort(filters)
+  };
+}
+
+function activityFiltersToSearchParams(filters: ActivityTypeFiltersValue) {
+  const params = new URLSearchParams();
+  for (const sport of filters.sports) {
+    params.append("sport", sport);
+  }
+  for (const sport of filters.excludeSports) {
+    params.append("excludeSport", sport);
+  }
+  if (filters.search?.trim()) {
+    params.set("search", filters.search.trim());
+  }
+  if (filters.dateFrom) {
+    params.set("dateFrom", filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    params.set("dateTo", filters.dateTo);
+  }
+
+  const sort = normalizedActivitySort(filters);
+  if (!activitySortsMatch(sort, defaultActivitySort)) {
+    params.set("sortBy", sort.sortBy);
+    params.set("sortOrder", sort.sortOrder);
+  }
+  return params;
+}
+
+function compactSearchParamValues(params: URLSearchParams, ...keys: string[]) {
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const key of keys) {
+    for (const raw of params.getAll(key)) {
+      for (const part of raw.split(",")) {
+        const value = part.trim();
+        if (!value || seen.has(value)) {
+          continue;
+        }
+        seen.add(value);
+        values.push(value);
+      }
+    }
+  }
+  return values;
+}
+
+function parseActivitySortBy(value: string | null): ActivitySortBy {
+  return activitySortOptions().some((option) => option.value === value) ? (value as ActivitySortBy) : defaultActivitySort.sortBy;
+}
+
+function parseActivitySortOrder(value: string | null) {
+  return value === "asc" || value === "desc" ? value : defaultActivitySort.sortOrder;
+}
+
+function activitySortOptions(): Array<{ value: ActivitySortBy; label: string }> {
+  return [
+    { value: "date", label: "Date" },
+    { value: "duration", label: "Duration" },
+    { value: "distance", label: "Distance" },
+    { value: "elevation_gain", label: "Elevation gain" },
+    { value: "avg_pace", label: "Avg pace" }
+  ];
+}
+
+function normalizedActivitySort(filters: ActivityTypeFiltersValue): ActivitySort {
+  return {
+    sortBy: filters.sortBy && activitySortOptions().some((option) => option.value === filters.sortBy) ? filters.sortBy : defaultActivitySort.sortBy,
+    sortOrder: filters.sortOrder === "asc" || filters.sortOrder === "desc" ? filters.sortOrder : defaultActivitySort.sortOrder
+  };
+}
+
+function activitySortsMatch(left: ActivitySort, right: ActivitySort) {
+  return left.sortBy === right.sortBy && left.sortOrder === right.sortOrder;
+}
+
+function dateFilterPresets(): Array<{ id: string; label: string; range: ActivityDateRange }> {
+  const today = new Date();
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth();
+  return [
+    { id: "last-7-days", label: "Last 7 days", range: dateRange(addDays(today, -6), today) },
+    { id: "last-30-days", label: "Last 30 days", range: dateRange(addDays(today, -29), today) },
+    { id: "last-90-days", label: "Last 90 days", range: dateRange(addDays(today, -89), today) },
+    { id: "this-month", label: "This month", range: dateRange(new Date(currentYear, currentMonth, 1), today) },
+    { id: "last-month", label: "Last month", range: dateRange(new Date(currentYear, currentMonth - 1, 1), new Date(currentYear, currentMonth, 0)) },
+    { id: "this-year", label: "This year", range: dateRange(new Date(currentYear, 0, 1), today) },
+    { id: "last-year", label: "Last year", range: dateRange(new Date(currentYear - 1, 0, 1), new Date(currentYear - 1, 11, 31)) }
+  ];
+}
+
+function dateRange(start: Date, end: Date): ActivityDateRange {
+  return {
+    dateFrom: dateInputValue(start),
+    dateTo: dateInputValue(end)
+  };
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function dateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateRangesMatch(left: ActivityDateRange, right: ActivityDateRange) {
+  return (left.dateFrom ?? "") === (right.dateFrom ?? "") && (left.dateTo ?? "") === (right.dateTo ?? "");
 }
 
 function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {

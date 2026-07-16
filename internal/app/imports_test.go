@@ -101,3 +101,18 @@ func TestNormalizeSportStrength(t *testing.T) {
 		}
 	}
 }
+
+func TestIsProviderSyncedSource(t *testing.T) {
+	if !isProviderSyncedSource("garmin", "123", true) {
+		t.Fatal("garmin source should be provider synced")
+	}
+	if isProviderSyncedSource("file", "file:hash", false) {
+		t.Fatal("file source should be manual")
+	}
+	if isProviderSyncedSource("garmin", "123", false) {
+		t.Fatal("provider source with a source file should not be treated as synced")
+	}
+	if isProviderSyncedSource("garmin", "", true) {
+		t.Fatal("empty source id should not be treated as synced")
+	}
+}

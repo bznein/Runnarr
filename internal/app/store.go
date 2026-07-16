@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ import (
 type Store struct {
 	db *pgxpool.Pool
 }
+
+var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
 
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
@@ -115,6 +118,24 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		}
 	}()
 
+	if isProviderSyncedSource(source, sourceID, sourceFileID == nil) {
+		var excluded bool
+		err = tx.QueryRow(ctx, `
+			select exists(
+				select 1
+				from sync_excluded_activities
+				where source = $1 and source_id = $2
+			)
+		`, source, sourceID).Scan(&excluded)
+		if err != nil {
+			return "", err
+		}
+		if excluded {
+			err = ErrActivitySyncExcluded
+			return "", err
+		}
+	}
+
 	var id string
 	err = tx.QueryRow(ctx, `
 		insert into activities(
@@ -168,9 +189,9 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 
 	for _, lap := range activity.Laps {
 		_, err = tx.Exec(ctx, `
-			insert into activity_laps(activity_id, lap_index, start_time, elapsed_time_s, distance_m)
-			values($1,$2,$3,$4,$5)
-		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.DistanceM)
+			insert into activity_laps(activity_id, lap_index, start_time, elapsed_time_s, distance_m, elevation_gain_m, elevation_loss_m)
+			values($1,$2,$3,$4,$5,$6,$7)
+		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.DistanceM, lap.ElevationGainM, lap.ElevationLossM)
 		if err != nil {
 			return "", err
 		}
@@ -203,6 +224,18 @@ func (s *Store) ListActivities(ctx context.Context, limit, offset int, filters A
 	return scanActivities(rows)
 }
 
+func (s *Store) IsActivitySyncExcluded(ctx context.Context, source, sourceID string) (bool, error) {
+	var excluded bool
+	err := s.db.QueryRow(ctx, `
+		select exists(
+			select 1
+			from sync_excluded_activities
+			where source = $1 and source_id = $2
+		)
+	`, source, sourceID).Scan(&excluded)
+	return excluded, err
+}
+
 func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	var activity Activity
 	row := s.db.QueryRow(ctx, activitySelectSQL+` where id = $1`, id)
@@ -224,15 +257,55 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	return activity, nil
 }
 
-func (s *Store) DeleteActivity(ctx context.Context, id string) error {
-	tag, err := s.db.Exec(ctx, `delete from activities where id = $1`, id)
+func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityResult, error) {
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return err
+		return DeleteActivityResult{}, err
 	}
-	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var source, sourceID, name, sportType string
+	var hasSourceFile bool
+	var startTime time.Time
+	err = tx.QueryRow(ctx, `
+		select source, source_id, source_file_id is not null, name, sport_type, start_time
+		from activities
+		where id = $1
+		for update
+	`, id).Scan(&source, &sourceID, &hasSourceFile, &name, &sportType, &startTime)
+	if err != nil {
+		return DeleteActivityResult{}, err
 	}
-	return nil
+
+	result := DeleteActivityResult{Deleted: true}
+	if isProviderSyncedSource(source, sourceID, !hasSourceFile) {
+		_, err = tx.Exec(ctx, `
+			insert into sync_excluded_activities(source, source_id, name, sport_type, start_time)
+			values($1, $2, $3, $4, $5)
+			on conflict(source, source_id) do update set
+				name = excluded.name,
+				sport_type = excluded.sport_type,
+				start_time = excluded.start_time,
+				reason = 'deleted_from_runnarr'
+		`, source, sourceID, name, sportType, startTime)
+		if err != nil {
+			return DeleteActivityResult{}, err
+		}
+		result.ExcludedFromSync = true
+		result.SyncExclusionMessage = "This synced activity will be ignored in future imports."
+	}
+
+	if _, err = tx.Exec(ctx, `delete from activities where id = $1`, id); err != nil {
+		return DeleteActivityResult{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return DeleteActivityResult{}, err
+	}
+	return result, nil
 }
 
 func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummaryStats, error) {
@@ -352,14 +425,47 @@ func (s *Store) GetProviderConnection(ctx context.Context, provider string) (Sto
 func (s *Store) CreateSyncJob(ctx context.Context, provider, kind string) (string, error) {
 	var id string
 	err := s.db.QueryRow(ctx, `
-		insert into sync_jobs(provider, kind, status)
-		values($1, $2, 'running')
+		insert into sync_jobs(provider, kind, status, started_at)
+		values($1, $2, 'running', now())
 		returning id::text
 	`, provider, kind).Scan(&id)
 	return id, err
 }
 
+func (s *Store) UpdateSyncJobProgress(ctx context.Context, id string, payload map[string]any) error {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `
+		update sync_jobs
+		set payload = $2
+		where id = $1 and status = 'running'
+	`, id, payloadBytes)
+	return err
+}
+
+func (s *Store) HasRunningSyncJob(ctx context.Context, provider string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(ctx, `
+		select exists(
+			select 1
+			from sync_jobs
+			where provider = $1 and status = 'running'
+		)
+	`, provider).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) FinishSyncJob(ctx context.Context, id, status, message string, payload map[string]any) error {
+	if payload == nil {
+		_, err := s.db.Exec(ctx, `
+			update sync_jobs
+			set status = $2, error = $3, finished_at = now()
+			where id = $1
+		`, id, status, message)
+		return err
+	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -447,7 +553,7 @@ func (s *Store) listSamples(ctx context.Context, activityID string) ([]ActivityS
 
 func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap, error) {
 	rows, err := s.db.Query(ctx, `
-		select lap_index, start_time, elapsed_time_s, distance_m
+		select lap_index, start_time, elapsed_time_s, distance_m, elevation_gain_m, elevation_loss_m
 		from activity_laps
 		where activity_id = $1
 		order by lap_index
@@ -461,12 +567,15 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 	for rows.Next() {
 		var lap ActivityLap
 		var ts pgtype.Timestamptz
-		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.DistanceM); err != nil {
+		var gain, loss sql.NullFloat64
+		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.DistanceM, &gain, &loss); err != nil {
 			return nil, err
 		}
 		if ts.Valid {
 			lap.StartTime = &ts.Time
 		}
+		lap.ElevationGainM = floatPtrFromNull(gain)
+		lap.ElevationLossM = floatPtrFromNull(loss)
 		laps = append(laps, lap)
 	}
 	return laps, rows.Err()
@@ -576,6 +685,10 @@ func activityOrderBy(sortBy, sortOrder string) string {
 		orderBy += ", start_time desc"
 	}
 	return orderBy + ", id desc"
+}
+
+func isProviderSyncedSource(source, sourceID string, noSourceFile bool) bool {
+	return source != "" && source != "file" && sourceID != "" && noSourceFile
 }
 
 func fallbackName(activity ImportedActivity) string {

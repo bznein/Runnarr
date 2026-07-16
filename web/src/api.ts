@@ -1,4 +1,4 @@
-import type { Activity, ActivityTypeFilters, AppConfig, ImportFile, Session, SummaryStats } from "./types";
+import type { Activity, ActivityTypeFilters, AppConfig, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -77,7 +77,7 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
-  deleteActivity: (id: string) => request<{ deleted: boolean }>(`/api/activities/${id}`, { method: "DELETE" }),
+  deleteActivity: (id: string) => request<DeleteActivityResult>(`/api/activities/${id}`, { method: "DELETE" }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
   upload: (file: File) => {
     const body = new FormData();
@@ -86,5 +86,17 @@ export const api = {
       method: "POST",
       body
     });
-  }
+  },
+  garminStatus: () => request<GarminStatus>("/api/providers/garmin/status"),
+  garminConnect: (body: { email: string; password: string; mfaCode?: string }) =>
+    request<{ connected: boolean; connection: GarminStatus["connection"] }>("/api/providers/garmin/connect", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  garminSync: (oldest: string) =>
+    request<{ jobId: string; status: string }>("/api/providers/garmin/sync", {
+      method: "POST",
+      body: JSON.stringify({ oldest })
+    }),
+  syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
 };

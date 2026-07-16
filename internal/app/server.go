@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,6 +25,7 @@ type Server struct {
 	cfg       Config
 	store     *Store
 	imports   *ImportService
+	garmin    *GarminService
 	logger    *slog.Logger
 	adminHash []byte
 }
@@ -42,6 +44,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		cfg:       cfg,
 		store:     store,
 		imports:   NewImportService(store),
+		garmin:    NewGarminService(cfg, store),
 		logger:    logger,
 		adminHash: adminHash,
 	}, nil
@@ -70,6 +73,10 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/imports", s.handleListImports)
 			r.Post("/imports", s.handleImport)
+			r.Get("/providers/garmin/status", s.handleGarminStatus)
+			r.Post("/providers/garmin/connect", s.handleGarminConnect)
+			r.Post("/providers/garmin/sync", s.handleGarminSync)
+			r.Get("/sync-jobs", s.handleSyncJobs)
 		})
 	})
 
@@ -176,7 +183,7 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
-	err := s.store.DeleteActivity(r.Context(), chi.URLParam(r, "id"))
+	result, err := s.store.DeleteActivity(r.Context(), chi.URLParam(r, "id"))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity not found")
 		return
@@ -186,7 +193,7 @@ func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not delete activity")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +237,156 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		"activity": activity,
 		"import":   importFile,
 	})
+}
+
+func (s *Server) handleGarminStatus(w http.ResponseWriter, r *http.Request) {
+	conn, connected, err := s.garmin.Status(r.Context())
+	if err != nil {
+		s.logger.Error("garmin status", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load Garmin status")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": true,
+		"connected":  connected,
+		"connection": conn,
+	})
+}
+
+func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		MFACode  string `json:"mfaCode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	conn, err := s.garmin.Connect(r.Context(), body.Email, body.Password, body.MFACode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connected": true, "connection": conn})
+}
+
+func (s *Server) handleGarminSync(w http.ResponseWriter, r *http.Request) {
+	opts, err := decodeGarminSyncOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	running, err := s.store.HasRunningSyncJob(r.Context(), garminProvider)
+	if err != nil {
+		s.logger.Error("check running garmin sync", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not check sync state")
+		return
+	}
+	if running {
+		writeError(w, http.StatusConflict, "Garmin sync is already running")
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(r.Context(), garminProvider, "manual")
+	if err != nil {
+		s.logger.Error("create garmin sync job", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not create sync job")
+		return
+	}
+	go s.runGarminManualSyncJob(jobID, opts)
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
+}
+
+func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
+	jobs, err := s.store.ListSyncJobs(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not list sync jobs")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+}
+
+func (s *Server) StartBackgroundSync(ctx context.Context) {
+	go s.runGarminScheduledSync(ctx)
+}
+
+func (s *Server) runGarminScheduledSync(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runGarminScheduledSyncOnce(ctx)
+		}
+	}
+}
+
+func (s *Server) runGarminScheduledSyncOnce(ctx context.Context) {
+	if _, connected, err := s.garmin.Status(ctx); err != nil || !connected {
+		return
+	}
+	if running, err := s.store.HasRunningSyncJob(ctx, garminProvider); err != nil || running {
+		if err != nil {
+			s.logger.Error("check running scheduled garmin sync", "error", err)
+		}
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(ctx, garminProvider, "scheduled")
+	if err != nil {
+		s.logger.Error("create scheduled garmin sync job", "error", err)
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	oldest := time.Now().UTC().AddDate(0, 0, -30)
+	if _, err := s.finishGarminSyncJob(syncCtx, jobID, GarminSyncOptions{Oldest: oldest}); err != nil {
+		s.logger.Error("scheduled garmin sync", "error", err)
+	}
+}
+
+func (s *Server) runGarminManualSyncJob(jobID string, opts GarminSyncOptions) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+	defer cancel()
+	if _, err := s.finishGarminSyncJob(ctx, jobID, opts); err != nil {
+		s.logger.Error("manual garmin sync", "job_id", jobID, "error", err)
+	}
+}
+
+func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts GarminSyncOptions) (map[string]any, error) {
+	progress := func(payload map[string]any) {
+		if err := s.store.UpdateSyncJobProgress(ctx, jobID, payload); err != nil {
+			s.logger.Error("update garmin sync progress", "job_id", jobID, "error", err)
+		}
+	}
+	payload, err := s.garmin.Sync(ctx, opts, progress)
+	if err != nil {
+		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		return nil, err
+	}
+	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func decodeGarminSyncOptions(r *http.Request) (GarminSyncOptions, error) {
+	var body struct {
+		Oldest string `json:"oldest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		return GarminSyncOptions{}, errors.New("invalid JSON body")
+	}
+	if strings.TrimSpace(body.Oldest) == "" {
+		return GarminSyncOptions{}, nil
+	}
+	oldest, err := time.Parse("2006-01-02", strings.TrimSpace(body.Oldest))
+	if err != nil {
+		return GarminSyncOptions{}, errors.New("oldest must use YYYY-MM-DD format")
+	}
+	return GarminSyncOptions{Oldest: oldest}, nil
 }
 
 func activityFiltersFromQuery(r *http.Request) ActivityFilters {

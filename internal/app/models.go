@@ -23,6 +23,12 @@ type Activity struct {
 	CreatedAt       time.Time        `json:"createdAt"`
 }
 
+type DeleteActivityResult struct {
+	Deleted              bool   `json:"deleted"`
+	ExcludedFromSync     bool   `json:"excludedFromSync"`
+	SyncExclusionMessage string `json:"syncExclusionMessage,omitempty"`
+}
+
 type ActivitySample struct {
 	Index      int        `json:"index"`
 	Timestamp  *time.Time `json:"timestamp,omitempty"`
@@ -38,10 +44,12 @@ type ActivitySample struct {
 }
 
 type ActivityLap struct {
-	Index        int        `json:"index"`
-	StartTime    *time.Time `json:"startTime,omitempty"`
-	ElapsedTimeS int        `json:"elapsedTimeS"`
-	DistanceM    float64    `json:"distanceM"`
+	Index          int        `json:"index"`
+	StartTime      *time.Time `json:"startTime,omitempty"`
+	ElapsedTimeS   int        `json:"elapsedTimeS"`
+	DistanceM      float64    `json:"distanceM"`
+	ElevationGainM *float64   `json:"elevationGainM,omitempty"`
+	ElevationLossM *float64   `json:"elevationLossM,omitempty"`
 }
 
 type ActivityClimb struct {

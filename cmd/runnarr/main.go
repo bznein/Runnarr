@@ -47,6 +47,7 @@ func main() {
 		logger.Error("create server", "error", err)
 		os.Exit(1)
 	}
+	server.StartBackgroundSync(ctx)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
