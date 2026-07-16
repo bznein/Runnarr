@@ -210,24 +210,50 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 }
 
 func (s *Store) ListActivities(ctx context.Context, limit, offset int, filters ActivityFilters) ([]Activity, error) {
+	page, err := s.ListActivityPage(ctx, limit, offset, filters)
+	return page.Activities, err
+}
+
+func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters ActivityFilters) (ActivityListPage, error) {
+	limit, offset = normalizeActivityPage(limit, offset)
+	where, args := activityFilterWhere(filters, 1)
+	orderBy := activityOrderBy(filters.SortBy, filters.SortOrder)
+	args = append(args, limit+1, offset)
+	limitParam := len(args) - 1
+	offsetParam := len(args)
+	rows, err := s.db.Query(ctx, activitySelectSQL+where+fmt.Sprintf(` %s limit $%d offset $%d`, orderBy, limitParam, offsetParam), args...)
+	if err != nil {
+		return ActivityListPage{}, err
+	}
+	defer rows.Close()
+	activities, err := scanActivities(rows)
+	if err != nil {
+		return ActivityListPage{}, err
+	}
+	hasMore := len(activities) > limit
+	if hasMore {
+		activities = activities[:limit]
+	}
+	page := ActivityListPage{
+		Activities: activities,
+		Limit:      limit,
+		Offset:     offset,
+		HasMore:    hasMore,
+	}
+	if hasMore {
+		page.NextOffset = offset + limit
+	}
+	return page, nil
+}
+
+func normalizeActivityPage(limit, offset int) (int, int) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
 	}
-
-	where, args := activityFilterWhere(filters, 1)
-	orderBy := activityOrderBy(filters.SortBy, filters.SortOrder)
-	args = append(args, limit, offset)
-	limitParam := len(args) - 1
-	offsetParam := len(args)
-	rows, err := s.db.Query(ctx, activitySelectSQL+where+fmt.Sprintf(` %s limit $%d offset $%d`, orderBy, limitParam, offsetParam), args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanActivities(rows)
+	return limit, offset
 }
 
 func (s *Store) IsActivitySyncExcluded(ctx context.Context, source, sourceID string) (bool, error) {

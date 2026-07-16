@@ -4,6 +4,7 @@
 
 ### Features
 
+- Activity browsing now loads additional pages on demand instead of stopping at the first 100 activities.
 - Settings now consolidates Garmin sync, display preferences, manual file import, and collapsed diagnostics.
 - Added a persistent light/dark/system theme preference.
 

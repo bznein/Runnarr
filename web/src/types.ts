@@ -108,6 +108,14 @@ export type ActivityTypeFilters = {
   sortOrder?: ActivitySortOrder;
 };
 
+export type ActivityListPage = {
+  activities: Activity[] | null;
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+  hasMore: boolean;
+};
+
 export type SummaryStats = {
   activityCount: number;
   distanceM: number;
