@@ -1425,6 +1425,10 @@ textarea {
   width: min(100%, 460px);
 }
 
+.export-gpx-dialog {
+  width: min(100%, 420px);
+}
+
 .rename-note {
   margin: 0;
 }
@@ -1489,6 +1493,21 @@ textarea {
 
 .danger-text-button {
   color: var(--color-danger-strong);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text);
+  font-weight: 650;
+}
+
+.checkbox-field input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-primary);
 }
 
 .primary-button:disabled,

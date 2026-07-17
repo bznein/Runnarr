@@ -7,6 +7,7 @@
 - Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.
 - Activity list columns can now be toggled, and long activity/gear names are clipped more aggressively to keep the list scannable.
 - Activity detail pages now support local-only notes that do not modify provider activities.
+- Activity detail pages can export a GPX track, with an option to include sensor extensions.
 - Garmin health sync now imports daily health metrics, including steps, calories, resting heart rate, sleep, stress, body battery, HRV, and body composition where Garmin provides them.
 - Added a Health page with date-range controls, Garmin health sync, summary cards, trend charts, selectable daily rows, and day-level details.
 - Body battery daily views now emphasize gained, drained, and highest values.

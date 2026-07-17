@@ -15,6 +15,11 @@ export function setCsrfToken(value?: string) {
   csrfToken = value ?? "";
 }
 
+export function activityGPXURL(id: string, includeSensors: boolean) {
+  const query = includeSensors ? "?includeSensors=true" : "";
+  return `/api/activities/${encodeURIComponent(id)}/gpx${query}`;
+}
+
 type ActivityPageOptions = {
   limit?: number;
   offset?: number;

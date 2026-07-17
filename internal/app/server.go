@@ -71,6 +71,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/config", s.handleConfig)
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
+			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
 			r.Get("/activities/{id}", s.handleGetActivity)
 			r.Patch("/activities/{id}", s.handleRenameActivity)
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
@@ -201,6 +202,36 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	activity.Media = media
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})
+}
+
+func (s *Server) handleExportActivityGPX(w http.ResponseWriter, r *http.Request) {
+	activity, err := s.store.GetActivity(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("get activity for GPX export", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not get activity")
+		return
+	}
+
+	includeSensors := parseQueryBool(r.URL.Query().Get("includeSensors"))
+	data, err := exportActivityGPX(activity, includeSensors)
+	if errors.Is(err, ErrActivityGPXNoRoute) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		s.logger.Error("export activity GPX", "activity_id", activity.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not export GPX")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/gpx+xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": activityGPXFilename(activity)}))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleDeleteActivity(w http.ResponseWriter, r *http.Request) {
@@ -942,6 +973,15 @@ func isMediaClientError(err error) bool {
 	return errors.Is(err, ErrEmptyMediaFile) ||
 		errors.Is(err, ErrMediaFileTooLarge) ||
 		errors.Is(err, ErrUnsupportedMediaType)
+}
+
+func parseQueryBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
