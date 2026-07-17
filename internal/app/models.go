@@ -22,6 +22,7 @@ type Activity struct {
 	CaloriesKcal             *int             `json:"caloriesKcal,omitempty"`
 	OriginalProviderURL      string           `json:"originalProviderUrl,omitempty"`
 	SummaryPolyline          string           `json:"summaryPolyline,omitempty"`
+	Gear                     []GearSummary    `json:"gear,omitempty"`
 	Samples                  []ActivitySample `json:"samples,omitempty"`
 	Laps                     []ActivityLap    `json:"laps,omitempty"`
 	Climbs                   []ActivityClimb  `json:"climbs,omitempty"`
@@ -45,6 +46,40 @@ type ActivityListPage struct {
 
 type DeleteActivityMediaResult struct {
 	Deleted bool `json:"deleted"`
+}
+
+type Gear struct {
+	ID                   string         `json:"id,omitempty"`
+	Provider             string         `json:"provider"`
+	ProviderGearID       string         `json:"providerGearId"`
+	Name                 string         `json:"name"`
+	GearType             string         `json:"gearType,omitempty"`
+	Brand                string         `json:"brand,omitempty"`
+	Model                string         `json:"model,omitempty"`
+	Retired              bool           `json:"retired"`
+	TotalDistanceM       *float64       `json:"totalDistanceM,omitempty"`
+	MaxDistanceM         *float64       `json:"maxDistanceM,omitempty"`
+	FirstUsedAt          *time.Time     `json:"firstUsedAt,omitempty"`
+	LastUsedAt           *time.Time     `json:"lastUsedAt,omitempty"`
+	DefaultActivityTypes []string       `json:"defaultActivityTypes,omitempty"`
+	Raw                  map[string]any `json:"raw,omitempty"`
+	StatsRaw             map[string]any `json:"statsRaw,omitempty"`
+	CreatedAt            time.Time      `json:"createdAt,omitempty"`
+	UpdatedAt            time.Time      `json:"updatedAt,omitempty"`
+}
+
+type GearSummary struct {
+	ID                   string     `json:"id"`
+	ProviderGearID       string     `json:"providerGearId"`
+	Name                 string     `json:"name"`
+	GearType             string     `json:"gearType,omitempty"`
+	Brand                string     `json:"brand,omitempty"`
+	Model                string     `json:"model,omitempty"`
+	Retired              bool       `json:"retired"`
+	TotalDistanceM       *float64   `json:"totalDistanceM,omitempty"`
+	MaxDistanceM         *float64   `json:"maxDistanceM,omitempty"`
+	DefaultActivityTypes []string   `json:"defaultActivityTypes,omitempty"`
+	LastUsedAt           *time.Time `json:"lastUsedAt,omitempty"`
 }
 
 type ActivitySample struct {

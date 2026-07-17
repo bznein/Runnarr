@@ -4,6 +4,8 @@
 
 ### Features
 
+- Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.
+- Activity list columns can now be toggled, and long activity/gear names are clipped more aggressively to keep the list scannable.
 - Garmin health sync now imports daily health metrics, including steps, calories, resting heart rate, sleep, stress, body battery, HRV, and body composition where Garmin provides them.
 - Added a Health page with date-range controls, Garmin health sync, summary cards, trend charts, selectable daily rows, and day-level details.
 - Body battery daily views now emphasize gained, drained, and highest values.
@@ -15,6 +17,7 @@
 
 ### Fixes
 
+- Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
 
 ## 0.3.0 - 2026-07-16

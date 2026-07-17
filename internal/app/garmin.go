@@ -20,6 +20,7 @@ import (
 
 const garminProvider = "garmin"
 const garminActivityPageLimit = 100
+const garminGearActivityPageLimit = 1000
 
 type GarminService struct {
 	store    *Store
@@ -33,13 +34,16 @@ type GarminBridge interface {
 	ListActivitySplits(ctx context.Context, tokenStore, activityID string) ([]GarminBridgeLap, error)
 	DownloadActivity(ctx context.Context, tokenStore, activityID string) ([]byte, error)
 	FetchHealthDay(ctx context.Context, tokenStore, date string) (GarminBridgeHealthDay, error)
+	ListGear(ctx context.Context, tokenStore string) (GarminBridgeGearResponse, error)
+	ListGearActivities(ctx context.Context, tokenStore, gearID string, start, limit int) ([]GarminBridgeGearActivity, error)
 }
 
 type GarminBridgeProfile struct {
-	AccountID   string `json:"accountId"`
-	DisplayName string `json:"displayName"`
-	FullName    string `json:"fullName"`
-	UnitSystem  string `json:"unitSystem"`
+	AccountID     string `json:"accountId"`
+	DisplayName   string `json:"displayName"`
+	FullName      string `json:"fullName"`
+	UnitSystem    string `json:"unitSystem"`
+	UserProfilePK string `json:"userProfilePk"`
 }
 
 type GarminBridgeActivity struct {
@@ -58,6 +62,35 @@ type GarminBridgeLap struct {
 type GarminBridgeHealthDay struct {
 	Date string         `json:"date"`
 	Raw  map[string]any `json:"raw"`
+}
+
+type GarminBridgeGearResponse struct {
+	UserProfilePK string             `json:"userProfilePk"`
+	Gear          []GarminBridgeGear `json:"gear"`
+	RawDefaults   any                `json:"rawDefaults"`
+}
+
+type GarminBridgeGear struct {
+	ID                   string         `json:"id"`
+	Name                 string         `json:"name"`
+	GearType             string         `json:"gearType"`
+	Brand                string         `json:"brand"`
+	Model                string         `json:"model"`
+	Retired              bool           `json:"retired"`
+	TotalDistanceM       *float64       `json:"totalDistanceM"`
+	MaxDistanceM         *float64       `json:"maxDistanceM"`
+	FirstUsedAt          *time.Time     `json:"firstUsedAt"`
+	LastUsedAt           *time.Time     `json:"lastUsedAt"`
+	DefaultActivityTypes []string       `json:"defaultActivityTypes"`
+	Raw                  map[string]any `json:"raw"`
+	StatsRaw             map[string]any `json:"statsRaw"`
+}
+
+type GarminBridgeGearActivity struct {
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	StartTime *time.Time     `json:"startTime"`
+	Raw       map[string]any `json:"raw"`
 }
 
 type GarminSyncOptions struct {
@@ -221,6 +254,125 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		"firstErrors":     firstErrors,
 		"oldest":          oldest.Format("2006-01-02"),
 	}, nil
+}
+
+func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgress) (map[string]any, error) {
+	if progress == nil {
+		progress = func(map[string]any) {}
+	}
+	if _, connected, err := s.Status(ctx); err != nil {
+		return nil, err
+	} else if !connected {
+		return nil, errors.New("Garmin is not connected")
+	}
+	if err := os.MkdirAll(s.tokenDir, 0o700); err != nil {
+		return nil, fmt.Errorf("could not prepare Garmin token storage: %w", err)
+	}
+
+	progress(map[string]any{"provider": garminProvider, "stage": "Listing Garmin gear", "gear": 0, "processed": 0, "saved": 0, "assignments": 0, "localAssignments": 0})
+	response, err := s.bridge.ListGear(ctx, s.tokenDir)
+	if err != nil {
+		return nil, err
+	}
+
+	saved := 0
+	assignments := 0
+	localAssignments := 0
+	warnings := make([]string, 0)
+	totalGear := len(response.Gear)
+	for index, source := range response.Gear {
+		processed := index + 1
+		progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin gear", "gear": totalGear, "processed": index, "saved": saved, "assignments": assignments, "localAssignments": localAssignments, "currentGearName": source.Name, "warnings": warnings})
+
+		providerGearID := strings.TrimSpace(source.ID)
+		if providerGearID == "" {
+			warnings = append(warnings, "Skipped Garmin gear without an ID")
+			progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin gear", "gear": totalGear, "processed": processed, "saved": saved, "assignments": assignments, "localAssignments": localAssignments, "currentGearName": source.Name, "warnings": warnings})
+			continue
+		}
+
+		gear, err := s.store.UpsertGear(ctx, Gear{
+			Provider:             garminProvider,
+			ProviderGearID:       providerGearID,
+			Name:                 strings.TrimSpace(source.Name),
+			GearType:             strings.TrimSpace(source.GearType),
+			Brand:                strings.TrimSpace(source.Brand),
+			Model:                strings.TrimSpace(source.Model),
+			Retired:              source.Retired,
+			TotalDistanceM:       source.TotalDistanceM,
+			MaxDistanceM:         source.MaxDistanceM,
+			FirstUsedAt:          source.FirstUsedAt,
+			LastUsedAt:           source.LastUsedAt,
+			DefaultActivityTypes: compactStrings(source.DefaultActivityTypes),
+			Raw:                  source.Raw,
+			StatsRaw:             source.StatsRaw,
+		})
+		if err != nil {
+			return nil, err
+		}
+		saved++
+
+		sourceActivityIDs, fetched, err := s.gearActivitySourceIDs(ctx, providerGearID)
+		assignments += fetched
+		if err != nil {
+			warnings = appendGarminGearSyncWarning(warnings, source.Name, err)
+		} else {
+			assigned, err := s.store.ReplaceGearAssignmentsForGear(ctx, gear.ID, garminProvider, sourceActivityIDs)
+			if err != nil {
+				return nil, err
+			}
+			localAssignments += assigned
+		}
+
+		progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin gear", "gear": totalGear, "processed": processed, "saved": saved, "assignments": assignments, "localAssignments": localAssignments, "currentGearName": source.Name, "warnings": warnings})
+	}
+
+	return map[string]any{
+		"provider":         garminProvider,
+		"stage":            "Completed",
+		"gear":             totalGear,
+		"processed":        totalGear,
+		"saved":            saved,
+		"assignments":      assignments,
+		"localAssignments": localAssignments,
+		"warnings":         warnings,
+	}, nil
+}
+
+func (s *GarminService) gearActivitySourceIDs(ctx context.Context, gearID string) ([]string, int, error) {
+	sourceIDs := make([]string, 0)
+	fetched := 0
+	for start := 0; ; {
+		page, err := s.bridge.ListGearActivities(ctx, s.tokenDir, gearID, start, garminGearActivityPageLimit)
+		if err != nil {
+			return sourceIDs, fetched, err
+		}
+		if len(page) == 0 {
+			break
+		}
+		fetched += len(page)
+		for _, activity := range page {
+			if strings.TrimSpace(activity.ID) != "" {
+				sourceIDs = append(sourceIDs, activity.ID)
+			}
+		}
+		if len(page) < garminGearActivityPageLimit {
+			break
+		}
+		start += len(page)
+	}
+	return compactStrings(sourceIDs), fetched, nil
+}
+
+func appendGarminGearSyncWarning(warnings []string, gearName string, err error) []string {
+	if len(warnings) >= 5 {
+		return warnings
+	}
+	gearName = strings.TrimSpace(gearName)
+	if gearName == "" {
+		gearName = "gear"
+	}
+	return append(warnings, gearName+": "+err.Error())
 }
 
 func (s *GarminService) listActivitiesSince(ctx context.Context, oldest time.Time, progress GarminSyncProgress) ([]GarminBridgeActivity, error) {
@@ -448,6 +600,29 @@ func (b PythonGarminBridge) FetchHealthDay(ctx context.Context, tokenStore, date
 		Date: responseDate,
 		Raw:  response,
 	}, nil
+}
+
+func (b PythonGarminBridge) ListGear(ctx context.Context, tokenStore string) (GarminBridgeGearResponse, error) {
+	var response GarminBridgeGearResponse
+	err := b.run(ctx, map[string]any{
+		"action":     "gear",
+		"tokenStore": tokenStore,
+	}, &response)
+	return response, err
+}
+
+func (b PythonGarminBridge) ListGearActivities(ctx context.Context, tokenStore, gearID string, start, limit int) ([]GarminBridgeGearActivity, error) {
+	var response struct {
+		Activities []GarminBridgeGearActivity `json:"activities"`
+	}
+	err := b.run(ctx, map[string]any{
+		"action":     "gear-activities",
+		"tokenStore": tokenStore,
+		"gearId":     gearID,
+		"start":      start,
+		"limit":      limit,
+	}, &response)
+	return response.Activities, err
 }
 
 func (b PythonGarminBridge) run(ctx context.Context, request map[string]any, response any) error {

@@ -89,6 +89,17 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Missing health metrics should be omitted or left blank rather than rendered as placeholder values.
 - Garmin health support is read-only; the app must not write hydration, body composition, blood pressure, or other health values back to Garmin.
 
+### Garmin Gear
+
+- The app should import Garmin gear such as running shoes and cycling equipment as a read-only sync workflow.
+- Gear sync should be manually triggerable from Settings and the dedicated Gear page, and Garmin activity sync should refresh gear afterward when possible.
+- The first gear integration should normalize gear name, type, brand, model, retired state, Garmin-provided total distance, optional distance limit, first/last use dates, default activity types, and raw provider payloads.
+- Gear assigned to Garmin activities should be linked to matching local activities when those activities have already been imported.
+- The UI should include a top-level Gear page with active and retired gear sections, gear detail views, Garmin mileage, and assigned activity history.
+- Activity list rows and activity detail pages should show assigned gear when present.
+- Missing gear fields should be omitted rather than rendered as placeholder values.
+- Garmin gear support is read-only; the app must not create, edit, retire, assign, or remove gear in Garmin in the first implementation.
+
 ### Provider Sync Status
 
 - Provider settings must show sync status for each provider, including whether it is connected, idle, running, completed, or failed.
@@ -158,6 +169,8 @@ The storage model should separate canonical activity fields from provider/raw de
 - `activity_samples`: time-series samples such as position, elevation, heart rate, cadence, power, distance, and speed.
 - `activity_laps`: lap or split summaries from providers/files.
 - `activity_media`: media attached to activities, including file metadata, thumbnail paths, capture time, and optional EXIF-derived latitude/longitude.
+- `gears`: provider gear records with normalized metadata, Garmin distance totals, active/retired state, and raw provider payloads.
+- `activity_gears`: many-to-many links between local activities and imported provider gear.
 - `import_files`: uploaded file metadata and parser status.
 - `provider_connections`: external provider account metadata; provider token files or credentials must be protected with restricted storage access.
 - `sync_jobs`: provider sync/backfill job state.
@@ -215,9 +228,10 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 
 ### Gear
 
-- Shoe and bike tracking.
+- Editing and retiring gear from Runnarr when provider support and write safety are understood.
 - Mileage and retirement alerts.
 - Automatic assignment rules based on sport, source, route, or user preference.
+- Non-Garmin gear providers and manually managed gear.
 
 ### Routes and Maps
 
@@ -266,5 +280,6 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - The admin can connect Garmin from Settings and trigger a manual sync.
 - Garmin sync imports historical accessible activities as well as new activities, while repeated syncs avoid duplicate activity rows.
 - Scheduled Garmin sync imports newly uploaded activities after initial connection.
+- The admin can manually sync Garmin gear, see active and retired gear on the Gear page, and inspect assigned local activities for each gear item.
 - The admin can see whether provider sync is running, completed, or failed, including the latest result and error details.
 - Duplicate imports do not create duplicate activities.

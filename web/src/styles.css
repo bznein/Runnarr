@@ -1003,6 +1003,249 @@ input {
   text-decoration: none;
 }
 
+.activity-table {
+  table-layout: fixed;
+}
+
+.activity-date-column {
+  width: 108px;
+}
+
+.activity-name-column {
+  width: min(34vw, 360px);
+}
+
+.activity-type-column,
+.activity-source-column {
+  width: 92px;
+}
+
+.activity-gear-column {
+  width: min(24vw, 260px);
+}
+
+.activity-distance-column,
+.activity-time-column,
+.activity-calories-column {
+  width: 96px;
+}
+
+.activity-name-cell,
+.clip-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-name-cell a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gear-table-cell {
+  min-width: 0;
+  overflow: hidden;
+  white-space: normal;
+}
+
+.gear-section {
+  display: grid;
+  gap: 14px;
+}
+
+.gear-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.gear-card {
+  display: grid;
+  gap: 10px;
+  min-height: 142px;
+  padding: 14px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: var(--color-surface-muted);
+  text-decoration: none;
+}
+
+.gear-card:hover {
+  border-color: var(--color-border-hover);
+}
+
+.gear-card.retired {
+  opacity: 0.78;
+}
+
+.gear-card-header,
+.gear-distance-label {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gear-card-header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-heading);
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.gear-meta,
+.gear-progress-label {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.gear-distance-block {
+  display: grid;
+  align-self: end;
+  gap: 8px;
+}
+
+.gear-distance-label {
+  align-items: baseline;
+}
+
+.gear-distance-label span {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.gear-distance-label strong {
+  color: var(--color-heading);
+  font-size: 18px;
+}
+
+.gear-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface-subtle);
+}
+
+.gear-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+
+.gear-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gear-chip-list.compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  max-width: 100%;
+}
+
+.gear-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 999px;
+  color: var(--color-primary-text);
+  background: var(--color-primary-soft);
+  font-size: 12px;
+  font-weight: 760;
+  text-decoration: none;
+}
+
+.gear-chip-list.compact .gear-chip {
+  max-width: 100%;
+}
+
+.gear-chip.retired {
+  color: var(--color-muted-strong);
+  background: var(--color-surface-subtle);
+}
+
+.gear-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gear-activity-panel,
+.gear-detail-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.gear-activity-panel .panel-heading,
+.gear-detail-panel .panel-heading {
+  margin-bottom: 0;
+}
+
+.gear-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gear-detail-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gear-detail-item span {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.gear-detail-item strong {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.column-option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.column-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  color: var(--color-text-soft);
+  background: var(--color-surface);
+  font-weight: 680;
+}
+
+.column-option input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+}
+
+.column-option.locked {
+  color: var(--color-muted);
+  background: var(--color-surface-muted);
+}
+
 .table-button {
   padding: 0;
   border: 0;
@@ -1597,6 +1840,7 @@ input {
   .sync-progress-grid,
   .health-chart-grid,
   .health-detail-grid,
+  .gear-detail-grid,
   .climbs-layout,
   .climb-detail-metrics {
     grid-template-columns: 1fr;

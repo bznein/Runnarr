@@ -430,6 +430,9 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 	if hasMore {
 		activities = activities[:limit]
 	}
+	if err := s.attachActivityGear(ctx, activities); err != nil {
+		return ActivityListPage{}, err
+	}
 	page := ActivityListPage{
 		Activities: activities,
 		Limit:      limit,
@@ -481,6 +484,11 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	}
 	activity.Samples = samples
 	activity.Laps = laps
+	gear, err := s.ListActivityGear(ctx, id)
+	if err != nil {
+		return activity, err
+	}
+	activity.Gear = gear
 	activity.Climbs = detectActivityClimbs(samples)
 	return activity, nil
 }
@@ -489,6 +497,245 @@ func (s *Store) ActivityExists(ctx context.Context, id string) (bool, error) {
 	var exists bool
 	err := s.db.QueryRow(ctx, `select exists(select 1 from activities where id = $1)`, id).Scan(&exists)
 	return exists, err
+}
+
+func (s *Store) UpsertGear(ctx context.Context, gear Gear) (Gear, error) {
+	raw := gear.Raw
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	statsRaw := gear.StatsRaw
+	if statsRaw == nil {
+		statsRaw = map[string]any{}
+	}
+	rawBytes, err := json.Marshal(raw)
+	if err != nil {
+		return Gear{}, err
+	}
+	statsBytes, err := json.Marshal(statsRaw)
+	if err != nil {
+		return Gear{}, err
+	}
+	row := s.db.QueryRow(ctx, `
+		insert into gears(
+			provider, provider_gear_id, name, gear_type, brand, model, retired,
+			total_distance_m, max_distance_m, first_used_at, last_used_at,
+			default_activity_types, raw, stats_raw
+		)
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		on conflict(provider, provider_gear_id) do update set
+			name = excluded.name,
+			gear_type = excluded.gear_type,
+			brand = excluded.brand,
+			model = excluded.model,
+			retired = excluded.retired,
+			total_distance_m = excluded.total_distance_m,
+			max_distance_m = excluded.max_distance_m,
+			first_used_at = excluded.first_used_at,
+			last_used_at = excluded.last_used_at,
+			default_activity_types = excluded.default_activity_types,
+			raw = excluded.raw,
+			stats_raw = excluded.stats_raw,
+			updated_at = now()
+		returning id::text, provider, provider_gear_id, name, gear_type, brand, model, retired,
+			total_distance_m, max_distance_m, first_used_at, last_used_at, default_activity_types,
+			raw, stats_raw, created_at, updated_at
+	`, gear.Provider, gear.ProviderGearID, strings.TrimSpace(gear.Name), strings.TrimSpace(gear.GearType),
+		strings.TrimSpace(gear.Brand), strings.TrimSpace(gear.Model), gear.Retired,
+		optionalFloat(gear.TotalDistanceM), optionalFloat(gear.MaxDistanceM), nullTimePtr(gear.FirstUsedAt),
+		nullTimePtr(gear.LastUsedAt), gear.DefaultActivityTypes, rawBytes, statsBytes)
+	return scanGear(row)
+}
+
+func (s *Store) ReplaceGearAssignmentsForGear(ctx context.Context, gearID string, provider string, sourceIDs []string) (int, error) {
+	uniqueSourceIDs := compactStrings(sourceIDs)
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	if _, err = tx.Exec(ctx, `delete from activity_gears where gear_id = $1`, gearID); err != nil {
+		return 0, err
+	}
+	if len(uniqueSourceIDs) == 0 {
+		if err = tx.Commit(ctx); err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		select id::text
+		from activities
+		where source = $1 and source_id = any($2)
+	`, provider, uniqueSourceIDs)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	activityIDs := make([]string, 0)
+	for rows.Next() {
+		var activityID string
+		if err = rows.Scan(&activityID); err != nil {
+			return 0, err
+		}
+		activityIDs = append(activityIDs, activityID)
+	}
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+	rows.Close()
+	for _, activityID := range activityIDs {
+		if _, err = tx.Exec(ctx, `
+			insert into activity_gears(activity_id, gear_id)
+			values($1, $2)
+			on conflict(activity_id, gear_id) do update set updated_at = now()
+		`, activityID, gearID); err != nil {
+			return 0, err
+		}
+	}
+	if len(activityIDs) > 0 {
+		if _, err = tx.Exec(ctx, `
+			update gears
+			set first_used_at = gear_usage.first_used_at,
+				last_used_at = gear_usage.last_used_at,
+				updated_at = now()
+			from (
+				select min(activities.start_time) as first_used_at,
+					max(activities.start_time) as last_used_at
+				from activity_gears
+				join activities on activities.id = activity_gears.activity_id
+				where activity_gears.gear_id = $1
+			) gear_usage
+			where gears.id = $1
+		`, gearID); err != nil {
+			return 0, err
+		}
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return len(activityIDs), nil
+}
+
+func (s *Store) ListGears(ctx context.Context) ([]Gear, error) {
+	rows, err := s.db.Query(ctx, `
+		select id::text, provider, provider_gear_id, name, gear_type, brand, model, retired,
+			total_distance_m, max_distance_m, first_used_at, last_used_at, default_activity_types,
+			raw, stats_raw, created_at, updated_at
+		from gears
+		order by retired, lower(name), provider_gear_id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	gears := make([]Gear, 0)
+	for rows.Next() {
+		gear, err := scanGear(rows)
+		if err != nil {
+			return nil, err
+		}
+		gears = append(gears, gear)
+	}
+	return gears, rows.Err()
+}
+
+func (s *Store) GetGear(ctx context.Context, id string) (Gear, error) {
+	return scanGear(s.db.QueryRow(ctx, `
+		select id::text, provider, provider_gear_id, name, gear_type, brand, model, retired,
+			total_distance_m, max_distance_m, first_used_at, last_used_at, default_activity_types,
+			raw, stats_raw, created_at, updated_at
+		from gears
+		where id = $1
+	`, id))
+}
+
+func (s *Store) ListGearActivities(ctx context.Context, gearID string) ([]Activity, error) {
+	rows, err := s.db.Query(ctx, activitySelectSQL+`
+		join activity_gears on activity_gears.activity_id = activities.id
+		where activity_gears.gear_id = $1
+		order by activities.start_time desc, activities.id desc
+	`, gearID)
+	if err != nil {
+		return nil, err
+	}
+	activities, err := scanActivities(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachActivityGear(ctx, activities); err != nil {
+		return nil, err
+	}
+	return activities, nil
+}
+
+func (s *Store) ListActivityGear(ctx context.Context, activityID string) ([]GearSummary, error) {
+	rows, err := s.db.Query(ctx, gearSummarySelectSQL+`
+		join activity_gears on activity_gears.gear_id = gears.id
+		where activity_gears.activity_id = $1
+		order by gears.retired, lower(gears.name), gears.provider_gear_id
+	`, activityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	gear := make([]GearSummary, 0)
+	for rows.Next() {
+		item, err := scanGearSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		gear = append(gear, item)
+	}
+	return gear, rows.Err()
+}
+
+func (s *Store) attachActivityGear(ctx context.Context, activities []Activity) error {
+	if len(activities) == 0 {
+		return nil
+	}
+	activityIDs := make([]string, 0, len(activities))
+	activityIndex := make(map[string]int, len(activities))
+	for index, activity := range activities {
+		activityIDs = append(activityIDs, activity.ID)
+		activityIndex[activity.ID] = index
+	}
+	rows, err := s.db.Query(ctx, `
+		select activity_gears.activity_id::text, gears.id::text, gears.provider_gear_id, gears.name,
+			gears.gear_type, gears.brand, gears.model, gears.retired, gears.total_distance_m,
+			gears.max_distance_m, gears.default_activity_types, gears.last_used_at
+		from activity_gears
+		join gears on gears.id = activity_gears.gear_id
+		where activity_gears.activity_id::text = any($1)
+		order by gears.retired, lower(gears.name), gears.provider_gear_id
+	`, activityIDs)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var activityID string
+		var gear GearSummary
+		if err := scanGearSummaryWithActivity(rows, &activityID, &gear); err != nil {
+			return err
+		}
+		index, ok := activityIndex[activityID]
+		if !ok {
+			continue
+		}
+		activities[index].Gear = append(activities[index].Gear, gear)
+	}
+	return rows.Err()
 }
 
 func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityResult, error) {
@@ -929,10 +1176,19 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 }
 
 const activitySelectSQL = `
-	select id::text, source, source_id, coalesce(nullif(local_name, ''), name), name, local_name, sport_type, start_time, distance_m,
-		moving_time_s, elapsed_time_s, elevation_gain_m, avg_heart_rate, max_heart_rate,
-		avg_pace_s_per_km, avg_grade_adjusted_pace_s_per_km, calories_kcal, original_provider_url, summary_polyline, created_at
+	select activities.id::text, activities.source, activities.source_id, coalesce(nullif(activities.local_name, ''), activities.name),
+		activities.name, activities.local_name, activities.sport_type, activities.start_time, activities.distance_m,
+		activities.moving_time_s, activities.elapsed_time_s, activities.elevation_gain_m, activities.avg_heart_rate,
+		activities.max_heart_rate, activities.avg_pace_s_per_km, activities.avg_grade_adjusted_pace_s_per_km,
+		activities.calories_kcal, activities.original_provider_url, activities.summary_polyline, activities.created_at
 	from activities
+`
+
+const gearSummarySelectSQL = `
+	select gears.id::text, gears.provider_gear_id, gears.name, gears.gear_type, gears.brand,
+		gears.model, gears.retired, gears.total_distance_m, gears.max_distance_m,
+		gears.default_activity_types, gears.last_used_at
+	from gears
 `
 
 type rowScanner interface {
@@ -982,6 +1238,93 @@ func scanActivityMedia(row rowScanner, media *ActivityMedia) error {
 	}
 	media.Latitude = floatPtrFromNull(latitude)
 	media.Longitude = floatPtrFromNull(longitude)
+	return nil
+}
+
+func scanGear(row rowScanner) (Gear, error) {
+	var gear Gear
+	var totalDistance, maxDistance sql.NullFloat64
+	var firstUsed, lastUsed pgtype.Timestamptz
+	var rawBytes, statsBytes []byte
+	if err := row.Scan(
+		&gear.ID,
+		&gear.Provider,
+		&gear.ProviderGearID,
+		&gear.Name,
+		&gear.GearType,
+		&gear.Brand,
+		&gear.Model,
+		&gear.Retired,
+		&totalDistance,
+		&maxDistance,
+		&firstUsed,
+		&lastUsed,
+		&gear.DefaultActivityTypes,
+		&rawBytes,
+		&statsBytes,
+		&gear.CreatedAt,
+		&gear.UpdatedAt,
+	); err != nil {
+		return Gear{}, err
+	}
+	gear.TotalDistanceM = floatPtrFromNull(totalDistance)
+	gear.MaxDistanceM = floatPtrFromNull(maxDistance)
+	if firstUsed.Valid {
+		gear.FirstUsedAt = &firstUsed.Time
+	}
+	if lastUsed.Valid {
+		gear.LastUsedAt = &lastUsed.Time
+	}
+	if len(rawBytes) > 0 {
+		_ = json.Unmarshal(rawBytes, &gear.Raw)
+	}
+	if len(statsBytes) > 0 {
+		_ = json.Unmarshal(statsBytes, &gear.StatsRaw)
+	}
+	if gear.Raw == nil {
+		gear.Raw = map[string]any{}
+	}
+	if gear.StatsRaw == nil {
+		gear.StatsRaw = map[string]any{}
+	}
+	return gear, nil
+}
+
+func scanGearSummary(row rowScanner) (GearSummary, error) {
+	var gear GearSummary
+	if err := scanGearSummaryWithActivity(row, nil, &gear); err != nil {
+		return GearSummary{}, err
+	}
+	return gear, nil
+}
+
+func scanGearSummaryWithActivity(row rowScanner, activityID *string, gear *GearSummary) error {
+	var totalDistance, maxDistance sql.NullFloat64
+	var lastUsed pgtype.Timestamptz
+	dest := []any{
+		&gear.ID,
+		&gear.ProviderGearID,
+		&gear.Name,
+		&gear.GearType,
+		&gear.Brand,
+		&gear.Model,
+		&gear.Retired,
+		&totalDistance,
+		&maxDistance,
+		&gear.DefaultActivityTypes,
+		&lastUsed,
+	}
+	if activityID != nil {
+		dest = append([]any{activityID}, dest...)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return err
+	}
+	gear.TotalDistanceM = floatPtrFromNull(totalDistance)
+	gear.MaxDistanceM = floatPtrFromNull(maxDistance)
+	if lastUsed.Valid {
+		gear.LastUsedAt = &lastUsed.Time
+	}
 	return nil
 }
 
@@ -1196,11 +1539,32 @@ func nullTime(t time.Time) any {
 	return t
 }
 
+func nullTimePtr(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return *t
+}
+
 func optionalInt(value *int) any {
 	if value == nil {
 		return nil
 	}
 	return *value
+}
+
+func compactStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func optionalFloat(value *float64) any {

@@ -61,6 +61,29 @@ export type ActivityMedia = {
   createdAt: string;
 };
 
+export type GearSummary = {
+  id: string;
+  providerGearId: string;
+  name: string;
+  gearType?: string;
+  brand?: string;
+  model?: string;
+  retired: boolean;
+  totalDistanceM?: number;
+  maxDistanceM?: number;
+  defaultActivityTypes?: string[];
+  lastUsedAt?: string;
+};
+
+export type Gear = GearSummary & {
+  provider: string;
+  firstUsedAt?: string;
+  raw?: Record<string, unknown>;
+  statsRaw?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type Activity = {
   id: string;
   source: string;
@@ -81,6 +104,7 @@ export type Activity = {
   caloriesKcal?: number;
   originalProviderUrl?: string;
   summaryPolyline?: string;
+  gear?: GearSummary[];
   samples?: ActivitySample[];
   laps?: ActivityLap[];
   climbs?: ActivityClimb[];
@@ -153,6 +177,17 @@ export type ProviderStatus = {
 };
 
 export type GarminStatus = ProviderStatus;
+
+export type GearListResponse = {
+  gear: Gear[] | null;
+  active: Gear[] | null;
+  retired: Gear[] | null;
+};
+
+export type GearDetailResponse = {
+  gear: Gear;
+  activities: Activity[] | null;
+};
 
 export type SyncJob = {
   id: string;

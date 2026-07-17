@@ -16,6 +16,14 @@ class MFARequired(Exception):
 def parse_garmin_time(value):
     if not value:
         return None
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 100000000000:
+            timestamp = timestamp / 1000
+        try:
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        except (OverflowError, OSError, ValueError):
+            return None
     text = str(value).strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
         try:
@@ -43,14 +51,68 @@ def login(token_store, email=None, password=None, mfa_code=""):
 
 
 def profile_response(client):
+    user_profile_pk = extract_user_profile_pk(client)
     display_name = client.display_name or ""
     full_name = client.full_name or ""
     return {
-        "accountId": display_name or full_name,
+        "accountId": str(user_profile_pk or display_name or full_name),
         "displayName": display_name,
         "fullName": full_name,
         "unitSystem": client.unit_system or "",
+        "userProfilePk": str(user_profile_pk or ""),
     }
+
+
+def extract_user_profile_pk(client):
+    candidates = []
+    try:
+        profile = client.get_user_profile()
+    except Exception:
+        profile = {}
+    candidates.append(first_nested_value(profile, ("userProfilePk", "userProfilePK", "userProfileId", "profileId", "profilePk", "id")))
+
+    try:
+        social_profile = client.client.connectapi("/userprofile-service/socialProfile")
+    except Exception:
+        social_profile = {}
+    candidates.append(first_nested_value(social_profile, ("userProfilePk", "userProfilePK", "userProfileId", "profileId", "profilePk")))
+
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return candidate
+    return None
+
+
+def first_nested_value(value, keys):
+    normalized = {normalize_key(key) for key in keys}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if normalize_key(key) in normalized and item not in (None, ""):
+                return item
+        for item in value.values():
+            found = first_nested_value(item, keys)
+            if found not in (None, ""):
+                return found
+    if isinstance(value, list):
+        for item in value:
+            found = first_nested_value(item, keys)
+            if found not in (None, ""):
+                return found
+    return None
+
+
+def first_value(item, keys):
+    if not isinstance(item, dict):
+        return None
+    for wanted in (normalize_key(key) for key in keys):
+        for key, value in item.items():
+            if normalize_key(key) == wanted and value not in (None, ""):
+                return value
+    return None
+
+
+def normalize_key(value):
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
 
 
 def normalize_activity(item):
@@ -73,6 +135,14 @@ def normalize_activity(item):
     }
 
 
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("true", "1", "yes", "retired", "inactive")
+
+
 def parse_number(value):
     if value is None:
         return None
@@ -82,6 +152,18 @@ def parse_number(value):
         return None
     if not math.isfinite(parsed):
         return None
+    return parsed
+
+
+def parse_distance_m(value, key=""):
+    parsed = parse_number(value)
+    if parsed is None:
+        return None
+    normalized_key = normalize_key(key)
+    if "mile" in normalized_key or normalized_key.endswith("mi"):
+        return parsed * 1609.344
+    if "kilometer" in normalized_key or normalized_key.endswith("km"):
+        return parsed * 1000
     return parsed
 
 
@@ -114,6 +196,182 @@ def normalize_lap(item, fallback_index):
         "index": index,
         "avgGradeAdjustedSpeed": parse_number(item.get("avgGradeAdjustedSpeed")),
     }
+
+
+def normalize_gear_response(client):
+    user_profile_pk = extract_user_profile_pk(client)
+    if not user_profile_pk:
+        raise RuntimeError("missing Garmin user profile id")
+    gear_payload = client.get_gear(str(user_profile_pk))
+    defaults_payload = safe_gear_call(lambda: client.get_gear_defaults(str(user_profile_pk)), {})
+    gear_items = extract_gear_items(gear_payload)
+    gears = []
+    for item in gear_items:
+        gear_id = str(first_value(item, ("gearUUID", "gearUuid", "uuid", "gearPk", "gearId", "id")) or "").strip()
+        if not gear_id:
+            continue
+        stats_payload = safe_gear_call(lambda gear_id=gear_id: client.get_gear_stats(gear_id), {})
+        gears.append(normalize_gear(item, stats_payload, defaults_payload, gear_id))
+    return {
+        "userProfilePk": str(user_profile_pk),
+        "gear": gears,
+        "rawDefaults": defaults_payload,
+    }
+
+
+def safe_gear_call(fn, fallback):
+    try:
+        result = fn()
+    except Exception:
+        return fallback
+    return result if result is not None else fallback
+
+
+def extract_gear_items(payload):
+    out = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            if looks_like_gear(value):
+                out.append(value)
+                return
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(payload)
+    return out
+
+
+def looks_like_gear(item):
+    if not isinstance(item, dict):
+        return False
+    keys = {normalize_key(key) for key in item.keys()}
+    has_id = bool(keys & {"gearuuid", "gearuuid", "uuid", "gearpk", "gearid", "id"})
+    has_name = bool(keys & {"gearname", "displayname", "name"})
+    has_type = bool(keys & {"geartype", "geartypename", "category", "typename"})
+    return has_id and (has_name or has_type)
+
+
+def normalize_gear(item, stats, defaults, gear_id):
+    name = str(first_value(item, ("displayName", "customMakeModel", "gearName", "name")) or "").strip()
+    gear_type = str(first_value(item, ("gearTypeName", "gearType", "typeName", "category")) or "").strip()
+    brand = str(first_value(item, ("brandName", "gearMakeName", "makeName", "brand")) or "").strip()
+    model = str(first_value(item, ("modelName", "gearModelName", "customMakeModel", "model")) or "").strip()
+    if brand.lower() in ("other", "unknown"):
+        brand = ""
+    if model.lower() in ("unknown", "unknown shoes", "unknown bike", "unknown gear"):
+        model = str(first_value(item, ("customMakeModel",)) or "").strip()
+    status = str(first_value(item, ("status", "gearStatus", "gearStatusName")) or "").strip().lower()
+    retired = parse_bool(first_value(item, ("retired", "retiredFlag", "inactive"))) or "retired" in status
+    total_distance = first_distance_m(stats, item, (
+        "totalDistanceInMeters",
+        "totalDistanceMeters",
+        "totalDistanceM",
+        "totalDistance",
+        "distanceInMeters",
+        "distance",
+    ))
+    max_distance = first_distance_m(item, stats, (
+        "maxDistanceInMeters",
+        "maximumDistanceInMeters",
+        "maxDistanceMeters",
+        "maxDistanceM",
+        "maxDistance",
+        "maximumMeters",
+        "retirementDistance",
+    ))
+    first_used = first_time(item, stats, ("dateBegin", "firstUsedDate", "firstActivityDate", "createdDate", "createDate"))
+    last_used = first_time(item, stats, ("dateEnd", "lastUsedDate", "lastActivityDate", "updatedDate", "updateDate"))
+    defaults_for_gear = sorted(default_activity_types_for_gear(defaults, gear_id) | set(default_activity_types_from_item(item)))
+    return {
+        "id": gear_id,
+        "name": name or gear_type or gear_id,
+        "gearType": gear_type,
+        "brand": brand,
+        "model": model,
+        "retired": retired,
+        "totalDistanceM": total_distance,
+        "maxDistanceM": max_distance,
+        "firstUsedAt": first_used,
+        "lastUsedAt": last_used,
+        "defaultActivityTypes": defaults_for_gear,
+        "raw": item,
+        "statsRaw": stats if isinstance(stats, dict) else {},
+    }
+
+
+def first_distance_m(primary, secondary, keys):
+    for source in (primary, secondary):
+        if not isinstance(source, dict):
+            continue
+        for key in keys:
+            value = first_nested_value(source, (key,))
+            parsed = parse_distance_m(value, key)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def first_time(primary, secondary, keys):
+    for source in (primary, secondary):
+        value = first_nested_value(source, keys)
+        parsed = parse_garmin_time(value)
+        if parsed:
+            return parsed
+    return None
+
+
+def default_activity_types_from_item(item):
+    value = first_value(item, ("defaultActivityTypes", "activityTypes"))
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def default_activity_types_for_gear(payload, gear_id):
+    out = set()
+
+    def visit(value, activity_hint=""):
+        if isinstance(value, dict):
+            current_activity = str(first_value(value, ("activityType", "activityTypeKey", "typeKey", "sportType")) or activity_hint).strip()
+            current_gear = str(first_value(value, ("gearUUID", "gearUuid", "uuid", "gearPk", "gearId", "defaultGearUuid")) or "").strip()
+            is_default = parse_bool(first_value(value, ("defaultGear", "default", "isDefault")))
+            if current_gear == gear_id and (is_default or current_activity):
+                out.add(current_activity or "default")
+            for key, item in value.items():
+                next_hint = current_activity or str(key)
+                visit(item, next_hint)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item, activity_hint)
+
+    visit(payload)
+    return {item for item in out if item}
+
+
+def normalize_gear_activity(item):
+    if not isinstance(item, dict):
+        return {"id": "", "raw": item}
+    activity_id = item.get("activityId") or item.get("activityIdPk") or item.get("id")
+    return {
+        "id": str(activity_id or ""),
+        "name": str(item.get("activityName") or item.get("name") or ""),
+        "startTime": parse_garmin_time(item.get("startTimeGMT") or item.get("startTimeLocal") or item.get("startTime")),
+        "raw": item,
+    }
+
+
+def gear_activities_response(client, gear_id, start, limit):
+    start = max(int(start or 0), 0)
+    limit = max(min(int(limit or 1000), 1000), 1)
+    url = f"{client.garmin_connect_activities_baseurl}{gear_id}/gear?start={start}&limit={limit}"
+    activities = client.connectapi(url)
+    if not isinstance(activities, list):
+        activities = []
+    return {"activities": [normalize_gear_activity(item) for item in activities]}
 
 
 def download_bytes(client, activity_id):
@@ -205,6 +463,17 @@ def main():
         if not cdate:
             raise RuntimeError("missing date")
         print(json.dumps(health_day_response(client, cdate)))
+        return
+
+    if action == "gear":
+        print(json.dumps(normalize_gear_response(client)))
+        return
+
+    if action == "gear-activities":
+        gear_id = str(request.get("gearId") or "").strip()
+        if not gear_id:
+            raise RuntimeError("missing gearId")
+        print(json.dumps(gear_activities_response(client, gear_id, request.get("start"), request.get("limit"))))
         return
 
     raise RuntimeError(f"unsupported action: {action}")

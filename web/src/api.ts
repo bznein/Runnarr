@@ -1,4 +1,4 @@
-import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DailyHealthMetric, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
+import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DailyHealthMetric, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, GearDetailResponse, GearListResponse, ImportFile, Session, SummaryStats, SyncJob } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -108,6 +108,8 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  gears: () => request<GearListResponse>("/api/gears"),
+  gear: (id: string) => request<GearDetailResponse>(`/api/gears/${id}`),
   renameActivity: (id: string, name: string) =>
     request<{ activity: Activity }>(`/api/activities/${id}`, {
       method: "PATCH",
@@ -149,5 +151,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(range ?? {})
     }),
+  garminGearSync: () => request<{ jobId: string; status: string }>("/api/providers/garmin/gear-sync", { method: "POST" }),
   syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
 };
