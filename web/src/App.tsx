@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -1821,6 +1821,14 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setRenameOpen(false);
     }
   });
+  const updateActivityNotes = useMutation({
+    mutationFn: (notes: string) => api.updateActivityNotes(id!, notes),
+    onSuccess: async (result) => {
+      queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, result);
+      await queryClient.invalidateQueries({ queryKey: ["activity", id] });
+      setNotesOpen(false);
+    }
+  });
   const uploadMedia = useMutation({
     mutationFn: async (files: File[]) => {
       const uploaded: Array<{ media: ActivityMedia }> = [];
@@ -1848,6 +1856,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [selectedClimbIndex, setSelectedClimbIndex] = useState<number | undefined>();
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
 
@@ -1856,7 +1865,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setSelectedClimbIndex(undefined);
     setActionsOpen(false);
     setRenameOpen(false);
+    setNotesOpen(false);
     setSelectedMediaId(undefined);
+    updateActivityNotes.reset();
     uploadMedia.reset();
     setMediaFileInputKey((key) => key + 1);
   }, [id]);
@@ -1894,6 +1905,14 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const handleRename = (name: string) => {
     renameActivity.mutate(name);
   };
+  const handleSaveNotes = (notes: string) => {
+    updateActivityNotes.mutate(notes);
+  };
+  const handleDeleteNotes = () => {
+    if (window.confirm("Delete this note?")) {
+      updateActivityNotes.mutate("");
+    }
+  };
   const handleMediaFilesSelected = (files: File[]) => {
     if (files.length === 0 || uploadMedia.isPending) {
       return;
@@ -1923,6 +1942,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
               setRenameOpen(true);
               setActionsOpen(false);
             }}
+            onNotes={() => {
+              updateActivityNotes.reset();
+              setNotesOpen(true);
+              setActionsOpen(false);
+            }}
             onDelete={handleDelete}
           />
         </>
@@ -1938,6 +1962,15 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onClose={() => setRenameOpen(false)}
         />
       )}
+      {notesOpen && (
+        <ActivityNotesDialog
+          activity={item}
+          saving={updateActivityNotes.isPending}
+          error={updateActivityNotes.error}
+          onSave={handleSaveNotes}
+          onClose={() => setNotesOpen(false)}
+        />
+      )}
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
@@ -1946,6 +1979,16 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         {item.avgGradeAdjustedPaceSPKM !== undefined && <Metric label="GAP" value={formatPace(item.avgGradeAdjustedPaceSPKM)} />}
         {item.caloriesKcal !== undefined && <Metric label="Calories" value={formatCalories(item.caloriesKcal)} />}
       </section>
+
+      <ActivityNotesPanel
+        notes={item.notes ?? ""}
+        saving={updateActivityNotes.isPending}
+        onEdit={() => {
+          updateActivityNotes.reset();
+          setNotesOpen(true);
+        }}
+        onDelete={handleDeleteNotes}
+      />
 
       {(item.gear ?? []).length > 0 && (
         <section className="panel gear-activity-panel">
@@ -2027,6 +2070,124 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
     </Page>
+  );
+}
+
+function ActivityNotesPanel({
+  notes,
+  saving,
+  onEdit,
+  onDelete
+}: {
+  notes: string;
+  saving: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const hasNotes = notes.trim().length > 0;
+  if (!hasNotes) {
+    return null;
+  }
+  return (
+    <section className="panel notes-panel">
+      <div className="notes-panel-header">
+        <div className="panel-heading">Notes</div>
+        <div className="notes-actions">
+          <button className="secondary-button small-button" type="button" disabled={saving} onClick={onEdit}>
+            <Pencil size={15} />
+            Edit
+          </button>
+          <button className="secondary-button small-button danger-text-button" type="button" disabled={saving} onClick={onDelete}>
+            <Trash2 size={15} />
+            Delete
+          </button>
+        </div>
+      </div>
+      <div className="notes-body">{notes}</div>
+    </section>
+  );
+}
+
+function ActivityNotesDialog({
+  activity,
+  saving,
+  error,
+  onSave,
+  onClose
+}: {
+  activity: Activity;
+  saving: boolean;
+  error: unknown;
+  onSave: (notes: string) => void;
+  onClose: () => void;
+}) {
+  const [notes, setNotes] = useState(activity.notes ?? "");
+  const trimmedNotes = notes.trim();
+  const currentNotes = (activity.notes ?? "").trim();
+  const valid = Array.from(trimmedNotes).length <= 5000;
+  const changed = trimmedNotes !== currentNotes;
+  const message = error instanceof Error ? error.message : "";
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <form
+        className="filter-dialog notes-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="activity-notes-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid && changed) {
+            onSave(trimmedNotes);
+          }
+        }}
+      >
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Activity</div>
+            <h2 id="activity-notes-title">Notes</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close notes" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <label className="field">
+          <span>Notes</span>
+          <textarea
+            autoFocus
+            className="notes-textarea"
+            maxLength={5000}
+            rows={8}
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+          />
+        </label>
+        {!valid && <div className="row-error">Notes must be 5000 characters or fewer.</div>}
+        {message && <div className="error">{message}</div>}
+
+        <div className="dialog-actions">
+          {currentNotes && (
+            <button className="secondary-button" type="button" disabled={saving} onClick={() => onSave("")}>
+              Clear note
+            </button>
+          )}
+          <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="submit" disabled={saving || !valid || !changed}>
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -2241,6 +2402,7 @@ function ActivityDetailActions({
   deleting,
   onToggle,
   onRename,
+  onNotes,
   onDelete
 }: {
   activity: Activity;
@@ -2248,6 +2410,7 @@ function ActivityDetailActions({
   deleting: boolean;
   onToggle: () => void;
   onRename: () => void;
+  onNotes: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -2260,6 +2423,10 @@ function ActivityDetailActions({
           <button className="action-menu-item" type="button" role="menuitem" onClick={onRename}>
             <Pencil size={16} />
             Rename
+          </button>
+          <button className="action-menu-item" type="button" role="menuitem" onClick={onNotes}>
+            <StickyNote size={16} />
+            {(activity.notes ?? "").trim() ? "Edit note" : "Add note"}
           </button>
           {activity.originalProviderUrl && (
             <a className="action-menu-item" role="menuitem" href={activity.originalProviderUrl} target="_blank" rel="noreferrer">

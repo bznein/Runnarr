@@ -315,13 +315,26 @@ func (s *Server) handleServeActivityMedia(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Name  *string `json:"name"`
+		Notes *string `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	activity, err := s.store.RenameActivity(r.Context(), chi.URLParam(r, "id"), body.Name)
+	if body.Name == nil && body.Notes == nil {
+		writeError(w, http.StatusBadRequest, "missing activity update")
+		return
+	}
+	var activity Activity
+	var err error
+	id := chi.URLParam(r, "id")
+	if body.Name != nil {
+		activity, err = s.store.RenameActivity(r.Context(), id, *body.Name)
+	}
+	if err == nil && body.Notes != nil {
+		activity, err = s.store.UpdateActivityNotes(r.Context(), id, *body.Notes)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity not found")
 		return
@@ -330,9 +343,13 @@ func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if errors.Is(err, ErrInvalidActivityNotes) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
-		s.logger.Error("rename activity", "error", err)
-		writeError(w, http.StatusInternalServerError, "could not rename activity")
+		s.logger.Error("update activity", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not update activity")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})

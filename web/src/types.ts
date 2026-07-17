@@ -91,6 +91,7 @@ export type Activity = {
   name: string;
   sourceName: string;
   localName?: string;
+  notes?: string;
   sportType: string;
   startTime: string;
   distanceM: number;

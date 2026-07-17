@@ -21,6 +21,7 @@ type Store struct {
 
 var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
 var ErrInvalidActivityName = errors.New("activity name must be between 1 and 160 characters")
+var ErrInvalidActivityNotes = errors.New("activity notes must be 5000 characters or fewer")
 
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
@@ -882,6 +883,21 @@ func (s *Store) RenameActivity(ctx context.Context, id, requestedName string) (A
 	return s.GetActivity(ctx, id)
 }
 
+func (s *Store) UpdateActivityNotes(ctx context.Context, id, requestedNotes string) (Activity, error) {
+	notes, err := localActivityNotesValue(requestedNotes)
+	if err != nil {
+		return Activity{}, err
+	}
+	if _, err := s.db.Exec(ctx, `
+		update activities
+		set local_notes = $2, updated_at = now()
+		where id = $1
+	`, id, notes); err != nil {
+		return Activity{}, err
+	}
+	return s.GetActivity(ctx, id)
+}
+
 func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummaryStats, error) {
 	var stats SummaryStats
 	stats.Recent = make([]Activity, 0)
@@ -1177,7 +1193,7 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 
 const activitySelectSQL = `
 	select activities.id::text, activities.source, activities.source_id, coalesce(nullif(activities.local_name, ''), activities.name),
-		activities.name, activities.local_name, activities.sport_type, activities.start_time, activities.distance_m,
+		activities.name, activities.local_name, activities.local_notes, activities.sport_type, activities.start_time, activities.distance_m,
 		activities.moving_time_s, activities.elapsed_time_s, activities.elevation_gain_m, activities.avg_heart_rate,
 		activities.max_heart_rate, activities.avg_pace_s_per_km, activities.avg_grade_adjusted_pace_s_per_km,
 		activities.calories_kcal, activities.original_provider_url, activities.summary_polyline, activities.created_at
@@ -1211,7 +1227,7 @@ func scanActivities(rows pgx.Rows) ([]Activity, error) {
 func scanActivity(row rowScanner, activity *Activity) error {
 	var avgHR, maxHR, avgPace, avgGradeAdjustedPace sql.NullFloat64
 	var calories sql.NullInt32
-	if err := row.Scan(&activity.ID, &activity.Source, &activity.SourceID, &activity.Name, &activity.SourceName, &activity.LocalName, &activity.SportType,
+	if err := row.Scan(&activity.ID, &activity.Source, &activity.SourceID, &activity.Name, &activity.SourceName, &activity.LocalName, &activity.Notes, &activity.SportType,
 		&activity.StartTime, &activity.DistanceM, &activity.MovingTimeS, &activity.ElapsedTimeS,
 		&activity.ElevationGainM, &avgHR, &maxHR, &avgPace, &avgGradeAdjustedPace, &calories,
 		&activity.OriginalProviderURL, &activity.SummaryPolyline, &activity.CreatedAt); err != nil {
@@ -1530,6 +1546,14 @@ func localActivityNameOverride(requestedName, sourceName string) (string, error)
 		return "", ErrInvalidActivityName
 	}
 	return name, nil
+}
+
+func localActivityNotesValue(requestedNotes string) (string, error) {
+	notes := strings.TrimSpace(requestedNotes)
+	if utf8.RuneCountInString(notes) > 5000 {
+		return "", ErrInvalidActivityNotes
+	}
+	return notes, nil
 }
 
 func nullTime(t time.Time) any {

@@ -130,6 +130,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity detail must show summary metrics, a route map when GPS samples exist, and charts for elevation, pace/speed, and heart rate where data exists.
 - Activity detail should show an "Open original" link for provider-imported activities when an original provider activity URL is available; manual file imports should not show this link unless their source includes a meaningful external URL.
 - Activity detail should allow locally renaming an activity without modifying the original provider activity or imported source file.
+- Activity detail should allow local notes on an activity without modifying the original provider activity or imported source file.
 - Activity detail should use a compact overflow menu for secondary actions such as rename and delete instead of showing destructive actions as primary page actions.
 - Activity detail should support overlaying compatible chart series in a single combined graph, such as elevation, pace/speed, heart rate, power, and cadence, with clear axes, legends, and per-series toggles.
 - Activity detail, list rows, and dashboard summaries should use sport-appropriate metrics, units, and labels rather than one generic endurance format for every activity.
@@ -165,7 +166,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 
 The storage model should separate canonical activity fields from provider/raw details:
 
-- `activities`: one row per normalized activity, including calories/energy expenditure and an original provider activity URL when provided by the source.
+- `activities`: one row per normalized activity, including local-only name/notes overrides, calories/energy expenditure, and an original provider activity URL when provided by the source.
 - `activity_samples`: time-series samples such as position, elevation, heart rate, cadence, power, distance, and speed.
 - `activity_laps`: lap or split summaries from providers/files.
 - `activity_media`: media attached to activities, including file metadata, thumbnail paths, capture time, and optional EXIF-derived latitude/longitude.

@@ -34,3 +34,22 @@ func TestLocalActivityNameOverrideRejectsInvalidNames(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalActivityNotesValue(t *testing.T) {
+	notes, err := localActivityNotesValue("  Felt smooth\nNeed colder drink  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notes != "Felt smooth\nNeed colder drink" {
+		t.Fatalf("notes = %q, want trimmed note", notes)
+	}
+	if notes, err := localActivityNotesValue("   "); err != nil || notes != "" {
+		t.Fatalf("blank notes = %q, err = %v; want cleared notes", notes, err)
+	}
+}
+
+func TestLocalActivityNotesValueRejectsLongNotes(t *testing.T) {
+	if _, err := localActivityNotesValue(strings.Repeat("a", 5001)); !errors.Is(err, ErrInvalidActivityNotes) {
+		t.Fatalf("long notes error = %v, want ErrInvalidActivityNotes", err)
+	}
+}

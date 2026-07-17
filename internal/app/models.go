@@ -9,6 +9,7 @@ type Activity struct {
 	Name                     string           `json:"name"`
 	SourceName               string           `json:"sourceName"`
 	LocalName                string           `json:"localName,omitempty"`
+	Notes                    string           `json:"notes,omitempty"`
 	SportType                string           `json:"sportType"`
 	StartTime                time.Time        `json:"startTime"`
 	DistanceM                float64          `json:"distanceM"`
