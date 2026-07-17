@@ -198,7 +198,7 @@ func normalizeGarminHealthDay(day GarminBridgeHealthDay) DailyHealthMetric {
 	hrvRaw := rawValue(raw, "hrv")
 	metric.HRVAvgMS = firstFloat(hrvRaw, "lastNightAvg", "weeklyAvg", "averageHrv", "avgHrv", "hrvAvg", "hrvValue")
 	metric.HRVStatus = firstString(hrvRaw, "hrvStatus", "status", "feedbackPhrase")
-	metric.WeightKG = firstFloat(raw, "weightKg", "bodyWeightKg", "weight", "bodyWeight")
+	metric.WeightKG = firstWeightKG(raw)
 	metric.BodyFatPct = firstFloat(raw, "bodyFatPct", "bodyFatPercentage", "bodyFat", "percentFat")
 	return metric
 }
@@ -260,6 +260,24 @@ func firstFloat(root any, keys ...string) *float64 {
 		}
 	}
 	return nil
+}
+
+func firstWeightKG(root any) *float64 {
+	if value := firstFloat(root, "weightKg", "bodyWeightKg"); value != nil {
+		return value
+	}
+	if value := firstFloat(root, "weight", "bodyWeight"); value != nil {
+		normalized := normalizeWeightKG(*value)
+		return &normalized
+	}
+	return nil
+}
+
+func normalizeWeightKG(value float64) float64 {
+	if value > 1000 {
+		return value / 1000
+	}
+	return value
 }
 
 func firstString(root any, keys ...string) string {

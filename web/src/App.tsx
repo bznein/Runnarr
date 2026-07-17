@@ -475,7 +475,7 @@ function HealthPage() {
             <HealthLineChart title="Stress" data={chartData} dataKey="stress" color="#7a4eb2" formatter={(value) => Math.round(value).toLocaleString()} />
             <HealthBodyBatteryChart data={chartData} asLine={showLongRangeHealthLines} />
             <HealthLineChart title="HRV" data={chartData} dataKey="hrv" color="#6f8f2f" formatter={(value) => `${Math.round(value)} ms`} />
-            <HealthLineChart title="Weight" data={chartData} dataKey="weight" color="#8b5e3c" formatter={(value) => `${value.toFixed(1)} kg`} />
+            <HealthWeightChart data={chartData} />
           </section>
 
           <section className="panel">
@@ -675,6 +675,55 @@ function HealthLineChart({
       </div>
     </div>
   );
+}
+
+function HealthWeightChart({ data }: { data: HealthChartPoint[] }) {
+  const points = data.filter((item): item is HealthChartPoint & { weight: number } => isFiniteNumber(item.weight));
+  if (points.length === 0) {
+    return null;
+  }
+  const measurementLabel = points.length === 1 ? "1 measurement" : `${points.length.toLocaleString()} measurements`;
+  return (
+    <div className="panel">
+      <div className="chart-header">
+        <div className="panel-heading">Weight</div>
+        <div className="muted">{measurementLabel}</div>
+      </div>
+      <div className="health-chart-area">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" minTickGap={18} />
+            <YAxis width={46} domain={weightYAxisDomain(points)} tickFormatter={(value) => Number(value).toFixed(1)} />
+            <Tooltip
+              contentStyle={chartTooltipContentStyle}
+              labelStyle={chartTooltipLabelStyle}
+              formatter={(value) => [formatHealthWeight(Number(value)), "Weight"]}
+            />
+            <Line
+              type="monotone"
+              dataKey="weight"
+              stroke="#8b5e3c"
+              strokeWidth={2}
+              dot={{ r: 4, strokeWidth: 2 }}
+              activeDot={{ r: 6 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function weightYAxisDomain(points: Array<HealthChartPoint & { weight: number }>): [number, number] {
+  const values = points.map((point) => point.weight);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const padding = min === max ? 1 : Math.max(0.5, (max - min) * 0.25);
+  return [
+    Math.max(0, Math.floor((min - padding) * 10) / 10),
+    Math.ceil((max + padding) * 10) / 10
+  ];
 }
 
 function HealthBodyBatteryChart({ data, asLine = false }: { data: HealthChartPoint[]; asLine?: boolean }) {

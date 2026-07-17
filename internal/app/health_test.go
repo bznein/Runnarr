@@ -81,7 +81,7 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 			},
 			"bodyComposition": map[string]any{
 				"totalAverage": map[string]any{
-					"weight":  float64(72.4),
+					"weight":  float64(72400),
 					"bodyFat": float64(14.2),
 				},
 			},
@@ -116,6 +116,21 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 	if metric.Provider != garminProvider || metric.Date != "2026-07-16" {
 		t.Fatalf("provider/date = %s/%s", metric.Provider, metric.Date)
 	}
+}
+
+func TestNormalizeGarminHealthDayKeepsKilogramWeight(t *testing.T) {
+	metric := normalizeGarminHealthDay(GarminBridgeHealthDay{
+		Date: "2026-07-16",
+		Raw: map[string]any{
+			"bodyComposition": map[string]any{
+				"totalAverage": map[string]any{
+					"weight": float64(72.4),
+				},
+			},
+		},
+	})
+
+	assertFloatPtr(t, "weight", metric.WeightKG, 72.4)
 }
 
 func TestNormalizeGarminHealthDayComputesBodyBatteryGainDrainFallback(t *testing.T) {
