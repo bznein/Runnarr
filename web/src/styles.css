@@ -182,7 +182,8 @@ a {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -848,6 +849,54 @@ input {
   gap: 14px;
 }
 
+.notes-panel {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--color-surface-muted);
+}
+
+.notes-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notes-panel-header .panel-heading {
+  margin-bottom: 0;
+}
+
+.notes-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.notes-body {
+  max-width: 78ch;
+  color: var(--color-muted-strong);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.notes-dialog {
+  width: min(100%, 640px);
+}
+
+.notes-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  background: var(--color-surface);
+  line-height: 1.45;
+}
+
 .media-panel-header {
   display: flex;
   align-items: center;
@@ -1436,6 +1485,10 @@ input {
 .icon-button.danger:hover {
   border-color: var(--color-danger-border-soft);
   background: var(--color-danger-soft);
+}
+
+.danger-text-button {
+  color: var(--color-danger-strong);
 }
 
 .primary-button:disabled,

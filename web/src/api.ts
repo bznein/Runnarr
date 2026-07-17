@@ -115,6 +115,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ name })
     }),
+  updateActivityNotes: (id: string, notes: string) =>
+    request<{ activity: Activity }>(`/api/activities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes })
+    }),
   deleteActivity: (id: string) => request<DeleteActivityResult>(`/api/activities/${id}`, { method: "DELETE" }),
   uploadActivityMedia: (id: string, file: File) => {
     const body = new FormData();
