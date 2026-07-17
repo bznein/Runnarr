@@ -1,4 +1,4 @@
-import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
+import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DailyHealthMetric, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, ImportFile, Session, SummaryStats, SyncJob } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -18,6 +18,11 @@ export function setCsrfToken(value?: string) {
 type ActivityPageOptions = {
   limit?: number;
   offset?: number;
+};
+
+type HealthRange = {
+  from?: string;
+  to?: string;
 };
 
 function activityFilterQuery(filters?: ActivityTypeFilters, page?: ActivityPageOptions) {
@@ -52,6 +57,17 @@ function activityFilterQuery(filters?: ActivityTypeFilters, page?: ActivityPageO
   return params.toString();
 }
 
+function healthRangeQuery(range?: HealthRange) {
+  const params = new URLSearchParams();
+  if (range?.from) {
+    params.set("from", range.from);
+  }
+  if (range?.to) {
+    params.set("to", range.to);
+  }
+  return params.toString();
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData) && init.body !== undefined && !headers.has("Content-Type")) {
@@ -82,6 +98,10 @@ export const api = {
   logout: () => request<Session>("/api/session/logout", { method: "POST" }),
   config: () => request<AppConfig>("/api/config"),
   summary: (filters?: ActivityTypeFilters) => request<SummaryStats>(`/api/stats/summary?${activityFilterQuery(filters)}`),
+  healthDaily: (range?: HealthRange) => {
+    const query = healthRangeQuery(range);
+    return request<{ metrics: DailyHealthMetric[] | null }>(`/api/health/daily${query ? `?${query}` : ""}`);
+  },
   activities: (filters?: ActivityTypeFilters, page?: ActivityPageOptions) => {
     const query = activityFilterQuery(filters, page);
     return request<ActivityListPage>(`/api/activities${query ? `?${query}` : ""}`);
@@ -123,6 +143,11 @@ export const api = {
     request<{ jobId: string; status: string }>("/api/providers/garmin/sync", {
       method: "POST",
       body: JSON.stringify({ oldest })
+    }),
+  garminHealthSync: (range?: HealthRange) =>
+    request<{ jobId: string; status: string }>("/api/providers/garmin/health-sync", {
+      method: "POST",
+      body: JSON.stringify(range ?? {})
     }),
   syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
 };

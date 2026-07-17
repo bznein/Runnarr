@@ -1,0 +1,32 @@
+create table if not exists daily_health_metrics (
+	id uuid primary key default gen_random_uuid(),
+	provider text not null,
+	metric_date date not null,
+	steps integer,
+	total_calories_kcal integer,
+	active_calories_kcal integer,
+	resting_heart_rate_bpm double precision,
+	avg_heart_rate_bpm double precision,
+	max_heart_rate_bpm double precision,
+	sleep_duration_s integer,
+	deep_sleep_s integer,
+	light_sleep_s integer,
+	rem_sleep_s integer,
+	awake_sleep_s integer,
+	sleep_score double precision,
+	stress_avg double precision,
+	stress_max double precision,
+	body_battery_avg double precision,
+	body_battery_min double precision,
+	body_battery_max double precision,
+	hrv_avg_ms double precision,
+	hrv_status text not null default '',
+	weight_kg double precision,
+	body_fat_pct double precision,
+	raw jsonb not null default '{}'::jsonb,
+	created_at timestamptz not null default now(),
+	updated_at timestamptz not null default now(),
+	unique(provider, metric_date)
+);
+
+create index if not exists daily_health_metrics_date_idx on daily_health_metrics(metric_date desc);
