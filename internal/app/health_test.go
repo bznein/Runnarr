@@ -66,6 +66,8 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 			},
 			"bodyBattery": []any{
 				map[string]any{
+					"charged": float64(54),
+					"drained": float64(29),
 					"bodyBatteryValuesArray": []any{
 						[]any{"2026-07-16T00:00:00", float64(42)},
 						[]any{"2026-07-16T01:00:00", float64(50)},
@@ -101,6 +103,10 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 	assertFloatPtr(t, "body battery min", metric.BodyBatteryMin, 42)
 	assertFloatPtr(t, "body battery max", metric.BodyBatteryMax, 68)
 	assertFloatPtr(t, "body battery avg", metric.BodyBatteryAvg, 53.333333333333336)
+	assertFloatPtr(t, "body battery start", metric.BodyBatteryStart, 42)
+	assertFloatPtr(t, "body battery end", metric.BodyBatteryEnd, 68)
+	assertFloatPtr(t, "body battery gained", metric.BodyBatteryGained, 54)
+	assertFloatPtr(t, "body battery drained", metric.BodyBatteryDrained, 29)
 	assertFloatPtr(t, "hrv avg", metric.HRVAvgMS, 55)
 	if metric.HRVStatus != "balanced" {
 		t.Fatalf("HRV status = %q, want balanced", metric.HRVStatus)
@@ -110,6 +116,29 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 	if metric.Provider != garminProvider || metric.Date != "2026-07-16" {
 		t.Fatalf("provider/date = %s/%s", metric.Provider, metric.Date)
 	}
+}
+
+func TestNormalizeGarminHealthDayComputesBodyBatteryGainDrainFallback(t *testing.T) {
+	metric := normalizeGarminHealthDay(GarminBridgeHealthDay{
+		Date: "2026-07-16",
+		Raw: map[string]any{
+			"bodyBattery": []any{
+				map[string]any{
+					"bodyBatteryValuesArray": []any{
+						[]any{"2026-07-16T00:00:00", float64(20)},
+						[]any{"2026-07-16T01:00:00", float64(50)},
+						[]any{"2026-07-16T02:00:00", float64(45)},
+						[]any{"2026-07-16T03:00:00", float64(73)},
+						[]any{"2026-07-16T04:00:00", float64(44)},
+					},
+				},
+			},
+		},
+	})
+
+	assertFloatPtr(t, "body battery gained", metric.BodyBatteryGained, 58)
+	assertFloatPtr(t, "body battery drained", metric.BodyBatteryDrained, 34)
+	assertFloatPtr(t, "body battery max", metric.BodyBatteryMax, 73)
 }
 
 func assertIntPtr(t *testing.T, name string, value *int, want int) {

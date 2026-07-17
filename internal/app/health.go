@@ -164,12 +164,19 @@ func normalizeGarminHealthDay(day GarminBridgeHealthDay) DailyHealthMetric {
 	metric.StressAvg = firstFloat(raw, "avgStressLevel", "averageStressLevel", "stressAvg")
 	metric.StressMax = firstFloat(raw, "maxStressLevel", "stressMax")
 
+	bodyBatteryRaw := rawValue(raw, "bodyBattery")
 	bodyBatteryValues := boundedSeriesValues(raw, 0, 100, "bodyBatteryValuesArray", "bodyBatteryValues")
 	metric.BodyBatteryAvg = firstFloat(raw, "averageBodyBattery", "avgBodyBattery", "bodyBatteryAvg")
 	metric.BodyBatteryMin = firstFloat(raw, "minBodyBattery", "bodyBatteryMin", "lowestBodyBattery")
 	metric.BodyBatteryMax = firstFloat(raw, "maxBodyBattery", "bodyBatteryMax", "highestBodyBattery")
+	metric.BodyBatteryGained = firstFloat(bodyBatteryRaw, "charged", "gained", "bodyBatteryGained")
+	metric.BodyBatteryDrained = firstFloat(bodyBatteryRaw, "drained", "bodyBatteryDrained")
 	if len(bodyBatteryValues) > 0 {
 		summary := numberSummary(bodyBatteryValues)
+		start := bodyBatteryValues[0]
+		end := bodyBatteryValues[len(bodyBatteryValues)-1]
+		metric.BodyBatteryStart = &start
+		metric.BodyBatteryEnd = &end
 		if metric.BodyBatteryAvg == nil {
 			metric.BodyBatteryAvg = &summary.avg
 		}
@@ -178,6 +185,13 @@ func normalizeGarminHealthDay(day GarminBridgeHealthDay) DailyHealthMetric {
 		}
 		if metric.BodyBatteryMax == nil {
 			metric.BodyBatteryMax = &summary.max
+		}
+		change := bodyBatteryGainDrain(bodyBatteryValues)
+		if metric.BodyBatteryGained == nil {
+			metric.BodyBatteryGained = &change.gained
+		}
+		if metric.BodyBatteryDrained == nil {
+			metric.BodyBatteryDrained = &change.drained
 		}
 	}
 
@@ -390,6 +404,24 @@ type numericSummary struct {
 	min float64
 	max float64
 	avg float64
+}
+
+type bodyBatteryChange struct {
+	gained  float64
+	drained float64
+}
+
+func bodyBatteryGainDrain(values []float64) bodyBatteryChange {
+	var change bodyBatteryChange
+	for index := 1; index < len(values); index++ {
+		delta := values[index] - values[index-1]
+		if delta > 0 {
+			change.gained += delta
+		} else {
+			change.drained -= delta
+		}
+	}
+	return change
 }
 
 func numberSummary(values []float64) numericSummary {
