@@ -559,6 +559,12 @@ input {
   gap: 12px;
 }
 
+.health-range-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .health-preset-control {
   min-width: 220px;
   grid-template-columns: repeat(3, minmax(0, 1fr));

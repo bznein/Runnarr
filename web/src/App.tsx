@@ -354,6 +354,7 @@ function Dashboard() {
 
 function HealthPage() {
   const [range, setRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
+  const [draftRange, setDraftRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
   const [syncFrom, setSyncFrom] = useState(range.from);
   const [selectedDate, setSelectedDate] = useState("");
   const queryClient = useQueryClient();
@@ -382,8 +383,15 @@ function HealthPage() {
   const chartData = healthChartData(metrics);
   const showLongRangeHealthLines = healthRangeDayCount(range) > healthBarChartMaxDays;
   const cardItems = healthMetricCards(latestMetric);
-  const activePreset = healthRangePresets().find((preset) => healthRangesMatch(range, healthRangeForLastDays(preset.days)));
+  const activePreset = healthRangePresets().find((preset) => healthRangesMatch(draftRange, healthRangeForLastDays(preset.days)));
+  const draftRangeChanged = !healthRangesMatch(draftRange, range);
+  const draftRangeValid = healthRangeDayCount(draftRange) > 0;
   const syncDisabled = !garminStatus.data?.connected || garminHealthSync.isPending || anyGarminSyncRunning;
+  const applyHealthRange = (nextRange: HealthDateRange) => {
+    setRange(nextRange);
+    setDraftRange(nextRange);
+    setSelectedDate("");
+  };
 
   return (
     <Page title="Health">
@@ -395,7 +403,7 @@ function HealthPage() {
                 key={preset.days}
                 className={activePreset?.days === preset.days ? "active" : ""}
                 type="button"
-                onClick={() => setRange(healthRangeForLastDays(preset.days))}
+                onClick={() => applyHealthRange(healthRangeForLastDays(preset.days))}
               >
                 {preset.label}
               </button>
@@ -406,21 +414,29 @@ function HealthPage() {
               <span>From</span>
               <input
                 type="date"
-                value={range.from}
-                max={range.to}
-                onChange={(event) => setRange({ ...range, from: event.target.value })}
+                value={draftRange.from}
+                max={draftRange.to || localDateString()}
+                onChange={(event) => setDraftRange({ ...draftRange, from: event.target.value })}
               />
             </label>
             <label className="field">
               <span>To</span>
               <input
                 type="date"
-                value={range.to}
-                min={range.from}
+                value={draftRange.to}
+                min={draftRange.from}
                 max={localDateString()}
-                onChange={(event) => setRange({ ...range, to: event.target.value })}
+                onChange={(event) => setDraftRange({ ...draftRange, to: event.target.value })}
               />
             </label>
+          </div>
+          <div className="health-range-actions">
+            <button className="secondary-button small-button" type="button" disabled={!draftRangeChanged} onClick={() => setDraftRange(range)}>
+              Reset
+            </button>
+            <button className="primary-button small-button" type="button" disabled={!draftRangeChanged || !draftRangeValid} onClick={() => applyHealthRange(draftRange)}>
+              Apply
+            </button>
           </div>
         </div>
         <div className="health-sync-controls">
