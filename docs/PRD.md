@@ -78,6 +78,16 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Garmin original activity downloads should be parsed from FIT where available, including session-level elevation gain and lap data.
 - The provider settings UI should make clear that importing requires connecting Garmin first, then triggering sync.
 
+### Garmin Health Metrics
+
+- The app should import daily Garmin health metrics as a separate sync workflow from activity import.
+- Health sync should support a default recent backfill and a user-selected older start date for full-history backfills.
+- The first health metric slice should normalize steps, calories, resting heart rate, sleep, stress, body battery, HRV, and weight/body composition where Garmin provides them.
+- Health metric storage should preserve nullable normalized fields plus raw Garmin payloads so provider-specific gaps can be debugged without losing data.
+- The UI should include a top-level Health page with date-range controls, sync status, summary cards, trend charts, daily rows, and day-level details.
+- Missing health metrics should be omitted or left blank rather than rendered as placeholder values.
+- Garmin health support is read-only; the app must not write hydration, body composition, blood pressure, or other health values back to Garmin.
+
 ### Provider Sync Status
 
 - Provider settings must show sync status for each provider, including whether it is connected, idle, running, completed, or failed.
@@ -187,7 +197,7 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 - If no custom heart-rate zones are configured, the app may offer sensible defaults based on max heart rate or threshold heart rate when known.
 - Activity detail should show time in heart-rate zones for activities with heart-rate samples.
 - Dashboard analytics should summarize heart-rate zone distribution across the active time scale and activity filters where enough data exists.
-- Health metrics such as resting HR, HRV, sleep, body weight, and subjective notes if provider support exists.
+- Additional health metrics and wellness context such as SpO2, respiration, hydration, blood pressure, subjective notes, and intraday health time series if provider support exists.
 - Video attachments for activities, without requiring EXIF or location metadata support.
 - Grade Adjusted Pace (GAP), sourced directly from provider/workout data when available and computed from route grade and pace when not; climb summaries should use the same GAP source/calculation so climb-level GAP is comparable with activity-level GAP.
 - Interactive chart zooming and panning for inspecting specific sections of an activity.

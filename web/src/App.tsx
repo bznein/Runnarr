@@ -2,18 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
 import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
-import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, ImportFile, SyncJob } from "./types";
+import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, ImportFile, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
+type HealthDateRange = { from: string; to: string };
 type ThemePreference = "system" | "light" | "dark";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityChartPoint = {
@@ -50,10 +51,23 @@ type PaceRouteSegment = {
   points: RoutePoint[];
   color: string;
 };
+type HealthChartPoint = {
+  date: string;
+  label: string;
+  steps?: number;
+  calories?: number;
+  sleepHours?: number;
+  restingHeartRate?: number;
+  stress?: number;
+  bodyBattery?: number;
+  hrv?: number;
+  weight?: number;
+};
 
 const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
 const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], excludeSports: [], search: "", dateFrom: "", dateTo: "", ...defaultActivitySort };
 const ACTIVITY_LIST_PAGE_SIZE = 100;
+const garminHealthDefaultDays = 90;
 const themePreferenceStorageKey = "runnarr-theme-preference";
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
@@ -173,6 +187,7 @@ function AuthenticatedApp({
         <nav className="nav">
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
+          <NavItem to="/health" icon={<HeartPulse size={18} />} label="Health" />
         </nav>
         <div className="sidebar-bottom">
           <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
@@ -187,6 +202,7 @@ function AuthenticatedApp({
           <Route path="/" element={<Dashboard />} />
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
+          <Route path="/health" element={<HealthPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
           <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -327,6 +343,302 @@ function Dashboard() {
         </div>
       </section>
     </Page>
+  );
+}
+
+function HealthPage() {
+  const [range, setRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
+  const [syncFrom, setSyncFrom] = useState(range.from);
+  const [selectedDate, setSelectedDate] = useState("");
+  const queryClient = useQueryClient();
+  const garminStatus = useQuery({ queryKey: ["garmin-status"], queryFn: api.garminStatus });
+  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
+  const latestHealthJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin" && job.kind.startsWith("health"));
+  const anyGarminSyncRunning = (jobs.data?.jobs ?? []).some((job) => job.provider === "garmin" && job.status === "running");
+  const healthSyncRunning = latestHealthJob?.status === "running";
+  const health = useQuery({
+    queryKey: ["health-daily", range],
+    queryFn: () => api.healthDaily(range),
+    refetchInterval: healthSyncRunning ? 5000 : false
+  });
+  const garminHealthSync = useMutation({
+    mutationFn: api.garminHealthSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["health-daily"] })
+      ]);
+    }
+  });
+  const metrics = health.data?.metrics ?? [];
+  const latestMetric = latestHealthMetric(metrics);
+  const selectedMetric = metrics.find((metric) => metric.date === selectedDate);
+  const chartData = healthChartData(metrics);
+  const cardItems = healthMetricCards(latestMetric);
+  const activePreset = healthRangePresets().find((preset) => healthRangesMatch(range, healthRangeForLastDays(preset.days)));
+  const syncDisabled = !garminStatus.data?.connected || garminHealthSync.isPending || anyGarminSyncRunning;
+
+  return (
+    <Page title="Health">
+      <section className="panel health-controls-panel">
+        <div className="health-range-controls">
+          <div className="segmented-control health-preset-control" role="group" aria-label="Health date range">
+            {healthRangePresets().map((preset) => (
+              <button
+                key={preset.days}
+                className={activePreset?.days === preset.days ? "active" : ""}
+                type="button"
+                onClick={() => setRange(healthRangeForLastDays(preset.days))}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div className="date-range-grid health-date-grid">
+            <label className="field">
+              <span>From</span>
+              <input
+                type="date"
+                value={range.from}
+                max={range.to}
+                onChange={(event) => setRange({ ...range, from: event.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>To</span>
+              <input
+                type="date"
+                value={range.to}
+                min={range.from}
+                max={localDateString()}
+                onChange={(event) => setRange({ ...range, to: event.target.value })}
+              />
+            </label>
+          </div>
+        </div>
+        <div className="health-sync-controls">
+          <label className="compact-field">
+            <span>Sync from</span>
+            <input type="date" value={syncFrom} max={localDateString()} onChange={(event) => setSyncFrom(event.target.value)} />
+          </label>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={syncDisabled}
+            onClick={() => garminHealthSync.mutate({ from: syncFrom || undefined, to: localDateString() })}
+          >
+            <RefreshCw size={16} />
+            {healthSyncRunning ? "Syncing" : "Sync health"}
+          </button>
+        </div>
+      </section>
+
+      <SyncProgressCard job={latestHealthJob} />
+      {garminHealthSync.error && <div className="error">{garminHealthSync.error instanceof Error ? garminHealthSync.error.message : "Garmin health sync failed"}</div>}
+      {health.error && <div className="error">{health.error instanceof Error ? health.error.message : "Could not load health metrics"}</div>}
+
+      {cardItems.length > 0 && (
+        <section className="metric-grid">
+          {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} />)}
+        </section>
+      )}
+
+      {health.isLoading && <LoadingRow />}
+      {!health.isLoading && metrics.length === 0 && (
+        <EmptyState
+          title="No health metrics found"
+          action={garminStatus.data?.connected ? (
+            <button className="secondary-button" type="button" disabled={syncDisabled} onClick={() => garminHealthSync.mutate({ from: syncFrom || undefined, to: localDateString() })}>
+              <RefreshCw size={16} />
+              Sync health
+            </button>
+          ) : (
+            <Link className="secondary-button" to="/settings">Connect Garmin</Link>
+          )}
+        />
+      )}
+
+      {metrics.length > 0 && (
+        <>
+          <section className="health-chart-grid">
+            <HealthBarChart title="Steps" data={chartData} dataKey="steps" color="#2f8f83" formatter={formatHealthInteger} />
+            <HealthBarChart title="Calories" data={chartData} dataKey="calories" color="#b7791f" formatter={formatHealthCalories} />
+            <HealthBarChart title="Sleep" data={chartData} dataKey="sleepHours" color="#4664c9" formatter={(value) => `${value.toFixed(1)} h`} />
+            <HealthLineChart title="Resting heart rate" data={chartData} dataKey="restingHeartRate" color="#c84d4d" formatter={(value) => `${Math.round(value)} bpm`} />
+            <HealthLineChart title="Stress" data={chartData} dataKey="stress" color="#7a4eb2" formatter={(value) => Math.round(value).toLocaleString()} />
+            <HealthLineChart title="Body battery" data={chartData} dataKey="bodyBattery" color="#2d7fb8" formatter={(value) => Math.round(value).toLocaleString()} />
+            <HealthLineChart title="HRV" data={chartData} dataKey="hrv" color="#6f8f2f" formatter={(value) => `${Math.round(value)} ms`} />
+            <HealthLineChart title="Weight" data={chartData} dataKey="weight" color="#8b5e3c" formatter={(value) => `${value.toFixed(1)} kg`} />
+          </section>
+
+          <section className="panel">
+            <div className="filter-header">
+              <div className="panel-heading">Daily metrics</div>
+              {selectedMetric && (
+                <button className="secondary-button small-button" type="button" onClick={() => setSelectedDate("")}>
+                  Clear selection
+                </button>
+              )}
+            </div>
+            <HealthMetricsTable
+              metrics={metrics}
+              selectedDate={selectedDate}
+              onSelect={(date) => setSelectedDate((current) => current === date ? "" : date)}
+            />
+          </section>
+
+          {selectedMetric && <HealthDayDetail metric={selectedMetric} />}
+        </>
+      )}
+    </Page>
+  );
+}
+
+function HealthBarChart({
+  title,
+  data,
+  dataKey,
+  color,
+  formatter
+}: {
+  title: string;
+  data: HealthChartPoint[];
+  dataKey: keyof HealthChartPoint;
+  color: string;
+  formatter: (value: number) => string;
+}) {
+  if (!data.some((item) => isFiniteNumber(item[dataKey]))) {
+    return null;
+  }
+  return (
+    <div className="panel">
+      <div className="panel-heading">{title}</div>
+      <div className="health-chart-area">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" />
+            <YAxis width={42} />
+            <Tooltip
+              contentStyle={chartTooltipContentStyle}
+              labelStyle={chartTooltipLabelStyle}
+              cursor={chartTooltipCursorStyle}
+              formatter={(value) => [formatter(Number(value)), title]}
+            />
+            <Bar dataKey={dataKey} fill={color} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function HealthLineChart({
+  title,
+  data,
+  dataKey,
+  color,
+  formatter
+}: {
+  title: string;
+  data: HealthChartPoint[];
+  dataKey: keyof HealthChartPoint;
+  color: string;
+  formatter: (value: number) => string;
+}) {
+  if (!data.some((item) => isFiniteNumber(item[dataKey]))) {
+    return null;
+  }
+  return (
+    <div className="panel">
+      <div className="panel-heading">{title}</div>
+      <div className="health-chart-area">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" />
+            <YAxis width={42} />
+            <Tooltip
+              contentStyle={chartTooltipContentStyle}
+              labelStyle={chartTooltipLabelStyle}
+              formatter={(value) => [formatter(Number(value)), title]}
+            />
+            <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function HealthMetricsTable({
+  metrics,
+  selectedDate,
+  onSelect
+}: {
+  metrics: DailyHealthMetric[];
+  selectedDate: string;
+  onSelect: (date: string) => void;
+}) {
+  return (
+    <div className="table-wrap">
+      <table className="data-table health-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Steps</th>
+            <th>Calories</th>
+            <th>Sleep</th>
+            <th>RHR</th>
+            <th>Stress</th>
+            <th>Body battery</th>
+            <th>HRV</th>
+            <th>Weight</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...metrics].reverse().map((metric) => (
+            <tr key={metric.date} className={selectedDate === metric.date ? "selected-row" : ""}>
+              <td>
+                <button className="table-button" type="button" onClick={() => onSelect(metric.date)}>
+                  {formatHealthDate(metric.date)}
+                </button>
+              </td>
+              <td>{formatHealthInteger(metric.steps)}</td>
+              <td>{formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal)}</td>
+              <td>{formatHealthDuration(metric.sleepDurationS)}</td>
+              <td>{formatHealthBPM(metric.restingHeartRateBpm)}</td>
+              <td>{formatHealthRounded(metric.stressAvg)}</td>
+              <td>{formatHealthRounded(metric.bodyBatteryAvg)}</td>
+              <td>{formatHealthMS(metric.hrvAvgMs)}</td>
+              <td>{formatHealthWeight(metric.weightKg)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function HealthDayDetail({ metric }: { metric: DailyHealthMetric }) {
+  const items = healthDetailItems(metric);
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <section className="panel health-detail-panel">
+      <div>
+        <div className="panel-heading">{formatHealthDate(metric.date)}</div>
+        <div className="health-detail-grid">
+          {items.map((item) => (
+            <div className="health-detail-item" key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1718,31 +2030,46 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   if (!job || job.provider !== "garmin") {
     return null;
   }
+  const healthSync = isHealthSyncJob(job);
   const payload = job.payload ?? {};
   const imported = payloadNumber(payload, "imported");
+  const saved = payloadNumber(payload, "saved");
   const processed = payloadNumber(payload, "processed");
   const activities = payloadNumber(payload, "activities");
+  const days = payloadNumber(payload, "days");
+  const total = healthSync ? days : activities;
   const failed = payloadNumber(payload, "failed");
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const stage = payloadText(payload, "stage") || job.status;
   const listing = isSyncListingStage(stage);
   const fetchedPages = payloadNumber(payload, "fetchedPages");
   const oldest = payloadText(payload, "oldest");
+  const from = payloadText(payload, "from");
+  const to = payloadText(payload, "to");
+  const currentDate = payloadText(payload, "currentDate");
   const currentActivityName = payloadText(payload, "currentActivityName");
   const warnings = payloadList(payload, "warnings");
   const firstErrors = payloadList(payload, "firstErrors");
   const foundLabel = activities === 1 ? "activity" : "activities";
-  const detailText = syncProgressDetailText(job, stage, currentActivityName, oldest, activities);
+  const dayLabel = days === 1 ? "day" : "days";
+  const detailText = syncProgressDetailText(job, stage, currentActivityName, currentDate, oldest, from, to, total);
 
   return (
     <section className="panel sync-progress-panel">
       <div className="filter-header">
-        <div className="panel-heading">Garmin sync progress</div>
+        <div className="panel-heading">{healthSync ? "Garmin health sync progress" : "Garmin sync progress"}</div>
         <span className={`status ${job.status}`}>{job.status}</span>
       </div>
       <SyncProgressBar job={job} />
       <div className="sync-progress-grid">
-        {listing ? (
+        {healthSync ? (
+          <>
+            <SyncStat label="Completed" value={`${processed.toLocaleString()} / ${days.toLocaleString()} ${dayLabel}`} />
+            <SyncStat label="Saved" value={saved.toLocaleString()} />
+            <SyncStat label="Failed" value={failed.toLocaleString()} />
+            <SyncStat label="Range" value={from && to ? `${from} to ${to}` : "Recent"} />
+          </>
+        ) : listing ? (
           <>
             <SyncStat label="Found" value={`${activities.toLocaleString()} ${foundLabel}`} />
             <SyncStat label="Pages" value={fetchedPages.toLocaleString()} />
@@ -1785,11 +2112,11 @@ function SyncStat({ label, value }: { label: string; value: string }) {
 function SyncProgressBar({ job }: { job: SyncJob }) {
   const payload = job.payload ?? {};
   const processed = payloadNumber(payload, "processed");
-  const activities = payloadNumber(payload, "activities");
+  const total = isHealthSyncJob(job) ? payloadNumber(payload, "days") : payloadNumber(payload, "activities");
   const stage = payloadText(payload, "stage");
   const listing = job.status === "running" && isSyncListingStage(stage);
-  const hasKnownTotal = activities > 0 && !listing;
-  const percent = hasKnownTotal ? Math.min(100, Math.round((processed / activities) * 100)) : 0;
+  const hasKnownTotal = total > 0 && !listing;
+  const percent = hasKnownTotal ? Math.min(100, Math.round((processed / total) * 100)) : 0;
   return (
     <div className="progress-cell">
       <div className={`progress-bar${listing ? " indeterminate" : ""}`} aria-label={listing ? "Listing Garmin activities" : `Sync progress ${percent}%`}>
@@ -1803,13 +2130,27 @@ function SyncProgressBar({ job }: { job: SyncJob }) {
 function formatSyncJobDetails(job: SyncJob) {
   const payload = job.payload ?? {};
   const imported = payloadNumber(payload, "imported");
+  const saved = payloadNumber(payload, "saved");
   const processed = payloadNumber(payload, "processed");
   const failed = payloadNumber(payload, "failed");
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const activities = payloadNumber(payload, "activities");
+  const days = payloadNumber(payload, "days");
   const fetchedPages = payloadNumber(payload, "fetchedPages");
   const stage = payloadText(payload, "stage");
   const parts = [];
+  if (isHealthSyncJob(job)) {
+    if (days > 0) {
+      parts.push(`${processed}/${days} days`);
+    }
+    if (saved > 0) {
+      parts.push(`${saved} saved`);
+    }
+    if (failed > 0) {
+      parts.push(`${failed} failed`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "-";
+  }
   if (isSyncListingStage(stage)) {
     if (activities > 0) {
       parts.push(`${activities} found`);
@@ -1838,7 +2179,20 @@ function isSyncListingStage(stage: string) {
   return stage.toLowerCase().includes("listing");
 }
 
-function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, oldest: string, activities: number) {
+function isHealthSyncJob(job: SyncJob) {
+  return job.kind.startsWith("health") || payloadText(job.payload ?? {}, "kind") === "health";
+}
+
+function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, currentDate: string, oldest: string, from: string, to: string, total: number) {
+  if (isHealthSyncJob(job)) {
+    if (currentDate) {
+      return currentDate;
+    }
+    if (job.status === "completed") {
+      return total > 0 ? "Health sync finished" : "No days found";
+    }
+    return from && to ? `${from} to ${to}` : "Waiting for first day";
+  }
   if (isSyncListingStage(stage)) {
     return oldest ? `Searching from ${oldest}` : "Searching Garmin Connect";
   }
@@ -1846,7 +2200,7 @@ function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName
     return currentActivityName;
   }
   if (job.status === "completed") {
-    return activities > 0 ? "Sync finished" : "No activities found";
+    return total > 0 ? "Sync finished" : "No activities found";
   }
   return "Waiting for first activity";
 }
@@ -1864,6 +2218,170 @@ function payloadText(payload: Record<string, unknown>, key: string) {
 function payloadList(payload: Record<string, unknown>, key: string) {
   const value = payload[key];
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function healthRangePresets() {
+  return [
+    { label: "7D", days: 7 },
+    { label: "30D", days: 30 },
+    { label: "90D", days: 90 }
+  ];
+}
+
+function healthRangeForLastDays(days: number): HealthDateRange {
+  const to = new Date();
+  const from = new Date(to);
+  from.setDate(to.getDate() - Math.max(days - 1, 0));
+  return { from: localDateString(from), to: localDateString(to) };
+}
+
+function healthRangesMatch(left: HealthDateRange, right: HealthDateRange) {
+  return left.from === right.from && left.to === right.to;
+}
+
+function localDateString(value = new Date()) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function latestHealthMetric(metrics: DailyHealthMetric[]) {
+  return [...metrics].reverse().find(hasAnyHealthMetric);
+}
+
+function hasAnyHealthMetric(metric: DailyHealthMetric) {
+  return [
+    metric.steps,
+    metric.totalCaloriesKcal,
+    metric.activeCaloriesKcal,
+    metric.restingHeartRateBpm,
+    metric.sleepDurationS,
+    metric.stressAvg,
+    metric.bodyBatteryAvg,
+    metric.hrvAvgMs,
+    metric.weightKg
+  ].some(isFiniteNumber);
+}
+
+function healthChartData(metrics: DailyHealthMetric[]): HealthChartPoint[] {
+  return metrics.map((metric) => ({
+    date: metric.date,
+    label: healthChartLabel(metric.date),
+    steps: finiteValue(metric.steps),
+    calories: finiteValue(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal),
+    sleepHours: isFiniteNumber(metric.sleepDurationS) ? metric.sleepDurationS / 3600 : undefined,
+    restingHeartRate: finiteValue(metric.restingHeartRateBpm),
+    stress: finiteValue(metric.stressAvg),
+    bodyBattery: finiteValue(metric.bodyBatteryAvg),
+    hrv: finiteValue(metric.hrvAvgMs),
+    weight: finiteValue(metric.weightKg)
+  }));
+}
+
+function healthMetricCards(metric?: DailyHealthMetric) {
+  if (!metric) {
+    return [];
+  }
+  return [
+    { label: "Steps", value: formatHealthInteger(metric.steps) },
+    { label: "Calories", value: formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal) },
+    { label: "Sleep", value: formatHealthDuration(metric.sleepDurationS) },
+    { label: "Resting HR", value: formatHealthBPM(metric.restingHeartRateBpm) },
+    { label: "Body battery", value: formatHealthRounded(metric.bodyBatteryAvg) },
+    { label: "HRV", value: formatHealthMS(metric.hrvAvgMs) },
+    { label: "Weight", value: formatHealthWeight(metric.weightKg) }
+  ].filter((item) => item.value !== "");
+}
+
+function healthDetailItems(metric: DailyHealthMetric) {
+  return [
+    { label: "Steps", value: formatHealthInteger(metric.steps) },
+    { label: "Total calories", value: formatHealthCalories(metric.totalCaloriesKcal) },
+    { label: "Active calories", value: formatHealthCalories(metric.activeCaloriesKcal) },
+    { label: "Resting heart rate", value: formatHealthBPM(metric.restingHeartRateBpm) },
+    { label: "Average heart rate", value: formatHealthBPM(metric.avgHeartRateBpm) },
+    { label: "Maximum heart rate", value: formatHealthBPM(metric.maxHeartRateBpm) },
+    { label: "Sleep", value: formatHealthDuration(metric.sleepDurationS) },
+    { label: "Deep sleep", value: formatHealthDuration(metric.deepSleepS) },
+    { label: "Light sleep", value: formatHealthDuration(metric.lightSleepS) },
+    { label: "REM sleep", value: formatHealthDuration(metric.remSleepS) },
+    { label: "Awake", value: formatHealthDuration(metric.awakeSleepS) },
+    { label: "Sleep score", value: formatHealthRounded(metric.sleepScore) },
+    { label: "Average stress", value: formatHealthRounded(metric.stressAvg) },
+    { label: "Maximum stress", value: formatHealthRounded(metric.stressMax) },
+    { label: "Body battery average", value: formatHealthRounded(metric.bodyBatteryAvg) },
+    { label: "Body battery minimum", value: formatHealthRounded(metric.bodyBatteryMin) },
+    { label: "Body battery maximum", value: formatHealthRounded(metric.bodyBatteryMax) },
+    { label: "HRV average", value: formatHealthMS(metric.hrvAvgMs) },
+    { label: "HRV status", value: metric.hrvStatus ?? "" },
+    { label: "Weight", value: formatHealthWeight(metric.weightKg) },
+    { label: "Body fat", value: formatHealthPercent(metric.bodyFatPct) }
+  ].filter((item) => item.value !== "");
+}
+
+function healthChartLabel(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) {
+    return date;
+  }
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatHealthDate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) {
+    return date;
+  }
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function finiteValue(value?: number) {
+  return isFiniteNumber(value) ? value : undefined;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatHealthInteger(value?: number) {
+  return isFiniteNumber(value) ? Math.round(value).toLocaleString() : "";
+}
+
+function formatHealthRounded(value?: number) {
+  return isFiniteNumber(value) ? Math.round(value).toLocaleString() : "";
+}
+
+function formatHealthCalories(value?: number) {
+  return isFiniteNumber(value) ? `${Math.round(value).toLocaleString()} kcal` : "";
+}
+
+function formatHealthBPM(value?: number) {
+  return isFiniteNumber(value) ? `${Math.round(value)} bpm` : "";
+}
+
+function formatHealthMS(value?: number) {
+  return isFiniteNumber(value) ? `${Math.round(value)} ms` : "";
+}
+
+function formatHealthWeight(value?: number) {
+  return isFiniteNumber(value) ? `${value.toFixed(1)} kg` : "";
+}
+
+function formatHealthPercent(value?: number) {
+  return isFiniteNumber(value) ? `${value.toFixed(1).replace(/\.0$/, "")}%` : "";
+}
+
+function formatHealthDuration(totalSeconds?: number) {
+  if (!isFiniteNumber(totalSeconds) || totalSeconds <= 0) {
+    return "";
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.round((totalSeconds % 3600) / 60);
+  if (hours <= 0) {
+    return `${minutes}m`;
+  }
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
 function Page({ title, eyebrow, actions, children }: { title: string; eyebrow?: string; actions?: ReactNode; children: ReactNode }) {

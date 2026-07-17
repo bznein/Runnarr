@@ -98,6 +98,175 @@ func (s *Store) ListImports(ctx context.Context) ([]ImportFile, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthMetric) (DailyHealthMetric, error) {
+	raw := metric.Raw
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	rawBytes, err := json.Marshal(raw)
+	if err != nil {
+		return DailyHealthMetric{}, err
+	}
+
+	row := s.db.QueryRow(ctx, `
+		insert into daily_health_metrics(
+			provider,
+			metric_date,
+			steps,
+			total_calories_kcal,
+			active_calories_kcal,
+			resting_heart_rate_bpm,
+			avg_heart_rate_bpm,
+			max_heart_rate_bpm,
+			sleep_duration_s,
+			deep_sleep_s,
+			light_sleep_s,
+			rem_sleep_s,
+			awake_sleep_s,
+			sleep_score,
+			stress_avg,
+			stress_max,
+			body_battery_avg,
+			body_battery_min,
+			body_battery_max,
+			hrv_avg_ms,
+			hrv_status,
+			weight_kg,
+			body_fat_pct,
+			raw
+		)
+		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+		on conflict(provider, metric_date) do update set
+			steps = excluded.steps,
+			total_calories_kcal = excluded.total_calories_kcal,
+			active_calories_kcal = excluded.active_calories_kcal,
+			resting_heart_rate_bpm = excluded.resting_heart_rate_bpm,
+			avg_heart_rate_bpm = excluded.avg_heart_rate_bpm,
+			max_heart_rate_bpm = excluded.max_heart_rate_bpm,
+			sleep_duration_s = excluded.sleep_duration_s,
+			deep_sleep_s = excluded.deep_sleep_s,
+			light_sleep_s = excluded.light_sleep_s,
+			rem_sleep_s = excluded.rem_sleep_s,
+			awake_sleep_s = excluded.awake_sleep_s,
+			sleep_score = excluded.sleep_score,
+			stress_avg = excluded.stress_avg,
+			stress_max = excluded.stress_max,
+			body_battery_avg = excluded.body_battery_avg,
+			body_battery_min = excluded.body_battery_min,
+			body_battery_max = excluded.body_battery_max,
+			hrv_avg_ms = excluded.hrv_avg_ms,
+			hrv_status = excluded.hrv_status,
+			weight_kg = excluded.weight_kg,
+			body_fat_pct = excluded.body_fat_pct,
+			raw = excluded.raw,
+			updated_at = now()
+		returning
+			id::text,
+			provider,
+			to_char(metric_date, 'YYYY-MM-DD'),
+			steps,
+			total_calories_kcal,
+			active_calories_kcal,
+			resting_heart_rate_bpm,
+			avg_heart_rate_bpm,
+			max_heart_rate_bpm,
+			sleep_duration_s,
+			deep_sleep_s,
+			light_sleep_s,
+			rem_sleep_s,
+			awake_sleep_s,
+			sleep_score,
+			stress_avg,
+			stress_max,
+			body_battery_avg,
+			body_battery_min,
+			body_battery_max,
+			hrv_avg_ms,
+			hrv_status,
+			weight_kg,
+			body_fat_pct,
+			raw,
+			created_at,
+			updated_at
+	`,
+		metric.Provider,
+		metric.Date,
+		optionalInt(metric.Steps),
+		optionalInt(metric.TotalCaloriesKcal),
+		optionalInt(metric.ActiveCaloriesKcal),
+		optionalFloat(metric.RestingHeartRateBPM),
+		optionalFloat(metric.AvgHeartRateBPM),
+		optionalFloat(metric.MaxHeartRateBPM),
+		optionalInt(metric.SleepDurationS),
+		optionalInt(metric.DeepSleepS),
+		optionalInt(metric.LightSleepS),
+		optionalInt(metric.REMSleepS),
+		optionalInt(metric.AwakeSleepS),
+		optionalFloat(metric.SleepScore),
+		optionalFloat(metric.StressAvg),
+		optionalFloat(metric.StressMax),
+		optionalFloat(metric.BodyBatteryAvg),
+		optionalFloat(metric.BodyBatteryMin),
+		optionalFloat(metric.BodyBatteryMax),
+		optionalFloat(metric.HRVAvgMS),
+		strings.TrimSpace(metric.HRVStatus),
+		optionalFloat(metric.WeightKG),
+		optionalFloat(metric.BodyFatPct),
+		rawBytes,
+	)
+	return scanDailyHealthMetric(row)
+}
+
+func (s *Store) ListDailyHealthMetrics(ctx context.Context, provider string, from, to time.Time) ([]DailyHealthMetric, error) {
+	rows, err := s.db.Query(ctx, `
+		select
+			id::text,
+			provider,
+			to_char(metric_date, 'YYYY-MM-DD'),
+			steps,
+			total_calories_kcal,
+			active_calories_kcal,
+			resting_heart_rate_bpm,
+			avg_heart_rate_bpm,
+			max_heart_rate_bpm,
+			sleep_duration_s,
+			deep_sleep_s,
+			light_sleep_s,
+			rem_sleep_s,
+			awake_sleep_s,
+			sleep_score,
+			stress_avg,
+			stress_max,
+			body_battery_avg,
+			body_battery_min,
+			body_battery_max,
+			hrv_avg_ms,
+			hrv_status,
+			weight_kg,
+			body_fat_pct,
+			raw,
+			created_at,
+			updated_at
+		from daily_health_metrics
+		where provider = $1 and metric_date between $2 and $3
+		order by metric_date asc
+	`, provider, from.Format("2006-01-02"), to.Format("2006-01-02"))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]DailyHealthMetric, 0)
+	for rows.Next() {
+		metric, err := scanDailyHealthMetric(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, metric)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID string, sourceFileID *string, activity ImportedActivity) (string, error) {
 	raw := activity.Raw
 	if raw == nil {
@@ -595,6 +764,24 @@ func (s *Store) HasRunningSyncJob(ctx context.Context, provider string) (bool, e
 	return exists, err
 }
 
+func (s *Store) LatestSyncJobCreatedAt(ctx context.Context, provider, kind string) (time.Time, bool, error) {
+	var createdAt time.Time
+	err := s.db.QueryRow(ctx, `
+		select created_at
+		from sync_jobs
+		where provider = $1 and kind = $2
+		order by created_at desc
+		limit 1
+	`, provider, kind).Scan(&createdAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return createdAt, true, nil
+}
+
 func (s *Store) FinishSyncJob(ctx context.Context, id, status, message string, payload map[string]any) error {
 	if payload == nil {
 		_, err := s.db.Exec(ctx, `
@@ -778,6 +965,91 @@ func scanActivityMedia(row rowScanner, media *ActivityMedia) error {
 	return nil
 }
 
+func scanDailyHealthMetric(row rowScanner) (DailyHealthMetric, error) {
+	var metric DailyHealthMetric
+	var steps sql.NullInt32
+	var totalCalories sql.NullInt32
+	var activeCalories sql.NullInt32
+	var restingHR sql.NullFloat64
+	var avgHR sql.NullFloat64
+	var maxHR sql.NullFloat64
+	var sleepDuration sql.NullInt32
+	var deepSleep sql.NullInt32
+	var lightSleep sql.NullInt32
+	var remSleep sql.NullInt32
+	var awakeSleep sql.NullInt32
+	var sleepScore sql.NullFloat64
+	var stressAvg sql.NullFloat64
+	var stressMax sql.NullFloat64
+	var bodyBatteryAvg sql.NullFloat64
+	var bodyBatteryMin sql.NullFloat64
+	var bodyBatteryMax sql.NullFloat64
+	var hrvAvg sql.NullFloat64
+	var weightKG sql.NullFloat64
+	var bodyFatPct sql.NullFloat64
+	var rawBytes []byte
+
+	if err := row.Scan(
+		&metric.ID,
+		&metric.Provider,
+		&metric.Date,
+		&steps,
+		&totalCalories,
+		&activeCalories,
+		&restingHR,
+		&avgHR,
+		&maxHR,
+		&sleepDuration,
+		&deepSleep,
+		&lightSleep,
+		&remSleep,
+		&awakeSleep,
+		&sleepScore,
+		&stressAvg,
+		&stressMax,
+		&bodyBatteryAvg,
+		&bodyBatteryMin,
+		&bodyBatteryMax,
+		&hrvAvg,
+		&metric.HRVStatus,
+		&weightKG,
+		&bodyFatPct,
+		&rawBytes,
+		&metric.CreatedAt,
+		&metric.UpdatedAt,
+	); err != nil {
+		return DailyHealthMetric{}, err
+	}
+
+	metric.Steps = intPtrFromNull(steps)
+	metric.TotalCaloriesKcal = intPtrFromNull(totalCalories)
+	metric.ActiveCaloriesKcal = intPtrFromNull(activeCalories)
+	metric.RestingHeartRateBPM = floatPtrFromNull(restingHR)
+	metric.AvgHeartRateBPM = floatPtrFromNull(avgHR)
+	metric.MaxHeartRateBPM = floatPtrFromNull(maxHR)
+	metric.SleepDurationS = intPtrFromNull(sleepDuration)
+	metric.DeepSleepS = intPtrFromNull(deepSleep)
+	metric.LightSleepS = intPtrFromNull(lightSleep)
+	metric.REMSleepS = intPtrFromNull(remSleep)
+	metric.AwakeSleepS = intPtrFromNull(awakeSleep)
+	metric.SleepScore = floatPtrFromNull(sleepScore)
+	metric.StressAvg = floatPtrFromNull(stressAvg)
+	metric.StressMax = floatPtrFromNull(stressMax)
+	metric.BodyBatteryAvg = floatPtrFromNull(bodyBatteryAvg)
+	metric.BodyBatteryMin = floatPtrFromNull(bodyBatteryMin)
+	metric.BodyBatteryMax = floatPtrFromNull(bodyBatteryMax)
+	metric.HRVAvgMS = floatPtrFromNull(hrvAvg)
+	metric.WeightKG = floatPtrFromNull(weightKG)
+	metric.BodyFatPct = floatPtrFromNull(bodyFatPct)
+	if len(rawBytes) > 0 {
+		_ = json.Unmarshal(rawBytes, &metric.Raw)
+	}
+	if metric.Raw == nil {
+		metric.Raw = map[string]any{}
+	}
+	return metric, nil
+}
+
 func activityFilterWhere(filters ActivityFilters, startArg int) (string, []any) {
 	conditions, args := activityFilterConditions(filters, startArg)
 	if len(conditions) == 0 {
@@ -890,6 +1162,20 @@ func nullTime(t time.Time) any {
 		return nil
 	}
 	return t
+}
+
+func optionalInt(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func optionalFloat(value *float64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
 }
 
 func floatPtrFromNull(value sql.NullFloat64) *float64 {

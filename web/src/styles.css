@@ -544,6 +544,41 @@ input {
   min-width: 0;
 }
 
+.health-controls-panel {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.health-range-controls,
+.health-sync-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.health-preset-control {
+  min-width: 220px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.health-date-grid {
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+}
+
+.health-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.health-chart-area {
+  height: 220px;
+  min-width: 0;
+}
+
 .chart-header {
   display: flex;
   align-items: flex-start;
@@ -866,6 +901,47 @@ input {
   color: var(--color-primary-text);
   font-weight: 650;
   text-decoration: none;
+}
+
+.table-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary-text);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.selected-row td {
+  background: var(--color-surface-soft);
+}
+
+.health-detail-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.health-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.health-detail-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.health-detail-item span {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.health-detail-item strong {
+  font-size: 18px;
+  letter-spacing: 0;
 }
 
 .source-pill,
@@ -1419,6 +1495,8 @@ input {
   .date-range-grid,
   .search-panel,
   .sync-progress-grid,
+  .health-chart-grid,
+  .health-detail-grid,
   .climbs-layout,
   .climb-detail-metrics {
     grid-template-columns: 1fr;
@@ -1431,12 +1509,15 @@ input {
   .upload-panel,
   .provider-panel,
   .display-panel,
+  .health-controls-panel,
   .page-header {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .provider-controls,
+  .health-range-controls,
+  .health-sync-controls,
   .theme-control {
     justify-content: flex-start;
     width: 100%;

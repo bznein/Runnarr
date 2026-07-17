@@ -165,3 +165,33 @@ export type SyncJob = {
   finishedAt?: string;
   payload?: Record<string, unknown>;
 };
+
+export type DailyHealthMetric = {
+  id?: string;
+  provider: string;
+  date: string;
+  steps?: number;
+  totalCaloriesKcal?: number;
+  activeCaloriesKcal?: number;
+  restingHeartRateBpm?: number;
+  avgHeartRateBpm?: number;
+  maxHeartRateBpm?: number;
+  sleepDurationS?: number;
+  deepSleepS?: number;
+  lightSleepS?: number;
+  remSleepS?: number;
+  awakeSleepS?: number;
+  sleepScore?: number;
+  stressAvg?: number;
+  stressMax?: number;
+  bodyBatteryAvg?: number;
+  bodyBatteryMin?: number;
+  bodyBatteryMax?: number;
+  hrvAvgMs?: number;
+  hrvStatus?: string;
+  weightKg?: number;
+  bodyFatPct?: number;
+  raw?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+};

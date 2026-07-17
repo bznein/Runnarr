@@ -32,6 +32,7 @@ type GarminBridge interface {
 	ListActivities(ctx context.Context, tokenStore string, start, limit int) ([]GarminBridgeActivity, error)
 	ListActivitySplits(ctx context.Context, tokenStore, activityID string) ([]GarminBridgeLap, error)
 	DownloadActivity(ctx context.Context, tokenStore, activityID string) ([]byte, error)
+	FetchHealthDay(ctx context.Context, tokenStore, date string) (GarminBridgeHealthDay, error)
 }
 
 type GarminBridgeProfile struct {
@@ -52,6 +53,11 @@ type GarminBridgeActivity struct {
 type GarminBridgeLap struct {
 	Index                    int      `json:"index"`
 	AvgGradeAdjustedSpeedMPS *float64 `json:"avgGradeAdjustedSpeed,omitempty"`
+}
+
+type GarminBridgeHealthDay struct {
+	Date string         `json:"date"`
+	Raw  map[string]any `json:"raw"`
 }
 
 type GarminSyncOptions struct {
@@ -426,6 +432,22 @@ func (b PythonGarminBridge) DownloadActivity(ctx context.Context, tokenStore, ac
 		return nil, fmt.Errorf("invalid Garmin bridge download response: %w", err)
 	}
 	return data, nil
+}
+
+func (b PythonGarminBridge) FetchHealthDay(ctx context.Context, tokenStore, date string) (GarminBridgeHealthDay, error) {
+	var response map[string]any
+	if err := b.run(ctx, map[string]any{
+		"action":     "health-day",
+		"tokenStore": tokenStore,
+		"date":       date,
+	}, &response); err != nil {
+		return GarminBridgeHealthDay{}, err
+	}
+	responseDate, _ := response["date"].(string)
+	return GarminBridgeHealthDay{
+		Date: responseDate,
+		Raw:  response,
+	}, nil
 }
 
 func (b PythonGarminBridge) run(ctx context.Context, request map[string]any, response any) error {

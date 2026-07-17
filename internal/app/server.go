@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -79,11 +80,13 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activity-media/{mediaId}/thumbnail", s.handleServeThumbnailMedia)
 			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
+			r.Get("/health/daily", s.handleDailyHealthMetrics)
 			r.Get("/imports", s.handleListImports)
 			r.Post("/imports", s.handleImport)
 			r.Get("/providers/garmin/status", s.handleGarminStatus)
 			r.Post("/providers/garmin/connect", s.handleGarminConnect)
 			r.Post("/providers/garmin/sync", s.handleGarminSync)
+			r.Post("/providers/garmin/health-sync", s.handleGarminHealthSync)
 			r.Get("/sync-jobs", s.handleSyncJobs)
 		})
 	})
@@ -342,6 +345,21 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+func (s *Server) handleDailyHealthMetrics(w http.ResponseWriter, r *http.Request) {
+	from, to, err := healthRangeFromQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	metrics, err := s.store.ListDailyHealthMetrics(r.Context(), garminProvider, from, to)
+	if err != nil {
+		s.logger.Error("list daily health metrics", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load health metrics")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"metrics": metrics})
+}
+
 func (s *Server) handleListImports(w http.ResponseWriter, r *http.Request) {
 	imports, err := s.store.ListImports(r.Context())
 	if err != nil {
@@ -433,6 +451,32 @@ func (s *Server) handleGarminSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
 }
 
+func (s *Server) handleGarminHealthSync(w http.ResponseWriter, r *http.Request) {
+	opts, err := decodeGarminHealthSyncOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	running, err := s.store.HasRunningSyncJob(r.Context(), garminProvider)
+	if err != nil {
+		s.logger.Error("check running garmin health sync", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not check sync state")
+		return
+	}
+	if running {
+		writeError(w, http.StatusConflict, "Garmin sync is already running")
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(r.Context(), garminProvider, "health_manual")
+	if err != nil {
+		s.logger.Error("create garmin health sync job", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not create sync job")
+		return
+	}
+	go s.runGarminManualHealthSyncJob(jobID, opts)
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
+}
+
 func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, err := s.store.ListSyncJobs(r.Context())
 	if err != nil {
@@ -481,6 +525,7 @@ func (s *Server) runGarminScheduledSyncOnce(ctx context.Context) {
 	if _, err := s.finishGarminSyncJob(syncCtx, jobID, GarminSyncOptions{Oldest: oldest}); err != nil {
 		s.logger.Error("scheduled garmin sync", "error", err)
 	}
+	s.runGarminScheduledHealthSyncOnce(ctx)
 }
 
 func (s *Server) runGarminManualSyncJob(jobID string, opts GarminSyncOptions) {
@@ -508,6 +553,71 @@ func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts Gar
 	return payload, nil
 }
 
+func (s *Server) runGarminScheduledHealthSyncOnce(ctx context.Context) {
+	due, err := s.garminScheduledHealthSyncDue(ctx)
+	if err != nil {
+		s.logger.Error("check scheduled garmin health sync", "error", err)
+		return
+	}
+	if !due {
+		return
+	}
+	if running, err := s.store.HasRunningSyncJob(ctx, garminProvider); err != nil || running {
+		if err != nil {
+			s.logger.Error("check running scheduled garmin health sync", "error", err)
+		}
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(ctx, garminProvider, "health_scheduled")
+	if err != nil {
+		s.logger.Error("create scheduled garmin health sync job", "error", err)
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	to := time.Now().UTC()
+	from := to.AddDate(0, 0, -(garminHealthScheduledRefreshDays - 1))
+	if _, err := s.finishGarminHealthSyncJob(syncCtx, jobID, GarminHealthSyncOptions{From: from, To: to}); err != nil {
+		s.logger.Error("scheduled garmin health sync", "error", err)
+	}
+}
+
+func (s *Server) garminScheduledHealthSyncDue(ctx context.Context) (bool, error) {
+	createdAt, ok, err := s.store.LatestSyncJobCreatedAt(ctx, garminProvider, "health_scheduled")
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return true, nil
+	}
+	return time.Since(createdAt) >= 4*time.Hour, nil
+}
+
+func (s *Server) runGarminManualHealthSyncJob(jobID string, opts GarminHealthSyncOptions) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+	defer cancel()
+	if _, err := s.finishGarminHealthSyncJob(ctx, jobID, opts); err != nil {
+		s.logger.Error("manual garmin health sync", "job_id", jobID, "error", err)
+	}
+}
+
+func (s *Server) finishGarminHealthSyncJob(ctx context.Context, jobID string, opts GarminHealthSyncOptions) (map[string]any, error) {
+	progress := func(payload map[string]any) {
+		if err := s.store.UpdateSyncJobProgress(ctx, jobID, payload); err != nil {
+			s.logger.Error("update garmin health sync progress", "job_id", jobID, "error", err)
+		}
+	}
+	payload, err := s.garmin.SyncHealth(ctx, opts, progress)
+	if err != nil {
+		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		return nil, err
+	}
+	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
 func decodeGarminSyncOptions(r *http.Request) (GarminSyncOptions, error) {
 	var body struct {
 		Oldest string `json:"oldest"`
@@ -523,6 +633,57 @@ func decodeGarminSyncOptions(r *http.Request) (GarminSyncOptions, error) {
 		return GarminSyncOptions{}, errors.New("oldest must use YYYY-MM-DD format")
 	}
 	return GarminSyncOptions{Oldest: oldest}, nil
+}
+
+func decodeGarminHealthSyncOptions(r *http.Request) (GarminHealthSyncOptions, error) {
+	var body struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		return GarminHealthSyncOptions{}, errors.New("invalid JSON body")
+	}
+	from, err := parseOptionalAPIDate(body.From, "from")
+	if err != nil {
+		return GarminHealthSyncOptions{}, err
+	}
+	to, err := parseOptionalAPIDate(body.To, "to")
+	if err != nil {
+		return GarminHealthSyncOptions{}, err
+	}
+	if !from.IsZero() && !to.IsZero() && from.After(to) {
+		return GarminHealthSyncOptions{}, errors.New("from must be before or equal to to")
+	}
+	return GarminHealthSyncOptions{From: from, To: to}, nil
+}
+
+func healthRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
+	values := r.URL.Query()
+	from, err := parseOptionalAPIDate(values.Get("from"), "from")
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	to, err := parseOptionalAPIDate(values.Get("to"), "to")
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	from, to, err = garminHealthSyncRange(GarminHealthSyncOptions{From: from, To: to}, time.Now().UTC())
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	return from, to, nil
+}
+
+func parseOptionalAPIDate(value, field string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must use YYYY-MM-DD format", field)
+	}
+	return parsed, nil
 }
 
 func activityFiltersFromQuery(r *http.Request) ActivityFilters {

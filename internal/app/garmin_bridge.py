@@ -128,6 +128,33 @@ def download_bytes(client, activity_id):
     raise RuntimeError("Garmin returned an unsupported download payload")
 
 
+def safe_health_call(errors, name, fn):
+    try:
+        return fn()
+    except Exception as exc:
+        errors[name] = str(exc)
+        return None
+
+
+def health_day_response(client, cdate):
+    datetime.strptime(cdate, "%Y-%m-%d")
+    errors = {}
+    return {
+        "date": cdate,
+        "stats": safe_health_call(errors, "stats", lambda: client.get_stats(cdate)),
+        "statsAndBody": safe_health_call(errors, "statsAndBody", lambda: client.get_stats_and_body(cdate)),
+        "dailySteps": safe_health_call(errors, "dailySteps", lambda: client.get_daily_steps(cdate, cdate)),
+        "heartRates": safe_health_call(errors, "heartRates", lambda: client.get_heart_rates(cdate)),
+        "restingHeartRate": safe_health_call(errors, "restingHeartRate", lambda: client.get_rhr_day(cdate)),
+        "sleep": safe_health_call(errors, "sleep", lambda: client.get_sleep_data(cdate)),
+        "stress": safe_health_call(errors, "stress", lambda: client.get_stress_data(cdate)),
+        "bodyBattery": safe_health_call(errors, "bodyBattery", lambda: client.get_body_battery(cdate, cdate)),
+        "hrv": safe_health_call(errors, "hrv", lambda: client.get_hrv_data(cdate)),
+        "bodyComposition": safe_health_call(errors, "bodyComposition", lambda: client.get_body_composition(cdate, cdate)),
+        "errors": errors,
+    }
+
+
 def main():
     request = json.load(sys.stdin)
     action = request.get("action")
@@ -171,6 +198,13 @@ def main():
         if not isinstance(lap_items, list):
             lap_items = []
         print(json.dumps({"laps": [normalize_lap(item, index) for index, item in enumerate(lap_items)]}))
+        return
+
+    if action == "health-day":
+        cdate = str(request.get("date") or "").strip()
+        if not cdate:
+            raise RuntimeError("missing date")
+        print(json.dumps(health_day_response(client, cdate)))
         return
 
     raise RuntimeError(f"unsupported action: {action}")

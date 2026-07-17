@@ -172,6 +172,36 @@ type SyncJob struct {
 	FinishedAt *time.Time     `json:"finishedAt,omitempty"`
 }
 
+type DailyHealthMetric struct {
+	ID                  string         `json:"id,omitempty"`
+	Provider            string         `json:"provider"`
+	Date                string         `json:"date"`
+	Steps               *int           `json:"steps,omitempty"`
+	TotalCaloriesKcal   *int           `json:"totalCaloriesKcal,omitempty"`
+	ActiveCaloriesKcal  *int           `json:"activeCaloriesKcal,omitempty"`
+	RestingHeartRateBPM *float64       `json:"restingHeartRateBpm,omitempty"`
+	AvgHeartRateBPM     *float64       `json:"avgHeartRateBpm,omitempty"`
+	MaxHeartRateBPM     *float64       `json:"maxHeartRateBpm,omitempty"`
+	SleepDurationS      *int           `json:"sleepDurationS,omitempty"`
+	DeepSleepS          *int           `json:"deepSleepS,omitempty"`
+	LightSleepS         *int           `json:"lightSleepS,omitempty"`
+	REMSleepS           *int           `json:"remSleepS,omitempty"`
+	AwakeSleepS         *int           `json:"awakeSleepS,omitempty"`
+	SleepScore          *float64       `json:"sleepScore,omitempty"`
+	StressAvg           *float64       `json:"stressAvg,omitempty"`
+	StressMax           *float64       `json:"stressMax,omitempty"`
+	BodyBatteryAvg      *float64       `json:"bodyBatteryAvg,omitempty"`
+	BodyBatteryMin      *float64       `json:"bodyBatteryMin,omitempty"`
+	BodyBatteryMax      *float64       `json:"bodyBatteryMax,omitempty"`
+	HRVAvgMS            *float64       `json:"hrvAvgMs,omitempty"`
+	HRVStatus           string         `json:"hrvStatus,omitempty"`
+	WeightKG            *float64       `json:"weightKg,omitempty"`
+	BodyFatPct          *float64       `json:"bodyFatPct,omitempty"`
+	Raw                 map[string]any `json:"raw,omitempty"`
+	CreatedAt           time.Time      `json:"createdAt,omitempty"`
+	UpdatedAt           time.Time      `json:"updatedAt,omitempty"`
+}
+
 type SummaryStats struct {
 	ActivityCount  int            `json:"activityCount"`
 	DistanceM      float64        `json:"distanceM"`
