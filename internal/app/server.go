@@ -81,12 +81,15 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/health/daily", s.handleDailyHealthMetrics)
+			r.Get("/gears", s.handleListGears)
+			r.Get("/gears/{id}", s.handleGetGear)
 			r.Get("/imports", s.handleListImports)
 			r.Post("/imports", s.handleImport)
 			r.Get("/providers/garmin/status", s.handleGarminStatus)
 			r.Post("/providers/garmin/connect", s.handleGarminConnect)
 			r.Post("/providers/garmin/sync", s.handleGarminSync)
 			r.Post("/providers/garmin/health-sync", s.handleGarminHealthSync)
+			r.Post("/providers/garmin/gear-sync", s.handleGarminGearSync)
 			r.Get("/sync-jobs", s.handleSyncJobs)
 		})
 	})
@@ -360,6 +363,45 @@ func (s *Server) handleDailyHealthMetrics(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"metrics": metrics})
 }
 
+func (s *Server) handleListGears(w http.ResponseWriter, r *http.Request) {
+	gears, err := s.store.ListGears(r.Context())
+	if err != nil {
+		s.logger.Error("list gears", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load gear")
+		return
+	}
+	active := make([]Gear, 0)
+	retired := make([]Gear, 0)
+	for _, gear := range gears {
+		if gear.Retired {
+			retired = append(retired, gear)
+		} else {
+			active = append(active, gear)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"gear": gears, "active": active, "retired": retired})
+}
+
+func (s *Server) handleGetGear(w http.ResponseWriter, r *http.Request) {
+	gear, err := s.store.GetGear(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "gear not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("get gear", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load gear")
+		return
+	}
+	activities, err := s.store.ListGearActivities(r.Context(), gear.ID)
+	if err != nil {
+		s.logger.Error("list gear activities", "gear_id", gear.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load gear activities")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"gear": gear, "activities": activities})
+}
+
 func (s *Server) handleListImports(w http.ResponseWriter, r *http.Request) {
 	imports, err := s.store.ListImports(r.Context())
 	if err != nil {
@@ -477,6 +519,27 @@ func (s *Server) handleGarminHealthSync(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
 }
 
+func (s *Server) handleGarminGearSync(w http.ResponseWriter, r *http.Request) {
+	running, err := s.store.HasRunningSyncJob(r.Context(), garminProvider)
+	if err != nil {
+		s.logger.Error("check running garmin gear sync", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not check sync state")
+		return
+	}
+	if running {
+		writeError(w, http.StatusConflict, "Garmin sync is already running")
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(r.Context(), garminProvider, "gear_manual")
+	if err != nil {
+		s.logger.Error("create garmin gear sync job", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not create sync job")
+		return
+	}
+	go s.runGarminManualGearSyncJob(jobID)
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
+}
+
 func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, err := s.store.ListSyncJobs(r.Context())
 	if err != nil {
@@ -547,6 +610,11 @@ func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts Gar
 		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
 		return nil, err
 	}
+	gearPayload, gearErr := s.garmin.SyncGear(ctx, progress)
+	mergeGearSyncPayload(payload, gearPayload, gearErr)
+	if gearErr != nil {
+		s.logger.Error("garmin gear refresh after activity sync", "job_id", jobID, "error", gearErr)
+	}
 	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
 		return nil, err
 	}
@@ -599,6 +667,31 @@ func (s *Server) runGarminManualHealthSyncJob(jobID string, opts GarminHealthSyn
 	if _, err := s.finishGarminHealthSyncJob(ctx, jobID, opts); err != nil {
 		s.logger.Error("manual garmin health sync", "job_id", jobID, "error", err)
 	}
+}
+
+func (s *Server) runGarminManualGearSyncJob(jobID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+	if _, err := s.finishGarminGearSyncJob(ctx, jobID); err != nil {
+		s.logger.Error("manual garmin gear sync", "job_id", jobID, "error", err)
+	}
+}
+
+func (s *Server) finishGarminGearSyncJob(ctx context.Context, jobID string) (map[string]any, error) {
+	progress := func(payload map[string]any) {
+		if err := s.store.UpdateSyncJobProgress(ctx, jobID, payload); err != nil {
+			s.logger.Error("update garmin gear sync progress", "job_id", jobID, "error", err)
+		}
+	}
+	payload, err := s.garmin.SyncGear(ctx, progress)
+	if err != nil {
+		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		return nil, err
+	}
+	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (s *Server) finishGarminHealthSyncJob(ctx context.Context, jobID string, opts GarminHealthSyncOptions) (map[string]any, error) {
@@ -655,6 +748,24 @@ func decodeGarminHealthSyncOptions(r *http.Request) (GarminHealthSyncOptions, er
 		return GarminHealthSyncOptions{}, errors.New("from must be before or equal to to")
 	}
 	return GarminHealthSyncOptions{From: from, To: to}, nil
+}
+
+func mergeGearSyncPayload(payload map[string]any, gearPayload map[string]any, gearErr error) {
+	if payload == nil {
+		return
+	}
+	if gearPayload != nil {
+		payload["gear"] = gearPayload["gear"]
+		payload["gearSaved"] = gearPayload["saved"]
+		payload["gearAssignments"] = gearPayload["assignments"]
+		payload["gearLocalAssignments"] = gearPayload["localAssignments"]
+	}
+	if gearErr == nil {
+		return
+	}
+	warnings, _ := payload["warnings"].([]string)
+	warnings = append(warnings, "Gear refresh failed: "+gearErr.Error())
+	payload["warnings"] = warnings
 }
 
 func healthRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {

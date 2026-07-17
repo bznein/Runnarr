@@ -2,20 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Database, ExternalLink, Filter, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
+import type { QueryClient } from "@tanstack/react-query";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Sun, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, ApiError, setCsrfToken } from "./api";
 import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
-import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, ImportFile, SyncJob } from "./types";
+import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, Gear, GearSummary, ImportFile, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
 type HealthDateRange = { from: string; to: string };
 type ThemePreference = "system" | "light" | "dark";
+type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityChartPoint = {
   index: number;
@@ -75,6 +77,18 @@ const ACTIVITY_LIST_PAGE_SIZE = 100;
 const garminHealthDefaultDays = 90;
 const healthBarChartMaxDays = 30;
 const themePreferenceStorageKey = "runnarr-theme-preference";
+const activityColumnsStorageKey = "runnarr-activity-list-columns";
+const activityTableColumnOptions: Array<{ key: ActivityTableColumnKey; label: string }> = [
+  { key: "date", label: "Date" },
+  { key: "type", label: "Type" },
+  { key: "gear", label: "Gear" },
+  { key: "distance", label: "Distance" },
+  { key: "time", label: "Time" },
+  { key: "calories", label: "Calories" },
+  { key: "source", label: "Source" }
+];
+const defaultActivityTableColumns: ActivityTableColumnKey[] = activityTableColumnOptions.map((option) => option.key);
+const compactActivityTableColumns: ActivityTableColumnKey[] = ["date", "distance", "time"];
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
 const chartTooltipContentStyle: CSSProperties = {
@@ -140,6 +154,31 @@ function applyThemePreference(preference: ThemePreference) {
   root.dataset.theme = preference;
 }
 
+function readStoredActivityTableColumns(): ActivityTableColumnKey[] {
+  try {
+    const raw = window.localStorage.getItem(activityColumnsStorageKey);
+    if (!raw) {
+      return defaultActivityTableColumns;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return defaultActivityTableColumns;
+    }
+    const allowed = new Set(defaultActivityTableColumns);
+    return parsed.filter((item): item is ActivityTableColumnKey => typeof item === "string" && allowed.has(item as ActivityTableColumnKey));
+  } catch {
+    return defaultActivityTableColumns;
+  }
+}
+
+function storeActivityTableColumns(columns: ActivityTableColumnKey[]) {
+  try {
+    window.localStorage.setItem(activityColumnsStorageKey, JSON.stringify(columns));
+  } catch {
+    // Local storage can be unavailable in private or restricted browser contexts.
+  }
+}
+
 export function App() {
   const [themePreference, setThemePreference] = useThemePreference();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -194,6 +233,7 @@ function AuthenticatedApp({
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/health" icon={<HeartPulse size={18} />} label="Health" />
+          <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
         </nav>
         <div className="sidebar-bottom">
           <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
@@ -209,6 +249,8 @@ function AuthenticatedApp({
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
           <Route path="/health" element={<HealthPage />} />
+          <Route path="/gear" element={<GearPage />} />
+          <Route path="/gear/:id" element={<GearDetailPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
           <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -248,6 +290,16 @@ function formatSourceName(source: string) {
     default:
       return source;
   }
+}
+
+function invalidateGearRelatedQueries(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["gears"] }),
+    queryClient.invalidateQueries({ queryKey: ["gear"] }),
+    queryClient.invalidateQueries({ queryKey: ["activities"] }),
+    queryClient.invalidateQueries({ queryKey: ["activity"] }),
+    queryClient.invalidateQueries({ queryKey: ["summary"] })
+  ]);
 }
 
 function LoginPage() {
@@ -966,6 +1018,196 @@ function HealthDayDetail({ metric }: { metric: DailyHealthMetric }) {
   );
 }
 
+function GearPage() {
+  const queryClient = useQueryClient();
+  const gears = useQuery({ queryKey: ["gears"], queryFn: api.gears });
+  const garminStatus = useQuery({ queryKey: ["garmin-status"], queryFn: api.garminStatus });
+  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
+  const latestGearJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin" && isGearSyncJob(job));
+  const anyGarminSyncRunning = (jobs.data?.jobs ?? []).some((job) => job.provider === "garmin" && job.status === "running");
+  const gearSyncRunning = latestGearJob?.status === "running";
+  const gearSync = useMutation({
+    mutationFn: api.garminGearSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["gears"] }),
+        queryClient.invalidateQueries({ queryKey: ["gear"] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
+  const activeGear = gears.data?.active ?? [];
+  const retiredGear = gears.data?.retired ?? [];
+  const allGear = gears.data?.gear ?? [];
+  const syncDisabled = !garminStatus.data?.connected || gearSync.isPending || anyGarminSyncRunning;
+
+  useEffect(() => {
+    if (!latestGearJob || latestGearJob.status === "running") {
+      return;
+    }
+    void invalidateGearRelatedQueries(queryClient);
+  }, [latestGearJob?.id, latestGearJob?.status, queryClient]);
+
+  return (
+    <Page
+      title="Gear"
+      actions={
+        <button className="primary-button" type="button" disabled={syncDisabled} onClick={() => gearSync.mutate()}>
+          <RefreshCw size={16} />
+          {gearSyncRunning ? "Syncing" : "Sync gear"}
+        </button>
+      }
+    >
+      <SyncProgressCard job={latestGearJob} />
+      {gearSync.error && <div className="error">{gearSync.error instanceof Error ? gearSync.error.message : "Garmin gear sync failed"}</div>}
+      {gears.error && <div className="error">{gears.error instanceof Error ? gears.error.message : "Could not load gear"}</div>}
+      {gears.isLoading && <LoadingRow />}
+      {!gears.isLoading && allGear.length === 0 && (
+        <EmptyState
+          title="No gear found"
+          action={garminStatus.data?.connected ? (
+            <button className="secondary-button" type="button" disabled={syncDisabled} onClick={() => gearSync.mutate()}>
+              <RefreshCw size={16} />
+              Sync gear
+            </button>
+          ) : (
+            <Link className="secondary-button" to="/settings">Connect Garmin</Link>
+          )}
+        />
+      )}
+      {activeGear.length > 0 && <GearSection title="Active gear" gear={activeGear} />}
+      {retiredGear.length > 0 && <GearSection title="Retired gear" gear={retiredGear} retired />}
+    </Page>
+  );
+}
+
+function GearSection({ title, gear, retired = false }: { title: string; gear: Gear[]; retired?: boolean }) {
+  return (
+    <section className="panel gear-section">
+      <div className="filter-header">
+        <div className="panel-heading">{title}</div>
+        <span className="muted">{gear.length.toLocaleString()}</span>
+      </div>
+      <div className="gear-grid">
+        {gear.map((item) => <GearCard key={item.id} gear={item} retired={retired} />)}
+      </div>
+    </section>
+  );
+}
+
+function GearCard({ gear, retired = false }: { gear: Gear; retired?: boolean }) {
+  const subtitle = gearSubtitle(gear);
+  return (
+    <Link className={`gear-card${retired ? " retired" : ""}`} to={`/gear/${gear.id}`}>
+      <div className="gear-card-header">
+        <strong>{gearDisplayName(gear)}</strong>
+        <span className="source-pill">{formatGearType(gear.gearType)}</span>
+      </div>
+      {subtitle && <div className="gear-meta">{subtitle}</div>}
+      <GearDistanceBlock gear={gear} />
+    </Link>
+  );
+}
+
+function GearDistanceBlock({ gear }: { gear: GearSummary }) {
+  if (!isFiniteNumber(gear.totalDistanceM)) {
+    return null;
+  }
+  const total = gear.totalDistanceM;
+  const max = isFiniteNumber(gear.maxDistanceM) && gear.maxDistanceM > 0 ? gear.maxDistanceM : undefined;
+  const percent = max ? Math.min(100, Math.round((total / max) * 100)) : 0;
+  return (
+    <div className="gear-distance-block">
+      <div className="gear-distance-label">
+        <span>Total distance</span>
+        <strong>{formatGearDistance(total)}</strong>
+      </div>
+      {max && (
+        <>
+          <div className="gear-progress" aria-label={`Gear distance ${percent}%`}>
+            <span style={{ width: `${percent}%` }} />
+          </div>
+          <div className="gear-progress-label">{formatGearDistance(total)} of {formatGearDistance(max)}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function GearChipList({ gear, compact = false }: { gear?: GearSummary[]; compact?: boolean }) {
+  const items = gear ?? [];
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className={`gear-chip-list${compact ? " compact" : ""}`}>
+      {items.map((item) => (
+        <Link className={`gear-chip${item.retired ? " retired" : ""}`} key={item.id} to={`/gear/${item.id}`} title={gearDisplayLabel(item)}>
+          <Footprints size={13} />
+          <span>{gearDisplayLabel(item)}</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function GearDetailPage() {
+  const { id } = useParams();
+  const gear = useQuery({ queryKey: ["gear", id], queryFn: () => api.gear(id!), enabled: Boolean(id) });
+
+  if (gear.isLoading) {
+    return <Page title="Gear"><LoadingRow /></Page>;
+  }
+  if (gear.error) {
+    return <Page title="Gear"><div className="error">{gear.error instanceof Error ? gear.error.message : "Could not load gear"}</div></Page>;
+  }
+  if (!gear.data) {
+    return <Page title="Gear"><EmptyState title="Gear not found" /></Page>;
+  }
+
+  const item = gear.data.gear;
+  const activities = gear.data.activities ?? [];
+  const detailItems = gearDetailItems(item);
+  return (
+    <Page
+      title={gearDisplayName(item)}
+      eyebrow={`${formatGearType(item.gearType)} · ${item.retired ? "Retired" : "Active"}`}
+      actions={<Link className="secondary-button" to="/gear"><ChevronLeft size={16} /> All gear</Link>}
+    >
+      <section className="metric-grid">
+        {isFiniteNumber(item.totalDistanceM) && <Metric label="Distance" value={formatGearDistance(item.totalDistanceM)} />}
+        <Metric label="Activities" value={activities.length.toLocaleString()} />
+        <Metric label="Type" value={formatGearType(item.gearType)} />
+        <Metric label="Status" value={item.retired ? "Retired" : "Active"} />
+      </section>
+
+      {detailItems.length > 0 && (
+        <section className="panel gear-detail-panel">
+          <div className="panel-heading">Details</div>
+          <div className="gear-detail-grid">
+            {detailItems.map((detail) => (
+              <div className="gear-detail-item" key={detail.label}>
+                <span>{detail.label}</span>
+                <strong>{detail.value}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="panel">
+        <div className="filter-header">
+          <div className="panel-heading">Assigned activities</div>
+          <span className="muted">{activities.length.toLocaleString()}</span>
+        </div>
+        {activities.length > 0 ? <ActivityTable activities={activities} /> : <EmptyState title="No local activities assigned" />}
+      </section>
+    </Page>
+  );
+}
+
 function ActivitiesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = activityFiltersFromSearchParams(searchParams);
@@ -974,6 +1216,8 @@ function ActivitiesPage() {
   };
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<ActivityTableColumnKey[]>(readStoredActivityTableColumns);
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
   const activities = useInfiniteQuery({
     queryKey: ["activities", filters],
@@ -1003,6 +1247,11 @@ function ActivitiesPage() {
   const anyFiltersActive = hasActivityFilters(filters);
   const currentSort = normalizedActivitySort(filters);
   const sortActive = !activitySortsMatch(currentSort, defaultActivitySort);
+  const hiddenColumnCount = defaultActivityTableColumns.length - visibleColumns.length;
+  const applyColumns = (columns: ActivityTableColumnKey[]) => {
+    setVisibleColumns(columns);
+    storeActivityTableColumns(columns);
+  };
   return (
     <Page
       title="Activities"
@@ -1025,6 +1274,15 @@ function ActivitiesPage() {
             <ArrowUpDown size={16} />
             Sort
           </button>
+          <button
+            className={`secondary-button ${hiddenColumnCount > 0 ? "active-filter-button" : ""}`}
+            type="button"
+            onClick={() => setColumnsOpen(true)}
+          >
+            <Columns3 size={16} />
+            Columns
+            {hiddenColumnCount > 0 && <span className="button-badge">{hiddenColumnCount}</span>}
+          </button>
         </>
       }
     >
@@ -1042,6 +1300,13 @@ function ActivitiesPage() {
           onClose={() => setSortOpen(false)}
         />
       )}
+      {columnsOpen && (
+        <ActivityColumnsDialog
+          visibleColumns={visibleColumns}
+          onApply={applyColumns}
+          onClose={() => setColumnsOpen(false)}
+        />
+      )}
       <ActivitySearchPanel
         value={filters.search ?? ""}
         onChange={(search) => setFilters({ ...filters, search })}
@@ -1056,7 +1321,7 @@ function ActivitiesPage() {
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
       {activitiesLoaded && activityList.length > 0 && (
         <>
-          <ActivityTable activities={activityList} onDelete={handleDelete} deletingId={deleteActivity.variables} />
+          <ActivityTable activities={activityList} visibleColumns={visibleColumns} onDelete={handleDelete} deletingId={deleteActivity.variables} />
           {activities.hasNextPage && (
             <div className="pagination-actions">
               <button
@@ -1379,45 +1644,133 @@ function ActivityTypeFilterPanel({
   );
 }
 
+function ActivityColumnsDialog({
+  visibleColumns,
+  onApply,
+  onClose
+}: {
+  visibleColumns: ActivityTableColumnKey[];
+  onApply: (columns: ActivityTableColumnKey[]) => void;
+  onClose: () => void;
+}) {
+  const [draftColumns, setDraftColumns] = useState<ActivityTableColumnKey[]>(visibleColumns);
+  const visibleSet = new Set(draftColumns);
+  const toggleColumn = (key: ActivityTableColumnKey) => {
+    setDraftColumns((current) => {
+      const currentSet = new Set(current);
+      if (currentSet.has(key)) {
+        currentSet.delete(key);
+      } else {
+        currentSet.add(key);
+      }
+      return defaultActivityTableColumns.filter((column) => currentSet.has(column));
+    });
+  };
+  const applyColumns = () => {
+    onApply(draftColumns);
+    onClose();
+  };
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-columns-title">
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Columns</div>
+            <h2 id="activity-columns-title">Activities</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close columns" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="filter-dialog-section">
+          <div className="column-option-grid">
+            <label className="column-option locked">
+              <input type="checkbox" checked disabled />
+              <span>Name</span>
+            </label>
+            {activityTableColumnOptions.map((option) => (
+              <label className="column-option" key={option.key}>
+                <input
+                  type="checkbox"
+                  checked={visibleSet.has(option.key)}
+                  onChange={() => toggleColumn(option.key)}
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={() => setDraftColumns(defaultActivityTableColumns)}>
+            Show all
+          </button>
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" onClick={applyColumns}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ActivityTable({
   activities,
   compact = false,
+  visibleColumns,
   onDelete,
   deletingId
 }: {
   activities: Activity[];
   compact?: boolean;
+  visibleColumns?: ActivityTableColumnKey[];
   onDelete?: (activity: Activity) => void;
   deletingId?: string;
 }) {
   if (activities.length === 0) {
     return <EmptyState title="No activities found" />;
   }
+  const columns = compact ? compactActivityTableColumns : (visibleColumns ?? defaultActivityTableColumns);
+  const showColumn = (column: ActivityTableColumnKey) => columns.includes(column);
   return (
     <div className="table-wrap">
-      <table className="data-table">
+      <table className="data-table activity-table">
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Name</th>
-            {!compact && <th>Type</th>}
-            <th>Distance</th>
-            <th>Time</th>
-            {!compact && <th>Calories</th>}
-            {!compact && <th>Source</th>}
+            {showColumn("date") && <th className="activity-date-column">Date</th>}
+            <th className="activity-name-column">Name</th>
+            {showColumn("type") && <th className="activity-type-column">Type</th>}
+            {showColumn("gear") && <th className="activity-gear-column">Gear</th>}
+            {showColumn("distance") && <th className="activity-distance-column">Distance</th>}
+            {showColumn("time") && <th className="activity-time-column">Time</th>}
+            {showColumn("calories") && <th className="activity-calories-column">Calories</th>}
+            {showColumn("source") && <th className="activity-source-column">Source</th>}
             {onDelete && <th aria-label="Actions" />}
           </tr>
         </thead>
         <tbody>
           {activities.map((activity) => (
             <tr key={activity.id}>
-              <td>{formatDate(activity.startTime)}</td>
-              <td><Link to={`/activities/${activity.id}`}>{activity.name}</Link></td>
-              {!compact && <td>{activity.sportType}</td>}
-              <td>{formatDistance(activity.distanceM)}</td>
-              <td>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</td>
-              {!compact && <td>{formatCalories(activity.caloriesKcal)}</td>}
-              {!compact && <td><span className="source-pill">{activity.source}</span></td>}
+              {showColumn("date") && <td>{formatDate(activity.startTime)}</td>}
+              <td className="activity-name-cell"><Link to={`/activities/${activity.id}`} title={activity.name}>{activity.name}</Link></td>
+              {showColumn("type") && <td className="clip-cell" title={activity.sportType}>{activity.sportType}</td>}
+              {showColumn("gear") && <td className="gear-table-cell"><GearChipList gear={activity.gear} compact /></td>}
+              {showColumn("distance") && <td>{formatDistance(activity.distanceM)}</td>}
+              {showColumn("time") && <td>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</td>}
+              {showColumn("calories") && <td>{formatCalories(activity.caloriesKcal)}</td>}
+              {showColumn("source") && <td><span className="source-pill">{activity.source}</span></td>}
               {onDelete && (
                 <td className="row-actions">
                   <button
@@ -1593,6 +1946,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         {item.avgGradeAdjustedPaceSPKM !== undefined && <Metric label="GAP" value={formatPace(item.avgGradeAdjustedPaceSPKM)} />}
         {item.caloriesKcal !== undefined && <Metric label="Calories" value={formatCalories(item.caloriesKcal)} />}
       </section>
+
+      {(item.gear ?? []).length > 0 && (
+        <section className="panel gear-activity-panel">
+          <div className="panel-heading">Gear</div>
+          <GearChipList gear={item.gear} />
+        </section>
+      )}
 
       {mediaItems.length > 0 ? (
         <ActivityMediaPanel
@@ -2089,8 +2449,15 @@ function SettingsPage({
   const [garminPassword, setGarminPassword] = useState("");
   const [garminMFACode, setGarminMFACode] = useState("");
   const [garminOldest, setGarminOldest] = useState("1970-01-01");
-  const latestGarminJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin");
+  const garminJobs = jobs.data?.jobs ?? [];
+  const latestGearJob = garminJobs.find((job) => job.provider === "garmin" && isGearSyncJob(job));
+  const latestGarminJob = garminJobs.find((job) => job.provider === "garmin" && !isGearSyncJob(job)) ?? latestGearJob;
+  const anyGarminSyncRunning = garminJobs.some((job) => job.provider === "garmin" && job.status === "running");
   const garminSyncRunning = latestGarminJob?.status === "running";
+  const gearSyncRunning = latestGearJob?.status === "running";
+  const visibleSyncJobs = [latestGarminJob, latestGearJob]
+    .filter((job): job is SyncJob => Boolean(job))
+    .filter((job, index, list) => list.findIndex((item) => item.id === job.id) === index);
 
   useEffect(() => {
     if (location.hash !== "#import") {
@@ -2119,11 +2486,33 @@ function SettingsPage({
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["garmin-status"] }),
         queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["gears"] }),
+        queryClient.invalidateQueries({ queryKey: ["gear"] }),
         queryClient.invalidateQueries({ queryKey: ["activities"] }),
         queryClient.invalidateQueries({ queryKey: ["summary"] })
       ]);
     }
   });
+  const garminGearSync = useMutation({
+    mutationFn: api.garminGearSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["gears"] }),
+        queryClient.invalidateQueries({ queryKey: ["gear"] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
+
+  useEffect(() => {
+    if (!latestGearJob || latestGearJob.status === "running") {
+      return;
+    }
+    void invalidateGearRelatedQueries(queryClient);
+  }, [latestGearJob?.id, latestGearJob?.status, queryClient]);
+
   const upload = useMutation({
     mutationFn: (selected: File) => api.upload(selected),
     onSuccess: async () => {
@@ -2172,15 +2561,20 @@ function SettingsPage({
             <span>Oldest</span>
             <input type="date" value={garminOldest} onChange={(event) => setGarminOldest(event.target.value)} />
           </label>
-          <button className="primary-button" type="button" disabled={!garminStatus.data?.connected || garminSync.isPending || garminSyncRunning} onClick={() => garminSync.mutate(garminOldest)}>
+          <button className="primary-button" type="button" disabled={!garminStatus.data?.connected || garminSync.isPending || anyGarminSyncRunning} onClick={() => garminSync.mutate(garminOldest)}>
             <RefreshCw size={16} />
             {garminSyncRunning ? "Syncing" : "Sync"}
           </button>
+          <button className="secondary-button" type="button" disabled={!garminStatus.data?.connected || garminGearSync.isPending || anyGarminSyncRunning} onClick={() => garminGearSync.mutate()}>
+            <Footprints size={16} />
+            {gearSyncRunning ? "Syncing gear" : "Sync gear"}
+          </button>
         </div>
       </section>
-      <SyncProgressCard job={latestGarminJob} />
+      {visibleSyncJobs.map((job) => <SyncProgressCard key={job.id} job={job} />)}
       {garminConnect.error && <div className="error">{garminConnect.error instanceof Error ? garminConnect.error.message : "Garmin connection failed"}</div>}
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
+      {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} />
       <section id="import" className="panel upload-panel">
         <div>
@@ -2355,15 +2749,19 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
     return null;
   }
   const healthSync = isHealthSyncJob(job);
+  const gearSync = isGearSyncJob(job);
   const payload = job.payload ?? {};
   const imported = payloadNumber(payload, "imported");
   const saved = payloadNumber(payload, "saved");
   const processed = payloadNumber(payload, "processed");
   const activities = payloadNumber(payload, "activities");
   const days = payloadNumber(payload, "days");
-  const total = healthSync ? days : activities;
+  const gear = payloadNumber(payload, "gear");
+  const total = healthSync ? days : gearSync ? gear : activities;
   const failed = payloadNumber(payload, "failed");
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
+  const assignments = payloadNumber(payload, "assignments");
+  const localAssignments = payloadNumber(payload, "localAssignments");
   const stage = payloadText(payload, "stage") || job.status;
   const listing = isSyncListingStage(stage);
   const fetchedPages = payloadNumber(payload, "fetchedPages");
@@ -2372,21 +2770,30 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   const to = payloadText(payload, "to");
   const currentDate = payloadText(payload, "currentDate");
   const currentActivityName = payloadText(payload, "currentActivityName");
+  const currentGearName = payloadText(payload, "currentGearName");
   const warnings = payloadList(payload, "warnings");
   const firstErrors = payloadList(payload, "firstErrors");
   const foundLabel = activities === 1 ? "activity" : "activities";
   const dayLabel = days === 1 ? "day" : "days";
-  const detailText = syncProgressDetailText(job, stage, currentActivityName, currentDate, oldest, from, to, total);
+  const gearLabel = gear === 1 ? "item" : "items";
+  const detailText = syncProgressDetailText(job, stage, currentActivityName, currentGearName, currentDate, oldest, from, to, total);
 
   return (
     <section className="panel sync-progress-panel">
       <div className="filter-header">
-        <div className="panel-heading">{healthSync ? "Garmin health sync progress" : "Garmin sync progress"}</div>
+        <div className="panel-heading">{gearSync ? "Garmin gear sync progress" : healthSync ? "Garmin health sync progress" : "Garmin sync progress"}</div>
         <span className={`status ${job.status}`}>{job.status}</span>
       </div>
       <SyncProgressBar job={job} />
       <div className="sync-progress-grid">
-        {healthSync ? (
+        {gearSync ? (
+          <>
+            <SyncStat label="Completed" value={`${processed.toLocaleString()} / ${gear.toLocaleString()} ${gearLabel}`} />
+            <SyncStat label="Saved" value={saved.toLocaleString()} />
+            <SyncStat label="Garmin assignments" value={assignments.toLocaleString()} />
+            <SyncStat label="Local assignments" value={localAssignments.toLocaleString()} />
+          </>
+        ) : healthSync ? (
           <>
             <SyncStat label="Completed" value={`${processed.toLocaleString()} / ${days.toLocaleString()} ${dayLabel}`} />
             <SyncStat label="Saved" value={saved.toLocaleString()} />
@@ -2436,14 +2843,14 @@ function SyncStat({ label, value }: { label: string; value: string }) {
 function SyncProgressBar({ job }: { job: SyncJob }) {
   const payload = job.payload ?? {};
   const processed = payloadNumber(payload, "processed");
-  const total = isHealthSyncJob(job) ? payloadNumber(payload, "days") : payloadNumber(payload, "activities");
+  const total = isGearSyncJob(job) ? payloadNumber(payload, "gear") : isHealthSyncJob(job) ? payloadNumber(payload, "days") : payloadNumber(payload, "activities");
   const stage = payloadText(payload, "stage");
   const listing = job.status === "running" && isSyncListingStage(stage);
   const hasKnownTotal = total > 0 && !listing;
   const percent = hasKnownTotal ? Math.min(100, Math.round((processed / total) * 100)) : 0;
   return (
     <div className="progress-cell">
-      <div className={`progress-bar${listing ? " indeterminate" : ""}`} aria-label={listing ? "Listing Garmin activities" : `Sync progress ${percent}%`}>
+      <div className={`progress-bar${listing ? " indeterminate" : ""}`} aria-label={listing ? "Listing Garmin data" : `Sync progress ${percent}%`}>
         <span style={listing ? undefined : { width: `${percent}%` }} />
       </div>
       <span>{listing ? "Listing" : hasKnownTotal ? `${percent}%` : job.status}</span>
@@ -2460,9 +2867,26 @@ function formatSyncJobDetails(job: SyncJob) {
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const activities = payloadNumber(payload, "activities");
   const days = payloadNumber(payload, "days");
+  const gear = payloadNumber(payload, "gear");
+  const assignments = payloadNumber(payload, "assignments");
+  const localAssignments = payloadNumber(payload, "localAssignments");
   const fetchedPages = payloadNumber(payload, "fetchedPages");
   const stage = payloadText(payload, "stage");
   const parts = [];
+  if (isGearSyncJob(job)) {
+    if (gear > 0) {
+      parts.push(`${processed}/${gear} gear`);
+    }
+    if (saved > 0) {
+      parts.push(`${saved} saved`);
+    }
+    if (localAssignments > 0) {
+      parts.push(`${localAssignments} assigned`);
+    } else if (assignments > 0) {
+      parts.push(`${assignments} provider assignments`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "-";
+  }
   if (isHealthSyncJob(job)) {
     if (days > 0) {
       parts.push(`${processed}/${days} days`);
@@ -2507,7 +2931,20 @@ function isHealthSyncJob(job: SyncJob) {
   return job.kind.startsWith("health") || payloadText(job.payload ?? {}, "kind") === "health";
 }
 
-function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, currentDate: string, oldest: string, from: string, to: string, total: number) {
+function isGearSyncJob(job: SyncJob) {
+  return job.kind.startsWith("gear") || payloadText(job.payload ?? {}, "kind") === "gear";
+}
+
+function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, currentGearName: string, currentDate: string, oldest: string, from: string, to: string, total: number) {
+  if (isGearSyncJob(job)) {
+    if (currentGearName) {
+      return currentGearName;
+    }
+    if (job.status === "completed") {
+      return total > 0 ? "Gear sync finished" : "No gear found";
+    }
+    return "Waiting for first gear item";
+  }
   if (isHealthSyncJob(job)) {
     if (currentDate) {
       return currentDate;
@@ -3619,6 +4056,70 @@ function FullScreenMessage({ title, message }: { title: string; message: string 
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function gearDisplayName(gear: GearSummary) {
+  const name = gear.name?.trim();
+  if (name) {
+    return name;
+  }
+  const fallback = [gear.brand, gear.model].map((part) => part?.trim()).filter(Boolean).join(" ");
+  return fallback || "Garmin gear";
+}
+
+function gearDisplayLabel(gear: GearSummary) {
+  const name = gearDisplayName(gear);
+  const subtitle = gearSubtitle(gear);
+  return subtitle && subtitle !== name ? `${name} · ${subtitle}` : name;
+}
+
+function gearSubtitle(gear: GearSummary) {
+  const model = [gear.brand, gear.model].map((part) => part?.trim()).filter(Boolean).join(" ");
+  if (model && model !== gearDisplayName(gear)) {
+    return model;
+  }
+  return formatGearDefaults(gear.defaultActivityTypes);
+}
+
+function gearDetailItems(gear: Gear) {
+  return [
+    { label: "Brand", value: gear.brand?.trim() ?? "" },
+    { label: "Model", value: gear.model?.trim() ?? "" },
+    { label: "Garmin distance", value: formatOptionalGearDistance(gear.totalDistanceM) },
+    { label: "Distance limit", value: formatOptionalGearDistance(gear.maxDistanceM) },
+    { label: "First used", value: formatOptionalDate(gear.firstUsedAt) },
+    { label: "Last used", value: formatOptionalDate(gear.lastUsedAt) },
+    { label: "Default activity types", value: formatGearDefaults(gear.defaultActivityTypes) },
+    { label: "Provider", value: formatSourceName(gear.provider) },
+    { label: "Provider gear ID", value: gear.providerGearId }
+  ].filter((item) => item.value !== "");
+}
+
+function formatGearType(value?: string) {
+  const cleaned = value?.trim().replace(/[_-]+/g, " ");
+  if (!cleaned) {
+    return "Gear";
+  }
+  return cleaned.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatGearDefaults(values?: string[]) {
+  const formatted = (values ?? []).map(formatGearType).filter((value) => value !== "Gear");
+  return formatted.length > 0 ? formatted.join(", ") : "";
+}
+
+function formatOptionalDate(value?: string) {
+  return value ? formatDate(value) : "";
+}
+
+function formatOptionalGearDistance(value?: number) {
+  return isFiniteNumber(value) ? formatGearDistance(value) : "";
+}
+
+function formatGearDistance(value: number) {
+  const kilometers = value / 1000;
+  const precision = kilometers >= 100 ? 0 : 1;
+  return `${kilometers.toFixed(precision)} km`;
 }
 
 function formatDistance(value: number) {

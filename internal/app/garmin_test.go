@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -104,4 +105,77 @@ func TestGradeAdjustedPaceFromSpeedMPS(t *testing.T) {
 	if pace := gradeAdjustedPaceFromSpeedMPS(&zero); pace != nil {
 		t.Fatalf("zero speed pace = %#v, want nil", pace)
 	}
+}
+
+func TestGearActivitySourceIDsPaginatesAndCompacts(t *testing.T) {
+	firstPage := make([]GarminBridgeGearActivity, garminGearActivityPageLimit)
+	firstPage[0] = GarminBridgeGearActivity{ID: " activity-1 "}
+	firstPage[1] = GarminBridgeGearActivity{ID: "activity-2"}
+	firstPage[2] = GarminBridgeGearActivity{ID: "activity-1"}
+	secondPage := []GarminBridgeGearActivity{{ID: "activity-3"}}
+	bridge := stubGarminBridge{
+		gearActivityPages: map[int][]GarminBridgeGearActivity{
+			0:                           firstPage,
+			garminGearActivityPageLimit: secondPage,
+		},
+	}
+	service := &GarminService{bridge: bridge, tokenDir: "tokens"}
+
+	sourceIDs, fetched, err := service.gearActivitySourceIDs(context.Background(), "shoe-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fetched != garminGearActivityPageLimit+len(secondPage) {
+		t.Fatalf("fetched = %d, want %d", fetched, garminGearActivityPageLimit+len(secondPage))
+	}
+	want := []string{"activity-1", "activity-2", "activity-3"}
+	if strings.Join(sourceIDs, ",") != strings.Join(want, ",") {
+		t.Fatalf("source IDs = %#v, want %#v", sourceIDs, want)
+	}
+}
+
+func TestGarminBridgeGearResponseAcceptsArrayDefaults(t *testing.T) {
+	var response GarminBridgeGearResponse
+	err := json.Unmarshal([]byte(`{"userProfilePk":"123","gear":[],"rawDefaults":[{"activityType":"running"}]}`), &response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.UserProfilePK != "123" {
+		t.Fatalf("user profile pk = %q, want 123", response.UserProfilePK)
+	}
+	if response.RawDefaults == nil {
+		t.Fatal("raw defaults should be preserved")
+	}
+}
+
+type stubGarminBridge struct {
+	gearActivityPages map[int][]GarminBridgeGearActivity
+}
+
+func (b stubGarminBridge) Connect(context.Context, string, string, string, string) (GarminBridgeProfile, error) {
+	return GarminBridgeProfile{}, nil
+}
+
+func (b stubGarminBridge) ListActivities(context.Context, string, int, int) ([]GarminBridgeActivity, error) {
+	return nil, nil
+}
+
+func (b stubGarminBridge) ListActivitySplits(context.Context, string, string) ([]GarminBridgeLap, error) {
+	return nil, nil
+}
+
+func (b stubGarminBridge) DownloadActivity(context.Context, string, string) ([]byte, error) {
+	return nil, nil
+}
+
+func (b stubGarminBridge) FetchHealthDay(context.Context, string, string) (GarminBridgeHealthDay, error) {
+	return GarminBridgeHealthDay{}, nil
+}
+
+func (b stubGarminBridge) ListGear(context.Context, string) (GarminBridgeGearResponse, error) {
+	return GarminBridgeGearResponse{}, nil
+}
+
+func (b stubGarminBridge) ListGearActivities(_ context.Context, _ string, _ string, start, _ int) ([]GarminBridgeGearActivity, error) {
+	return b.gearActivityPages[start], nil
 }
