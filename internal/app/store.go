@@ -131,13 +131,15 @@ func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthM
 			body_battery_max,
 			body_battery_start,
 			body_battery_end,
+			body_battery_gained,
+			body_battery_drained,
 			hrv_avg_ms,
 			hrv_status,
 			weight_kg,
 			body_fat_pct,
 			raw
 		)
-		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
 		on conflict(provider, metric_date) do update set
 			steps = excluded.steps,
 			total_calories_kcal = excluded.total_calories_kcal,
@@ -158,6 +160,8 @@ func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthM
 			body_battery_max = excluded.body_battery_max,
 			body_battery_start = excluded.body_battery_start,
 			body_battery_end = excluded.body_battery_end,
+			body_battery_gained = excluded.body_battery_gained,
+			body_battery_drained = excluded.body_battery_drained,
 			hrv_avg_ms = excluded.hrv_avg_ms,
 			hrv_status = excluded.hrv_status,
 			weight_kg = excluded.weight_kg,
@@ -187,6 +191,8 @@ func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthM
 			body_battery_max,
 			body_battery_start,
 			body_battery_end,
+			body_battery_gained,
+			body_battery_drained,
 			hrv_avg_ms,
 			hrv_status,
 			weight_kg,
@@ -216,6 +222,8 @@ func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthM
 		optionalFloat(metric.BodyBatteryMax),
 		optionalFloat(metric.BodyBatteryStart),
 		optionalFloat(metric.BodyBatteryEnd),
+		optionalFloat(metric.BodyBatteryGained),
+		optionalFloat(metric.BodyBatteryDrained),
 		optionalFloat(metric.HRVAvgMS),
 		strings.TrimSpace(metric.HRVStatus),
 		optionalFloat(metric.WeightKG),
@@ -250,6 +258,8 @@ func (s *Store) ListDailyHealthMetrics(ctx context.Context, provider string, fro
 			body_battery_max,
 			body_battery_start,
 			body_battery_end,
+			body_battery_gained,
+			body_battery_drained,
 			hrv_avg_ms,
 			hrv_status,
 			weight_kg,
@@ -996,6 +1006,8 @@ func scanDailyHealthMetric(row rowScanner) (DailyHealthMetric, error) {
 	var bodyBatteryMax sql.NullFloat64
 	var bodyBatteryStart sql.NullFloat64
 	var bodyBatteryEnd sql.NullFloat64
+	var bodyBatteryGained sql.NullFloat64
+	var bodyBatteryDrained sql.NullFloat64
 	var hrvAvg sql.NullFloat64
 	var weightKG sql.NullFloat64
 	var bodyFatPct sql.NullFloat64
@@ -1024,6 +1036,8 @@ func scanDailyHealthMetric(row rowScanner) (DailyHealthMetric, error) {
 		&bodyBatteryMax,
 		&bodyBatteryStart,
 		&bodyBatteryEnd,
+		&bodyBatteryGained,
+		&bodyBatteryDrained,
 		&hrvAvg,
 		&metric.HRVStatus,
 		&weightKG,
@@ -1054,6 +1068,8 @@ func scanDailyHealthMetric(row rowScanner) (DailyHealthMetric, error) {
 	metric.BodyBatteryMax = floatPtrFromNull(bodyBatteryMax)
 	metric.BodyBatteryStart = floatPtrFromNull(bodyBatteryStart)
 	metric.BodyBatteryEnd = floatPtrFromNull(bodyBatteryEnd)
+	metric.BodyBatteryGained = floatPtrFromNull(bodyBatteryGained)
+	metric.BodyBatteryDrained = floatPtrFromNull(bodyBatteryDrained)
 	metric.HRVAvgMS = floatPtrFromNull(hrvAvg)
 	metric.WeightKG = floatPtrFromNull(weightKG)
 	metric.BodyFatPct = floatPtrFromNull(bodyFatPct)

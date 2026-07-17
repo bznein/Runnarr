@@ -189,6 +189,8 @@ export type DailyHealthMetric = {
   bodyBatteryMax?: number;
   bodyBatteryStart?: number;
   bodyBatteryEnd?: number;
+  bodyBatteryGained?: number;
+  bodyBatteryDrained?: number;
   hrvAvgMs?: number;
   hrvStatus?: string;
   weightKg?: number;

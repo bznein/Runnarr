@@ -60,8 +60,9 @@ type HealthChartPoint = {
   sleepHours?: number;
   restingHeartRate?: number;
   stress?: number;
-  bodyBatteryStart?: number;
-  bodyBatteryEnd?: number;
+  bodyBatteryGained?: number;
+  bodyBatteryDrainedLoss?: number;
+  bodyBatteryHighest?: number;
   hrv?: number;
   weight?: number;
 };
@@ -620,36 +621,125 @@ function HealthLineChart({
 }
 
 function HealthBodyBatteryChart({ data }: { data: HealthChartPoint[] }) {
-  if (!data.some((item) => isFiniteNumber(item.bodyBatteryStart) || isFiniteNumber(item.bodyBatteryEnd))) {
+  const [hoveredPoint, setHoveredPoint] = useState<{ point: HealthChartPoint; x: number; y: number }>();
+  const points = data.filter((item) => isFiniteNumber(item.bodyBatteryGained) || isFiniteNumber(item.bodyBatteryDrainedLoss) || isFiniteNumber(item.bodyBatteryHighest));
+  if (points.length === 0) {
     return null;
   }
+  const width = 640;
+  const height = 220;
+  const margin = { top: 10, right: 18, bottom: 34, left: 42 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const maxMagnitude = bodyBatteryMagnitude(points);
+  const yTicks = [maxMagnitude, maxMagnitude / 2, 0, -maxMagnitude / 2, -maxMagnitude];
+  const labelEvery = Math.max(1, Math.ceil(points.length / 6));
+  const highestPoints = points
+    .map((point, index) => ({ point, x: bodyBatteryChartX(index, points.length, margin.left, plotWidth) }))
+    .filter((item): item is { point: HealthChartPoint & { bodyBatteryHighest: number }; x: number } => isFiniteNumber(item.point.bodyBatteryHighest));
+  const highestPath = highestPoints.map((item, index) => `${index === 0 ? "M" : "L"} ${item.x} ${bodyBatteryChartY(item.point.bodyBatteryHighest, maxMagnitude, margin.top, plotHeight)}`).join(" ");
+
   return (
     <div className="panel">
       <div className="chart-header">
         <div className="panel-heading">Body battery</div>
         <div className="health-chart-legend" aria-label="Body battery series">
-          <span><i style={{ background: "#2d7fb8" }} /> Start</span>
-          <span><i style={{ background: "#b7791f" }} /> End</span>
+          <span><i style={{ background: "#2f8f83" }} /> Gained</span>
+          <span><i style={{ background: "#c84d4d" }} /> Drained</span>
+          <span><i style={{ background: "#b7791f" }} /> Highest</span>
         </div>
       </div>
-      <div className="health-chart-area">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" />
-            <YAxis width={42} domain={[0, 100]} />
-            <Tooltip
-              contentStyle={chartTooltipContentStyle}
-              labelStyle={chartTooltipLabelStyle}
-              formatter={(value, name) => [formatHealthRounded(Number(value)), String(name)]}
-            />
-            <Line type="monotone" dataKey="bodyBatteryStart" name="Start" stroke="#2d7fb8" strokeWidth={2} dot={false} connectNulls />
-            <Line type="monotone" dataKey="bodyBatteryEnd" name="End" stroke="#b7791f" strokeWidth={2} dot={false} connectNulls />
-          </LineChart>
-        </ResponsiveContainer>
+      <div className="health-chart-area body-battery-chart-wrap" onMouseLeave={() => setHoveredPoint(undefined)}>
+        <svg className="body-battery-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Body battery gained, drained, and highest by day">
+          {yTicks.map((tick) => {
+            const y = bodyBatteryChartY(tick, maxMagnitude, margin.top, plotHeight);
+            return (
+              <g key={tick}>
+                <line className="body-battery-grid-line" x1={margin.left} x2={width - margin.right} y1={y} y2={y} />
+                <text className="body-battery-axis-label" x={margin.left - 8} y={y + 4} textAnchor="end">{Math.round(tick)}</text>
+              </g>
+            );
+          })}
+          {highestPath && <path className="body-battery-highest-line" d={highestPath} />}
+          {points.map((point, index) => {
+            const x = bodyBatteryChartX(index, points.length, margin.left, plotWidth);
+            const zeroY = bodyBatteryChartY(0, maxMagnitude, margin.top, plotHeight);
+            const gainedY = isFiniteNumber(point.bodyBatteryGained) ? bodyBatteryChartY(point.bodyBatteryGained, maxMagnitude, margin.top, plotHeight) : undefined;
+            const drainedValue = isFiniteNumber(point.bodyBatteryDrainedLoss) ? point.bodyBatteryDrainedLoss : undefined;
+            const drainedY = drainedValue !== undefined ? bodyBatteryChartY(drainedValue, maxMagnitude, margin.top, plotHeight) : undefined;
+            const highestY = isFiniteNumber(point.bodyBatteryHighest) ? bodyBatteryChartY(point.bodyBatteryHighest, maxMagnitude, margin.top, plotHeight) : undefined;
+            const showLabel = index === 0 || index === points.length - 1 || index % labelEvery === 0;
+            const tooltipY = Math.min(gainedY ?? zeroY, highestY ?? zeroY);
+            return (
+              <g key={point.date}>
+                <rect
+                  className="body-battery-hit-area"
+                  x={x - 10}
+                  y={margin.top}
+                  width={20}
+                  height={plotHeight}
+                  onMouseEnter={() => setHoveredPoint({ point, x: (x / width) * 100, y: (tooltipY / height) * 100 })}
+                  onMouseMove={() => setHoveredPoint({ point, x: (x / width) * 100, y: (tooltipY / height) * 100 })}
+                  onFocus={() => setHoveredPoint({ point, x: (x / width) * 100, y: (tooltipY / height) * 100 })}
+                  tabIndex={0}
+                  aria-label={bodyBatteryTooltipText(point)}
+                />
+                {gainedY !== undefined && (
+                  <rect className="body-battery-bar gained" x={x - 6} y={gainedY} width={12} height={Math.max(1, zeroY - gainedY)} rx={3} />
+                )}
+                {drainedY !== undefined && (
+                  <rect className="body-battery-bar drained" x={x - 6} y={zeroY} width={12} height={Math.max(1, drainedY - zeroY)} rx={3} />
+                )}
+                {highestY !== undefined && <circle className="body-battery-highest-dot" cx={x} cy={highestY} r={3.5} />}
+                {showLabel && (
+                  <text className="body-battery-axis-label" x={x} y={height - 10} textAnchor="middle">{healthChartLabel(point.date)}</text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+        {hoveredPoint && (
+          <div className="body-battery-tooltip" style={{ left: `${hoveredPoint.x}%`, top: `${hoveredPoint.y}%` }}>
+            <strong>{formatHealthDate(hoveredPoint.point.date)}</strong>
+            <span>Gained {formatHealthRounded(hoveredPoint.point.bodyBatteryGained)}</span>
+            <span>Drained {formatHealthRounded(Math.abs(hoveredPoint.point.bodyBatteryDrainedLoss ?? 0))}</span>
+            <span>Highest {formatHealthRounded(hoveredPoint.point.bodyBatteryHighest)}</span>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function bodyBatteryMagnitude(points: HealthChartPoint[]) {
+  const maxValue = points.reduce((max, point) => Math.max(
+    max,
+    point.bodyBatteryGained ?? 0,
+    Math.abs(point.bodyBatteryDrainedLoss ?? 0),
+    point.bodyBatteryHighest ?? 0
+  ), 100);
+  return Math.ceil(maxValue / 25) * 25;
+}
+
+function bodyBatteryChartX(index: number, count: number, left: number, width: number) {
+  if (count <= 1) {
+    return left + width / 2;
+  }
+  return left + (index / (count - 1)) * width;
+}
+
+function bodyBatteryChartY(value: number, magnitude: number, top: number, height: number) {
+  const clamped = Math.max(-magnitude, Math.min(magnitude, value));
+  return top + ((magnitude - clamped) / (magnitude * 2)) * height;
+}
+
+function bodyBatteryTooltipText(point: HealthChartPoint) {
+  return [
+    formatHealthDate(point.date),
+    `Gained: ${formatHealthRounded(point.bodyBatteryGained)}`,
+    `Drained: ${formatHealthRounded(Math.abs(point.bodyBatteryDrainedLoss ?? 0))}`,
+    `Highest: ${formatHealthRounded(point.bodyBatteryHighest)}`
+  ].join("\n");
 }
 
 function HealthMetricsTable({
@@ -690,7 +780,7 @@ function HealthMetricsTable({
               <td>{formatHealthDuration(metric.sleepDurationS)}</td>
               <td>{formatHealthBPM(metric.restingHeartRateBpm)}</td>
               <td>{formatHealthRounded(metric.stressAvg)}</td>
-              <td>{formatBodyBatteryRange(metric)}</td>
+              <td>{formatBodyBatteryGainDrain(metric)}</td>
               <td>{formatHealthMS(metric.hrvAvgMs)}</td>
               <td>{formatHealthWeight(metric.weightKg)}</td>
             </tr>
@@ -2339,8 +2429,9 @@ function hasAnyHealthMetric(metric: DailyHealthMetric) {
     metric.restingHeartRateBpm,
     metric.sleepDurationS,
     metric.stressAvg,
-    metric.bodyBatteryStart,
-    metric.bodyBatteryEnd,
+    metric.bodyBatteryGained,
+    metric.bodyBatteryDrained,
+    metric.bodyBatteryMax,
     metric.hrvAvgMs,
     metric.weightKg
   ].some(isFiniteNumber);
@@ -2360,8 +2451,9 @@ function healthChartData(metrics: DailyHealthMetric[]): HealthChartPoint[] {
       sleepHours: isFiniteNumber(metric.sleepDurationS) ? metric.sleepDurationS / 3600 : undefined,
       restingHeartRate: finiteValue(metric.restingHeartRateBpm),
       stress: finiteValue(metric.stressAvg),
-      bodyBatteryStart: finiteValue(metric.bodyBatteryStart),
-      bodyBatteryEnd: finiteValue(metric.bodyBatteryEnd),
+      bodyBatteryGained: finiteValue(metric.bodyBatteryGained),
+      bodyBatteryDrainedLoss: isFiniteNumber(metric.bodyBatteryDrained) ? -metric.bodyBatteryDrained : undefined,
+      bodyBatteryHighest: finiteValue(metric.bodyBatteryMax),
       hrv: finiteValue(metric.hrvAvgMs),
       weight: finiteValue(metric.weightKg)
     };
@@ -2377,7 +2469,7 @@ function healthMetricCards(metric?: DailyHealthMetric) {
     { label: "Calories", value: formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal) },
     { label: "Sleep", value: formatHealthDuration(metric.sleepDurationS) },
     { label: "Resting HR", value: formatHealthBPM(metric.restingHeartRateBpm) },
-    { label: "Body battery", value: formatBodyBatteryRange(metric) },
+    { label: "Body battery", value: formatBodyBatteryGainDrain(metric) },
     { label: "HRV", value: formatHealthMS(metric.hrvAvgMs) },
     { label: "Weight", value: formatHealthWeight(metric.weightKg) }
   ].filter((item) => item.value !== "");
@@ -2399,8 +2491,9 @@ function healthDetailItems(metric: DailyHealthMetric) {
     { label: "Sleep score", value: formatHealthRounded(metric.sleepScore) },
     { label: "Average stress", value: formatHealthRounded(metric.stressAvg) },
     { label: "Maximum stress", value: formatHealthRounded(metric.stressMax) },
-    { label: "Body battery start", value: formatHealthRounded(metric.bodyBatteryStart) },
-    { label: "Body battery end", value: formatHealthRounded(metric.bodyBatteryEnd) },
+    { label: "Body battery gained", value: formatHealthRounded(metric.bodyBatteryGained) },
+    { label: "Body battery drained", value: formatHealthRounded(metric.bodyBatteryDrained) },
+    { label: "Body battery highest", value: formatHealthRounded(metric.bodyBatteryMax) },
     { label: "HRV average", value: formatHealthMS(metric.hrvAvgMs) },
     { label: "HRV status", value: metric.hrvStatus ?? "" },
     { label: "Weight", value: formatHealthWeight(metric.weightKg) },
@@ -2440,13 +2533,19 @@ function formatHealthRounded(value?: number) {
   return isFiniteNumber(value) ? Math.round(value).toLocaleString() : "";
 }
 
-function formatBodyBatteryRange(metric: DailyHealthMetric) {
-  const start = formatHealthRounded(metric.bodyBatteryStart);
-  const end = formatHealthRounded(metric.bodyBatteryEnd);
-  if (start && end) {
-    return `${start} -> ${end}`;
+function formatBodyBatteryGainDrain(metric: DailyHealthMetric) {
+  const gained = formatHealthRounded(metric.bodyBatteryGained);
+  const drained = formatHealthRounded(metric.bodyBatteryDrained);
+  if (gained && drained) {
+    return `+${gained} / -${drained}`;
   }
-  return start || end;
+  if (gained) {
+    return `+${gained}`;
+  }
+  if (drained) {
+    return `-${drained}`;
+  }
+  return formatHealthRounded(metric.bodyBatteryMax);
 }
 
 function formatHealthCalories(value?: number) {
