@@ -101,6 +101,8 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 	assertFloatPtr(t, "body battery min", metric.BodyBatteryMin, 42)
 	assertFloatPtr(t, "body battery max", metric.BodyBatteryMax, 68)
 	assertFloatPtr(t, "body battery avg", metric.BodyBatteryAvg, 53.333333333333336)
+	assertFloatPtr(t, "body battery start", metric.BodyBatteryStart, 42)
+	assertFloatPtr(t, "body battery end", metric.BodyBatteryEnd, 68)
 	assertFloatPtr(t, "hrv avg", metric.HRVAvgMS, 55)
 	if metric.HRVStatus != "balanced" {
 		t.Fatalf("HRV status = %q, want balanced", metric.HRVStatus)

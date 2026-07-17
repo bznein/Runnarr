@@ -193,6 +193,8 @@ type DailyHealthMetric struct {
 	BodyBatteryAvg      *float64       `json:"bodyBatteryAvg,omitempty"`
 	BodyBatteryMin      *float64       `json:"bodyBatteryMin,omitempty"`
 	BodyBatteryMax      *float64       `json:"bodyBatteryMax,omitempty"`
+	BodyBatteryStart    *float64       `json:"bodyBatteryStart,omitempty"`
+	BodyBatteryEnd      *float64       `json:"bodyBatteryEnd,omitempty"`
 	HRVAvgMS            *float64       `json:"hrvAvgMs,omitempty"`
 	HRVStatus           string         `json:"hrvStatus,omitempty"`
 	WeightKG            *float64       `json:"weightKg,omitempty"`

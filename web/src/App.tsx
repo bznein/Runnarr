@@ -55,11 +55,13 @@ type HealthChartPoint = {
   date: string;
   label: string;
   steps?: number;
-  calories?: number;
+  activeCalories?: number;
+  remainingCalories?: number;
   sleepHours?: number;
   restingHeartRate?: number;
   stress?: number;
-  bodyBattery?: number;
+  bodyBatteryStart?: number;
+  bodyBatteryEnd?: number;
   hrv?: number;
   weight?: number;
 };
@@ -462,11 +464,11 @@ function HealthPage() {
         <>
           <section className="health-chart-grid">
             <HealthBarChart title="Steps" data={chartData} dataKey="steps" color="#2f8f83" formatter={formatHealthInteger} />
-            <HealthBarChart title="Calories" data={chartData} dataKey="calories" color="#b7791f" formatter={formatHealthCalories} />
+            <HealthCaloriesChart data={chartData} />
             <HealthBarChart title="Sleep" data={chartData} dataKey="sleepHours" color="#4664c9" formatter={(value) => `${value.toFixed(1)} h`} />
             <HealthLineChart title="Resting heart rate" data={chartData} dataKey="restingHeartRate" color="#c84d4d" formatter={(value) => `${Math.round(value)} bpm`} />
             <HealthLineChart title="Stress" data={chartData} dataKey="stress" color="#7a4eb2" formatter={(value) => Math.round(value).toLocaleString()} />
-            <HealthLineChart title="Body battery" data={chartData} dataKey="bodyBattery" color="#2d7fb8" formatter={(value) => Math.round(value).toLocaleString()} />
+            <HealthBodyBatteryChart data={chartData} />
             <HealthLineChart title="HRV" data={chartData} dataKey="hrv" color="#6f8f2f" formatter={(value) => `${Math.round(value)} ms`} />
             <HealthLineChart title="Weight" data={chartData} dataKey="weight" color="#8b5e3c" formatter={(value) => `${value.toFixed(1)} kg`} />
           </section>
@@ -533,6 +535,52 @@ function HealthBarChart({
   );
 }
 
+function HealthCaloriesChart({ data }: { data: HealthChartPoint[] }) {
+  if (!data.some((item) => isFiniteNumber(item.activeCalories) || isFiniteNumber(item.remainingCalories))) {
+    return null;
+  }
+  return (
+    <div className="panel">
+      <div className="panel-heading">Calories</div>
+      <div className="health-chart-area">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" />
+            <YAxis width={42} />
+            <Tooltip
+              contentStyle={chartTooltipContentStyle}
+              labelStyle={chartTooltipLabelStyle}
+              cursor={chartTooltipCursorStyle}
+              formatter={(value, name, item) => formatCaloriesTooltipItem(value, name, item)}
+            />
+            <Bar dataKey="activeCalories" name="Active" stackId="calories" fill="#b7791f" />
+            <Bar dataKey="remainingCalories" name="Remaining" stackId="calories" fill="#4664c9" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function formatCaloriesTooltipItem(value: unknown, name: unknown, item: unknown) {
+  if (String(name) !== "Remaining") {
+    return [formatHealthCalories(Number(value)), String(name)];
+  }
+  const payload = healthTooltipPayload(item);
+  const active = finiteValue(payload?.activeCalories) ?? 0;
+  const remaining = finiteValue(Number(value)) ?? 0;
+  return [formatHealthCalories(active + remaining), "Total"];
+}
+
+function healthTooltipPayload(item: unknown): HealthChartPoint | undefined {
+  if (!item || typeof item !== "object" || !("payload" in item)) {
+    return undefined;
+  }
+  const payload = (item as { payload?: HealthChartPoint }).payload;
+  return payload && typeof payload === "object" ? payload : undefined;
+}
+
 function HealthLineChart({
   title,
   data,
@@ -564,6 +612,39 @@ function HealthLineChart({
               formatter={(value) => [formatter(Number(value)), title]}
             />
             <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={2} dot={false} connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function HealthBodyBatteryChart({ data }: { data: HealthChartPoint[] }) {
+  if (!data.some((item) => isFiniteNumber(item.bodyBatteryStart) || isFiniteNumber(item.bodyBatteryEnd))) {
+    return null;
+  }
+  return (
+    <div className="panel">
+      <div className="chart-header">
+        <div className="panel-heading">Body battery</div>
+        <div className="health-chart-legend" aria-label="Body battery series">
+          <span><i style={{ background: "#2d7fb8" }} /> Start</span>
+          <span><i style={{ background: "#b7791f" }} /> End</span>
+        </div>
+      </div>
+      <div className="health-chart-area">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" />
+            <YAxis width={42} domain={[0, 100]} />
+            <Tooltip
+              contentStyle={chartTooltipContentStyle}
+              labelStyle={chartTooltipLabelStyle}
+              formatter={(value, name) => [formatHealthRounded(Number(value)), String(name)]}
+            />
+            <Line type="monotone" dataKey="bodyBatteryStart" name="Start" stroke="#2d7fb8" strokeWidth={2} dot={false} connectNulls />
+            <Line type="monotone" dataKey="bodyBatteryEnd" name="End" stroke="#b7791f" strokeWidth={2} dot={false} connectNulls />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -609,7 +690,7 @@ function HealthMetricsTable({
               <td>{formatHealthDuration(metric.sleepDurationS)}</td>
               <td>{formatHealthBPM(metric.restingHeartRateBpm)}</td>
               <td>{formatHealthRounded(metric.stressAvg)}</td>
-              <td>{formatHealthRounded(metric.bodyBatteryAvg)}</td>
+              <td>{formatBodyBatteryRange(metric)}</td>
               <td>{formatHealthMS(metric.hrvAvgMs)}</td>
               <td>{formatHealthWeight(metric.weightKg)}</td>
             </tr>
@@ -2258,25 +2339,33 @@ function hasAnyHealthMetric(metric: DailyHealthMetric) {
     metric.restingHeartRateBpm,
     metric.sleepDurationS,
     metric.stressAvg,
-    metric.bodyBatteryAvg,
+    metric.bodyBatteryStart,
+    metric.bodyBatteryEnd,
     metric.hrvAvgMs,
     metric.weightKg
   ].some(isFiniteNumber);
 }
 
 function healthChartData(metrics: DailyHealthMetric[]): HealthChartPoint[] {
-  return metrics.map((metric) => ({
-    date: metric.date,
-    label: healthChartLabel(metric.date),
-    steps: finiteValue(metric.steps),
-    calories: finiteValue(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal),
-    sleepHours: isFiniteNumber(metric.sleepDurationS) ? metric.sleepDurationS / 3600 : undefined,
-    restingHeartRate: finiteValue(metric.restingHeartRateBpm),
-    stress: finiteValue(metric.stressAvg),
-    bodyBattery: finiteValue(metric.bodyBatteryAvg),
-    hrv: finiteValue(metric.hrvAvgMs),
-    weight: finiteValue(metric.weightKg)
-  }));
+  return metrics.map((metric) => {
+    const totalCalories = finiteValue(metric.totalCaloriesKcal);
+    const activeCalories = finiteValue(metric.activeCaloriesKcal);
+    const remainingCalories = isFiniteNumber(totalCalories) ? Math.max(0, totalCalories - (activeCalories ?? 0)) : undefined;
+    return {
+      date: metric.date,
+      label: healthChartLabel(metric.date),
+      steps: finiteValue(metric.steps),
+      activeCalories,
+      remainingCalories,
+      sleepHours: isFiniteNumber(metric.sleepDurationS) ? metric.sleepDurationS / 3600 : undefined,
+      restingHeartRate: finiteValue(metric.restingHeartRateBpm),
+      stress: finiteValue(metric.stressAvg),
+      bodyBatteryStart: finiteValue(metric.bodyBatteryStart),
+      bodyBatteryEnd: finiteValue(metric.bodyBatteryEnd),
+      hrv: finiteValue(metric.hrvAvgMs),
+      weight: finiteValue(metric.weightKg)
+    };
+  });
 }
 
 function healthMetricCards(metric?: DailyHealthMetric) {
@@ -2288,7 +2377,7 @@ function healthMetricCards(metric?: DailyHealthMetric) {
     { label: "Calories", value: formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal) },
     { label: "Sleep", value: formatHealthDuration(metric.sleepDurationS) },
     { label: "Resting HR", value: formatHealthBPM(metric.restingHeartRateBpm) },
-    { label: "Body battery", value: formatHealthRounded(metric.bodyBatteryAvg) },
+    { label: "Body battery", value: formatBodyBatteryRange(metric) },
     { label: "HRV", value: formatHealthMS(metric.hrvAvgMs) },
     { label: "Weight", value: formatHealthWeight(metric.weightKg) }
   ].filter((item) => item.value !== "");
@@ -2310,9 +2399,8 @@ function healthDetailItems(metric: DailyHealthMetric) {
     { label: "Sleep score", value: formatHealthRounded(metric.sleepScore) },
     { label: "Average stress", value: formatHealthRounded(metric.stressAvg) },
     { label: "Maximum stress", value: formatHealthRounded(metric.stressMax) },
-    { label: "Body battery average", value: formatHealthRounded(metric.bodyBatteryAvg) },
-    { label: "Body battery minimum", value: formatHealthRounded(metric.bodyBatteryMin) },
-    { label: "Body battery maximum", value: formatHealthRounded(metric.bodyBatteryMax) },
+    { label: "Body battery start", value: formatHealthRounded(metric.bodyBatteryStart) },
+    { label: "Body battery end", value: formatHealthRounded(metric.bodyBatteryEnd) },
     { label: "HRV average", value: formatHealthMS(metric.hrvAvgMs) },
     { label: "HRV status", value: metric.hrvStatus ?? "" },
     { label: "Weight", value: formatHealthWeight(metric.weightKg) },
@@ -2350,6 +2438,15 @@ function formatHealthInteger(value?: number) {
 
 function formatHealthRounded(value?: number) {
   return isFiniteNumber(value) ? Math.round(value).toLocaleString() : "";
+}
+
+function formatBodyBatteryRange(metric: DailyHealthMetric) {
+  const start = formatHealthRounded(metric.bodyBatteryStart);
+  const end = formatHealthRounded(metric.bodyBatteryEnd);
+  if (start && end) {
+    return `${start} -> ${end}`;
+  }
+  return start || end;
 }
 
 function formatHealthCalories(value?: number) {

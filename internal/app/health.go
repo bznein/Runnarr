@@ -170,6 +170,10 @@ func normalizeGarminHealthDay(day GarminBridgeHealthDay) DailyHealthMetric {
 	metric.BodyBatteryMax = firstFloat(raw, "maxBodyBattery", "bodyBatteryMax", "highestBodyBattery")
 	if len(bodyBatteryValues) > 0 {
 		summary := numberSummary(bodyBatteryValues)
+		start := bodyBatteryValues[0]
+		end := bodyBatteryValues[len(bodyBatteryValues)-1]
+		metric.BodyBatteryStart = &start
+		metric.BodyBatteryEnd = &end
 		if metric.BodyBatteryAvg == nil {
 			metric.BodyBatteryAvg = &summary.avg
 		}
