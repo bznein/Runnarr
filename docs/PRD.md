@@ -131,6 +131,7 @@ The default deployment is single-user. The architecture should avoid blocking fu
 - Activity detail should show an "Open original" link for provider-imported activities when an original provider activity URL is available; manual file imports should not show this link unless their source includes a meaningful external URL.
 - Activity detail should allow locally renaming an activity without modifying the original provider activity or imported source file.
 - Activity detail should allow local notes on an activity without modifying the original provider activity or imported source file.
+- Activity detail should allow exporting a GPX track from stored GPS samples, with a user choice for whether to include sensor extensions such as heart rate, cadence, power, and speed.
 - Activity detail should use a compact overflow menu for secondary actions such as rename and delete instead of showing destructive actions as primary page actions.
 - Activity detail should support overlaying compatible chart series in a single combined graph, such as elevation, pace/speed, heart rate, power, and cadence, with clear axes, legends, and per-series toggles.
 - Activity detail, list rows, and dashboard summaries should use sport-appropriate metrics, units, and labels rather than one generic endurance format for every activity.

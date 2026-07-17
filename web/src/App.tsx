@@ -3,11 +3,11 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, ApiError, setCsrfToken } from "./api";
+import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, Gear, GearSummary, ImportFile, SyncJob } from "./types";
@@ -1857,6 +1857,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
 
@@ -1866,6 +1867,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setActionsOpen(false);
     setRenameOpen(false);
     setNotesOpen(false);
+    setExportOpen(false);
     setSelectedMediaId(undefined);
     updateActivityNotes.reset();
     uploadMedia.reset();
@@ -1883,6 +1885,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
   const routePoints = routeForActivity(item);
+  const canExportGPX = canExportActivityGPX(item);
   const paceScale = paceScaleForActivity(item);
   const paceRouteSegments = paceRouteSegmentsForActivity(item, paceScale);
   const chartData = chartDataFor(item.samples ?? [], paceScale);
@@ -1936,6 +1939,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             activity={item}
             open={actionsOpen}
             deleting={deleteActivity.isPending}
+            canExportGPX={canExportGPX}
             onToggle={() => setActionsOpen((current) => !current)}
             onRename={() => {
               renameActivity.reset();
@@ -1945,6 +1949,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             onNotes={() => {
               updateActivityNotes.reset();
               setNotesOpen(true);
+              setActionsOpen(false);
+            }}
+            onExportGPX={() => {
+              setExportOpen(true);
               setActionsOpen(false);
             }}
             onDelete={handleDelete}
@@ -1969,6 +1977,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           error={updateActivityNotes.error}
           onSave={handleSaveNotes}
           onClose={() => setNotesOpen(false)}
+        />
+      )}
+      {exportOpen && (
+        <ActivityExportGPXDialog
+          activity={item}
+          onClose={() => setExportOpen(false)}
         />
       )}
       <section className="metric-grid">
@@ -2191,6 +2205,66 @@ function ActivityNotesDialog({
   );
 }
 
+function ActivityExportGPXDialog({
+  activity,
+  onClose
+}: {
+  activity: Activity;
+  onClose: () => void;
+}) {
+  const [includeSensors, setIncludeSensors] = useState(false);
+  const handleDownload = () => {
+    const link = document.createElement("a");
+    link.href = activityGPXURL(activity.id, includeSensors);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    onClose();
+  };
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="filter-dialog export-gpx-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-export-gpx-title">
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Activity</div>
+            <h2 id="activity-export-gpx-title">Export GPX</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close GPX export" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={includeSensors}
+            onChange={(event) => setIncludeSensors(event.target.checked)}
+          />
+          <span>Include sensors</span>
+        </label>
+
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="button" onClick={handleDownload}>
+            <Download size={16} />
+            Download
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ActivityMediaUploadAction({
   inputKey,
   uploading,
@@ -2400,17 +2474,21 @@ function ActivityDetailActions({
   activity,
   open,
   deleting,
+  canExportGPX,
   onToggle,
   onRename,
   onNotes,
+  onExportGPX,
   onDelete
 }: {
   activity: Activity;
   open: boolean;
   deleting: boolean;
+  canExportGPX: boolean;
   onToggle: () => void;
   onRename: () => void;
   onNotes: () => void;
+  onExportGPX: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -2427,6 +2505,10 @@ function ActivityDetailActions({
           <button className="action-menu-item" type="button" role="menuitem" onClick={onNotes}>
             <StickyNote size={16} />
             {(activity.notes ?? "").trim() ? "Edit note" : "Add note"}
+          </button>
+          <button className="action-menu-item" type="button" role="menuitem" disabled={!canExportGPX} onClick={onExportGPX}>
+            <Download size={16} />
+            Export GPX
           </button>
           {activity.originalProviderUrl && (
             <a className="action-menu-item" role="menuitem" href={activity.originalProviderUrl} target="_blank" rel="noreferrer">
@@ -3703,6 +3785,10 @@ function routeForActivity(activity: Activity): RoutePoint[] {
     return decodePolyline(activity.summaryPolyline);
   }
   return [];
+}
+
+function canExportActivityGPX(activity: Activity) {
+  return (activity.samples ?? []).filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number").length > 1;
 }
 
 function paceScaleForActivity(activity: Activity) {
