@@ -12,7 +12,7 @@ func TestDetectActivityClimbsEasyClimb(t *testing.T) {
 		{620, 118},
 	})
 
-	climbs := detectActivityClimbs(samples)
+	climbs := detectActivityClimbs("Run", samples)
 	if len(climbs) != 1 {
 		t.Fatalf("climbs = %d, want 1", len(climbs))
 	}
@@ -42,7 +42,7 @@ func TestDetectActivityClimbsIgnoresFlatNoise(t *testing.T) {
 		{900, 100},
 	})
 
-	climbs := detectActivityClimbs(samples)
+	climbs := detectActivityClimbs("Run", samples)
 	if len(climbs) != 0 {
 		t.Fatalf("climbs = %d, want 0", len(climbs))
 	}
@@ -57,7 +57,7 @@ func TestDetectActivityClimbsMergesShortDips(t *testing.T) {
 		{520, 124},
 	})
 
-	climbs := detectActivityClimbs(samples)
+	climbs := detectActivityClimbs("Run", samples)
 	if len(climbs) != 1 {
 		t.Fatalf("climbs = %d, want 1", len(climbs))
 	}
@@ -77,7 +77,7 @@ func TestDetectActivityClimbsSplitsSustainedDescents(t *testing.T) {
 		{980, 128},
 	})
 
-	climbs := detectActivityClimbs(samples)
+	climbs := detectActivityClimbs("Run", samples)
 	if len(climbs) != 2 {
 		t.Fatalf("climbs = %d, want 2", len(climbs))
 	}
@@ -92,9 +92,55 @@ func TestDetectActivityClimbsRequiresUsableSamples(t *testing.T) {
 		{Index: 1, DistanceM: floatPtr(100)},
 	}
 
-	climbs := detectActivityClimbs(samples)
+	climbs := detectActivityClimbs("Run", samples)
 	if len(climbs) != 0 {
 		t.Fatalf("climbs = %d, want 0", len(climbs))
+	}
+}
+
+func TestDetectActivityClimbsUsesRideProfileForThresholds(t *testing.T) {
+	samples := climbSamples([][2]float64{
+		{0, 100},
+		{250, 102},
+		{500, 104},
+		{750, 106},
+		{1000, 124},
+	})
+
+	runClimbs := detectActivityClimbs("Run", samples)
+	if len(runClimbs) != 0 {
+		t.Fatalf("runClimbs = %d, want 0", len(runClimbs))
+	}
+
+	rideClimbs := detectActivityClimbs("Ride", samples)
+	if len(rideClimbs) != 1 {
+		t.Fatalf("rideClimbs = %d, want 1", len(rideClimbs))
+	}
+}
+
+func TestDetectActivityClimbsUsesRideProfileForDifficulty(t *testing.T) {
+	samples := climbSamples([][2]float64{
+		{0, 100},
+		{250, 117.75},
+		{500, 135.5},
+		{750, 153.25},
+		{1000, 171},
+	})
+
+	runClimbs := detectActivityClimbs("Run", samples)
+	if len(runClimbs) != 1 {
+		t.Fatalf("runClimbs = %d, want 1", len(runClimbs))
+	}
+	if runClimbs[0].Difficulty != "Hard" {
+		t.Fatalf("run difficulty = %q, want Hard", runClimbs[0].Difficulty)
+	}
+
+	rideClimbs := detectActivityClimbs("Ride", samples)
+	if len(rideClimbs) != 1 {
+		t.Fatalf("rideClimbs = %d, want 1", len(rideClimbs))
+	}
+	if rideClimbs[0].Difficulty != "Moderate" {
+		t.Fatalf("ride difficulty = %q, want Moderate", rideClimbs[0].Difficulty)
 	}
 }
 

@@ -490,7 +490,7 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 		return activity, err
 	}
 	activity.Gear = gear
-	activity.Climbs = detectActivityClimbs(samples)
+	activity.Climbs = detectActivityClimbs(activity.SportType, samples)
 	return activity, nil
 }
 

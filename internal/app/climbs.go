@@ -4,13 +4,33 @@ import "math"
 
 const (
 	climbSmoothingRadiusM       = 75
-	minClimbDistanceM           = 300
-	minClimbElevationGainM      = 15
-	minClimbAverageGradePct     = 2.5
 	maxClimbMergeDipDistanceM   = 150
 	maxClimbMergeElevationLossM = 8
-	climbStartGainM             = 3
 )
+
+var defaultClimbProfile = climbActivityProfile{
+	minClimbDistanceM:       300,
+	minClimbElevationGainM:  15,
+	minClimbAverageGradePct: 2.5,
+	climbStartGainM:         3,
+	difficultyScale:         1,
+}
+
+var bikeClimbProfile = climbActivityProfile{
+	minClimbDistanceM:       300,
+	minClimbElevationGainM:  15,
+	minClimbAverageGradePct: 2.0,
+	climbStartGainM:         3,
+	difficultyScale:         1.8,
+}
+
+type climbActivityProfile struct {
+	minClimbDistanceM       float64
+	minClimbElevationGainM  float64
+	minClimbAverageGradePct float64
+	climbStartGainM         float64
+	difficultyScale         float64
+}
 
 type climbPoint struct {
 	sampleIndex int
@@ -18,12 +38,22 @@ type climbPoint struct {
 	elevationM  float64
 }
 
-func detectActivityClimbs(samples []ActivitySample) []ActivityClimb {
+func detectActivityClimbs(activityType string, samples []ActivitySample) []ActivityClimb {
+	profile := climbProfileForActivityType(activityType)
 	points := climbPointsFromSamples(samples)
 	if len(points) < 2 {
 		return nil
 	}
-	return detectClimbsFromPoints(smoothClimbPoints(points))
+	return detectClimbsFromPoints(smoothClimbPoints(points), profile)
+}
+
+func climbProfileForActivityType(activityType string) climbActivityProfile {
+	switch normalizeSport(activityType) {
+	case "Ride":
+		return bikeClimbProfile
+	default:
+		return defaultClimbProfile
+	}
 }
 
 func climbPointsFromSamples(samples []ActivitySample) []climbPoint {
@@ -76,7 +106,7 @@ func smoothClimbPoints(points []climbPoint) []climbPoint {
 	return smoothed
 }
 
-func detectClimbsFromPoints(points []climbPoint) []ActivityClimb {
+func detectClimbsFromPoints(points []climbPoint, profile climbActivityProfile) []ActivityClimb {
 	climbs := make([]ActivityClimb, 0)
 	lowIndex := 0
 	inClimb := false
@@ -88,16 +118,16 @@ func detectClimbsFromPoints(points []climbPoint) []ActivityClimb {
 		current := points[index]
 
 		if !inClimb {
-			if current.elevationM <= points[index-1].elevationM {
-				lowIndex = index
-				continue
-			}
-			gain := current.elevationM - points[lowIndex].elevationM
-			distance := current.distanceM - points[lowIndex].distanceM
-			if gain >= climbStartGainM && averageGradePct(gain, distance) >= minClimbAverageGradePct {
-				inClimb = true
-				startIndex = lowIndex
-				peakIndex = index
+		if current.elevationM <= points[index-1].elevationM {
+			lowIndex = index
+			continue
+		}
+		gain := current.elevationM - points[lowIndex].elevationM
+		distance := current.distanceM - points[lowIndex].distanceM
+		if gain >= profile.climbStartGainM && averageGradePct(gain, distance) >= profile.minClimbAverageGradePct {
+			inClimb = true
+			startIndex = lowIndex
+			peakIndex = index
 				dipLowIndex = index
 			}
 			continue
@@ -114,19 +144,19 @@ func detectClimbsFromPoints(points []climbPoint) []ActivityClimb {
 		dipDistance := current.distanceM - points[peakIndex].distanceM
 		dipLoss := points[peakIndex].elevationM - current.elevationM
 		if dipDistance > maxClimbMergeDipDistanceM || dipLoss > maxClimbMergeElevationLossM {
-			climbs = appendValidClimb(climbs, points, startIndex, peakIndex)
+			climbs = appendValidClimb(climbs, points, startIndex, peakIndex, profile)
 			inClimb = false
 			lowIndex = dipLowIndex
 		}
 	}
 
 	if inClimb {
-		climbs = appendValidClimb(climbs, points, startIndex, peakIndex)
+		climbs = appendValidClimb(climbs, points, startIndex, peakIndex, profile)
 	}
 	return climbs
 }
 
-func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex int, endIndex int) []ActivityClimb {
+func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex int, endIndex int, profile climbActivityProfile) []ActivityClimb {
 	if startIndex < 0 || endIndex <= startIndex || endIndex >= len(points) {
 		return climbs
 	}
@@ -135,12 +165,12 @@ func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex in
 	distance := end.distanceM - start.distanceM
 	gain := end.elevationM - start.elevationM
 	grade := averageGradePct(gain, distance)
-	if distance < minClimbDistanceM || gain < minClimbElevationGainM || grade < minClimbAverageGradePct {
+	if distance < profile.minClimbDistanceM || gain < profile.minClimbElevationGainM || grade < profile.minClimbAverageGradePct {
 		return climbs
 	}
 	return append(climbs, ActivityClimb{
 		Index:            len(climbs),
-		Difficulty:       classifyClimb(gain, grade),
+		Difficulty:       classifyClimb(gain, grade, profile),
 		StartSampleIndex: start.sampleIndex,
 		EndSampleIndex:   end.sampleIndex,
 		StartDistanceM:   start.distanceM,
@@ -153,8 +183,12 @@ func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex in
 	})
 }
 
-func classifyClimb(gainM float64, gradePct float64) string {
-	score := gainM * gradePct
+func classifyClimb(gainM float64, gradePct float64, profile climbActivityProfile) string {
+	scale := profile.difficultyScale
+	if scale <= 0 {
+		scale = 1
+	}
+	score := gainM * gradePct / scale
 	switch {
 	case score >= 1600:
 		return "Epic"

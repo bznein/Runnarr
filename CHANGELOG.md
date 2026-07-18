@@ -21,6 +21,7 @@
 - Gear list and gear detail pages now support sorting by last used, first used, distance, percent-to-limit, and activity count.
 - Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
+- Climb detection now uses activity-specific thresholds, and biking climbs are scored as easier than running for the same grade/elevation profile.
 
 ### Fixes
 
