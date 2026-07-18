@@ -23,6 +23,7 @@ If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BA
 Backend:
 
 ```sh
+source .env
 go run ./cmd/runnarr
 ```
 
@@ -33,6 +34,17 @@ cd web
 npm install
 npm run dev
 ```
+
+For local non-docker full-stack development with Vite hot-reload, use:
+
+```sh
+cp .env.example .env
+# update at least DATABASE_URL, RUNNARR_SECRET_KEY, and login credentials
+source .env
+scripts/dev.sh
+```
+
+See [docs/development.md](docs/development.md) for full non-dockerized setup notes.
 
 Set `DATABASE_URL` to a running Postgres instance before starting the backend outside Docker.
 
