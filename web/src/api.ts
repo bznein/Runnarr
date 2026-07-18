@@ -115,6 +115,11 @@ export const api = {
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
   gears: () => request<GearListResponse>("/api/gears"),
   gear: (id: string) => request<GearDetailResponse>(`/api/gears/${id}`),
+  updateActivity: (id: string, body: { name?: string; notes?: string; gearIds?: string[] }) =>
+    request<{ activity: Activity }>(`/api/activities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body)
+    }),
   renameActivity: (id: string, name: string) =>
     request<{ activity: Activity }>(`/api/activities/${id}`, {
       method: "PATCH",

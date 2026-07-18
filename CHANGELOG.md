@@ -23,6 +23,7 @@
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
 - Climb detection now uses activity-specific thresholds, and biking climbs are scored as easier than running for the same grade/elevation profile.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
+- Activity detail pages now support local note editing and gear assignment updates from a new action menu dialog.
 
 ### Fixes
 
