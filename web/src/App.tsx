@@ -3,9 +3,47 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
+import {
+  Activity as ActivityIcon,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  BarChart3,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Cloud,
+  Columns3,
+  Database,
+  Download,
+  ExternalLink,
+  Filter,
+  Flame,
+  Footprints,
+  HeartPulse,
+  LogOut,
+  Map as MapIcon,
+  MapPin,
+  Monitor,
+  Moon,
+  MoreVertical,
+  Pencil,
+  RefreshCw,
+  Route as RouteIcon,
+  Scale,
+  Mountain,
+  Timer,
+  Settings as SettingsIcon,
+  StickyNote,
+  Sun,
+  Trash2,
+  Upload,
+  X,
+  BatteryCharging,
+  RotateCcw
+} from "lucide-react";
 import { divIcon } from "leaflet";
-import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
@@ -1880,6 +1918,26 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setRouteColorSource("pace");
     }
   }, [id, routeUsesGap]);
+  const [pinningMediaId, setPinningMediaId] = useState<string>();
+  const pinActivityMedia = useMutation({
+    mutationFn: ({ mediaId, latitude, longitude }: { mediaId: string; latitude: number; longitude: number }) =>
+      api.updateActivityMediaLocation(id!, mediaId, latitude, longitude),
+    onSuccess: (result) => {
+      queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, (current) => {
+        if (!current) {
+          return current;
+        }
+        const updatedMedia = replaceMedia(current.activity.media ?? [], result.media);
+        return {
+          activity: {
+            ...current.activity,
+            media: updatedMedia
+          }
+        };
+      });
+      setPinningMediaId(undefined);
+    }
+  });
 
   useEffect(() => {
     setHighlightedSample(undefined);
@@ -1890,6 +1948,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setExportOpen(false);
     setSelectedMediaId(undefined);
     updateActivityNotes.reset();
+    setPinningMediaId(undefined);
     uploadMedia.reset();
     setMediaFileInputKey((key) => key + 1);
   }, [id]);
@@ -1944,6 +2003,20 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     uploadMedia.reset();
     uploadMedia.mutate(files);
   };
+  const handlePinMedia = (mediaId: string) => {
+    setPinningMediaId(mediaId);
+    setSelectedMediaId(mediaId);
+  };
+  const handleCancelPinMedia = () => {
+    setPinningMediaId(undefined);
+  };
+  const handleMapPin = (mediaId: string, latitude: number, longitude: number) => {
+    pinActivityMedia.reset();
+    pinActivityMedia.mutate({ mediaId, latitude, longitude });
+  };
+  const pinningMedia = mediaItems.find((item) => item.id === pinningMediaId);
+
+  const mediaPanelError = pinActivityMedia.error ? pinActivityMedia.error : null;
 
   return (
     <Page
@@ -2033,18 +2106,22 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       )}
 
       {mediaItems.length > 0 ? (
-        <ActivityMediaPanel
-          activity={item}
-          uploading={uploadMedia.isPending}
-          uploadError={uploadMedia.error}
-          selectedMediaId={selectedMediaId}
-          onSelectMedia={setSelectedMediaId}
-        />
+          <ActivityMediaPanel
+            activity={item}
+            uploading={uploadMedia.isPending}
+            uploadError={uploadMedia.error}
+            pinError={mediaPanelError}
+            pinningMediaId={pinningMediaId}
+            selectedMediaId={selectedMediaId}
+            onSelectMedia={setSelectedMediaId}
+            onStartPin={handlePinMedia}
+            onCancelPin={handleCancelPinMedia}
+          />
       ) : (
         Boolean(uploadMedia.error) && <div className="error">{uploadMedia.error instanceof Error ? uploadMedia.error.message : "Upload failed"}</div>
       )}
 
-      {(routePoints.length > 1 || locatedMedia.length > 0) && (
+      {(routePoints.length > 1 || locatedMedia.length > 0 || pinningMediaId) && (
         <section className="panel">
           <div className="route-panel-header">
             <div className="panel-heading">Route</div>
@@ -2063,6 +2140,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             routeColorSource={routeColorSource}
             onRouteColorSourceChange={setRouteColorSource}
             showRouteColorSelector={routeUsesGap}
+            pinningMediaId={pinningMediaId}
+            pinningMedia={pinningMedia}
+            onPinMedia={handleMapPin}
           />
         </section>
       )}
@@ -2330,18 +2410,27 @@ function ActivityMediaPanel({
   activity,
   uploading,
   uploadError,
+  pinError,
+  pinningMediaId,
   selectedMediaId,
-  onSelectMedia
+  onSelectMedia,
+  onStartPin,
+  onCancelPin
 }: {
   activity: Activity;
   uploading: boolean;
   uploadError: unknown;
+  pinError: unknown;
+  pinningMediaId?: string;
   selectedMediaId?: string;
   onSelectMedia: (mediaId?: string) => void;
+  onStartPin: (mediaId: string) => void;
+  onCancelPin: () => void;
 }) {
   const queryClient = useQueryClient();
   const media = activity.media ?? [];
   const previewMedia = media.find((item) => item.id === selectedMediaId);
+  const previewIsPinning = Boolean(previewMedia && previewMedia.id === pinningMediaId);
   const previewMediaIndex = selectedMediaId ? media.findIndex((item) => item.id === selectedMediaId) : -1;
   const previousMedia = previewMediaIndex > 0 ? media[previewMediaIndex - 1] : undefined;
   const nextMedia = previewMediaIndex >= 0 && previewMediaIndex < media.length - 1 ? media[previewMediaIndex + 1] : undefined;
@@ -2383,6 +2472,7 @@ function ActivityMediaPanel({
 
       {uploading && <div className="media-upload-status"><Upload size={16} /> Uploading photos</div>}
       {Boolean(uploadError) && <div className="error">{uploadError instanceof Error ? uploadError.message : "Upload failed"}</div>}
+      {Boolean(pinError) && <div className="error">{pinError instanceof Error ? pinError.message : "Pin failed"}</div>}
       {deleteMedia.error && <div className="error">{deleteMedia.error instanceof Error ? deleteMedia.error.message : "Delete failed"}</div>}
 
       {media.length > 0 ? (
@@ -2405,6 +2495,9 @@ function ActivityMediaPanel({
           onDelete={() => handleDeleteMedia(previewMedia)}
           onPrevious={previousMedia ? () => onSelectMedia(previousMedia.id) : undefined}
           onNext={nextMedia ? () => onSelectMedia(nextMedia.id) : undefined}
+          onStartPin={onStartPin}
+          onCancelPin={onCancelPin}
+          isPinning={previewIsPinning}
         />
       )}
     </section>
@@ -2417,7 +2510,10 @@ function ActivityMediaPreview({
   onClose,
   onDelete,
   onPrevious,
-  onNext
+  onNext,
+  onStartPin,
+  onCancelPin,
+  isPinning
 }: {
   media: ActivityMedia;
   deleting: boolean;
@@ -2425,6 +2521,9 @@ function ActivityMediaPreview({
   onDelete: () => void;
   onPrevious?: () => void;
   onNext?: () => void;
+  onStartPin: (mediaId: string) => void;
+  onCancelPin: () => void;
+  isPinning: boolean;
 }) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2482,6 +2581,10 @@ function ActivityMediaPreview({
         </div>
 
         <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={() => (isPinning ? onCancelPin() : onStartPin(media.id))}>
+            <MapPin size={16} />
+            {isPinning ? "Cancel pin" : hasMediaLocation(media) ? "Re-pin on map" : "Pin on map"}
+          </button>
           <a className="secondary-button" href={activityMediaOriginalURL(media.id)} target="_blank" rel="noreferrer">
             <ExternalLink size={16} />
             Open original
@@ -3590,6 +3693,9 @@ function ActivityMap({
   mediaMarkers = [],
   selectedMediaId,
   onSelectMedia,
+  pinningMediaId,
+  pinningMedia,
+  onPinMedia,
   routeColorSource,
   onRouteColorSourceChange,
   showRouteColorSelector
@@ -3604,6 +3710,9 @@ function ActivityMap({
   mediaMarkers?: ActivityMedia[];
   selectedMediaId?: string;
   onSelectMedia?: (mediaId: string) => void;
+  pinningMediaId?: string;
+  pinningMedia?: ActivityMedia;
+  onPinMedia?: (mediaId: string, latitude: number, longitude: number) => void;
   routeColorSource?: RouteColorSource;
   onRouteColorSourceChange?: (next: RouteColorSource) => void;
   showRouteColorSelector?: boolean;
@@ -3613,6 +3722,7 @@ function ActivityMap({
   const center = points[0] ?? mediaPoints[0] ?? [53.3498, -6.2603];
   const start = points[0];
   const end = points.length > 1 ? points[points.length - 1] : undefined;
+
   return (
     <div className="map-frame">
       <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
@@ -3626,6 +3736,7 @@ function ActivityMap({
         {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
         {highlightedPoint && <Marker position={highlightedPoint} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
         <ActivityMediaMapMarkers mediaMarkers={mediaMarkers} selectedMediaId={selectedMediaId} onSelectMedia={onSelectMedia} />
+        {onPinMedia && pinningMediaId && <ActivityMapPinCapture mediaId={pinningMediaId} onPinMedia={onPinMedia} />}
         <FitMapContent points={mapPoints} />
       </MapContainer>
       {showRouteColorSelector && onRouteColorSourceChange && (
@@ -3635,8 +3746,28 @@ function ActivityMap({
         />
       )}
       {paceSegments.length > 0 && <ActivityPaceRouteLegend source={routeColorSource ?? "pace"} />}
+      {pinningMedia && (
+        <div className="media-pin-hint">
+          Pin <strong>{pinningMedia.originalFilename}</strong> by clicking the map
+        </div>
+      )}
     </div>
   );
+}
+
+function ActivityMapPinCapture({
+  mediaId,
+  onPinMedia
+}: {
+  mediaId: string;
+  onPinMedia: (mediaId: string, latitude: number, longitude: number) => void;
+}) {
+  useMapEvents({
+    click: (event) => {
+      onPinMedia(mediaId, event.latlng.lat, event.latlng.lng);
+    }
+  });
+  return null;
 }
 
 function ActivityPaceRouteLegend({ source }: { source: RouteColorSource }) {
@@ -3714,7 +3845,12 @@ function ClimbStartMarkerLayer({
   selected: boolean;
   onSelectClimb?: (climb: ActivityClimb) => void;
 }) {
-  const eventHandlers = onSelectClimb ? { click: () => onSelectClimb(segment.climb) } : undefined;
+  const eventHandlers = onSelectClimb ? {
+    click: (event: { originalEvent?: { stopPropagation: () => void } }) => {
+      event.originalEvent?.stopPropagation();
+      onSelectClimb(segment.climb);
+    }
+  } : undefined;
   if (!segment.start) {
     return null;
   }
@@ -3736,7 +3872,12 @@ function SelectedClimbMapSegmentLayer({
   segment: ClimbMapSegment;
   onSelectClimb?: (climb: ActivityClimb) => void;
 }) {
-  const eventHandlers = onSelectClimb ? { click: () => onSelectClimb(segment.climb) } : undefined;
+  const eventHandlers = onSelectClimb ? {
+    click: (event: { originalEvent?: { stopPropagation: () => void } }) => {
+      event.originalEvent?.stopPropagation();
+      onSelectClimb(segment.climb);
+    }
+  } : undefined;
   if (segment.points.length <= 1) {
     return null;
   }
@@ -3766,6 +3907,12 @@ function ActivityMediaMapMarkers({
           return null;
         }
         const selected = item.id === selectedMediaId;
+        const eventHandlers = onSelectMedia ? {
+          click: (event: { originalEvent?: { stopPropagation: () => void } }) => {
+            event.originalEvent?.stopPropagation();
+            onSelectMedia(item.id);
+          }
+        } : undefined;
         return (
           <Marker
             key={item.id}
@@ -3773,7 +3920,7 @@ function ActivityMediaMapMarkers({
             icon={mediaMapMarkerIcon(item, selected)}
             zIndexOffset={selected ? 1200 : 800}
             title={item.originalFilename}
-            eventHandlers={onSelectMedia ? { click: () => onSelectMedia(item.id) } : undefined}
+            eventHandlers={eventHandlers}
           />
         );
       })}
@@ -4340,6 +4487,21 @@ function mergeActivityMedia(current: ActivityMedia[], uploaded: ActivityMedia[])
     byId.set(item.id, item);
   }
   return Array.from(byId.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function replaceMedia(current: ActivityMedia[], updated: ActivityMedia) {
+  let replaced = false;
+  const next = current.map((item) => {
+    if (item.id === updated.id) {
+      replaced = true;
+      return updated;
+    }
+    return item;
+  });
+  if (!replaced) {
+    next.push(updated);
+  }
+  return next;
 }
 
 function formatActivityMediaMeta(media: ActivityMedia) {

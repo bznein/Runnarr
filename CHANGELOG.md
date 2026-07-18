@@ -20,6 +20,7 @@
 - Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
 - Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
+- Activities can pin uploaded photos to map coordinates from their preview.
 
 ### Fixes
 

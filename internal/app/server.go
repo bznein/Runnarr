@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"net/http"
 	"os"
@@ -77,6 +78,7 @@ func (s *Server) Routes() http.Handler {
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
 			r.Post("/activities/{id}/media", s.handleUploadActivityMedia)
 			r.Delete("/activities/{id}/media/{mediaId}", s.handleDeleteActivityMedia)
+			r.Patch("/activities/{id}/media/{mediaId}", s.handleUpdateActivityMedia)
 			r.Get("/activity-media/{mediaId}/original", s.handleServeOriginalMedia)
 			r.Get("/activity-media/{mediaId}/thumbnail", s.handleServeThumbnailMedia)
 			r.Get("/activity-types", s.handleActivityTypes)
@@ -298,6 +300,46 @@ func (s *Server) handleDeleteActivityMedia(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, DeleteActivityMediaResult{Deleted: true})
+}
+
+func (s *Server) handleUpdateActivityMedia(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Latitude  *float64 `json:"latitude"`
+		Longitude *float64 `json:"longitude"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if (body.Latitude == nil) != (body.Longitude == nil) {
+		writeError(w, http.StatusBadRequest, "both latitude and longitude are required")
+		return
+	}
+	if body.Latitude != nil {
+		if math.IsNaN(*body.Latitude) || math.IsNaN(*body.Longitude) || math.IsInf(*body.Latitude, 0) || math.IsInf(*body.Longitude, 0) {
+			writeError(w, http.StatusBadRequest, "latitude and longitude must be finite numbers")
+			return
+		}
+		if *body.Latitude < -90 || *body.Latitude > 90 || *body.Longitude < -180 || *body.Longitude > 180 {
+			writeError(w, http.StatusBadRequest, "latitude must be between -90 and 90 and longitude between -180 and 180")
+			return
+		}
+	}
+
+	activityID := chi.URLParam(r, "id")
+	mediaID := chi.URLParam(r, "mediaId")
+	media, err := s.store.UpdateActivityMediaLocation(r.Context(), activityID, mediaID, body.Latitude, body.Longitude)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "media not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("update activity media location", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not update media")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"media": media})
 }
 
 func (s *Server) handleServeOriginalMedia(w http.ResponseWriter, r *http.Request) {

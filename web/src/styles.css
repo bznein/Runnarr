@@ -943,6 +943,24 @@ textarea {
   font-weight: 680;
 }
 
+.media-pin-hint {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 700;
+  max-width: min(460px, calc(100% - 24px));
+  padding: 7px 10px;
+  border: 1px solid var(--color-border-hover);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  color: var(--color-heading);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+  pointer-events: none;
+  box-shadow: var(--shadow-menu);
+}
+
 .media-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

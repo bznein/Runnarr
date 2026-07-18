@@ -136,6 +136,11 @@ export const api = {
   },
   deleteActivityMedia: (activityId: string, mediaId: string) =>
     request<DeleteActivityMediaResult>(`/api/activities/${activityId}/media/${mediaId}`, { method: "DELETE" }),
+  updateActivityMediaLocation: (activityId: string, mediaId: string, latitude: number, longitude: number) =>
+    request<{ media: ActivityMedia }>(`/api/activities/${activityId}/media/${mediaId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ latitude, longitude })
+    }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
   upload: (file: File) => {
     const body = new FormData();
