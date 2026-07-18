@@ -16,6 +16,9 @@
 - Garmin-synced activities now preserve grade-adjusted pace when provided and show GAP on activity details and laps.
 - Activity lap tables now show per-lap pace derived from lap distance and elapsed time.
 - Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
+- Climb detection now uses activity-specific thresholds, and biking climbs are scored as easier than running for the same grade/elevation profile.
+- Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
+- Activity detail pages now support local note editing and gear assignment updates from a new action menu dialog.
 
 ### Fixes
 

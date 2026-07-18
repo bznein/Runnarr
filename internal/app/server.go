@@ -346,26 +346,20 @@ func (s *Server) handleServeActivityMedia(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name  *string `json:"name"`
-		Notes *string `json:"notes"`
+		Name    *string   `json:"name"`
+		Notes   *string   `json:"notes"`
+		GearIDs *[]string `json:"gearIds"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.Name == nil && body.Notes == nil {
+	if body.Name == nil && body.Notes == nil && body.GearIDs == nil {
 		writeError(w, http.StatusBadRequest, "missing activity update")
 		return
 	}
-	var activity Activity
-	var err error
 	id := chi.URLParam(r, "id")
-	if body.Name != nil {
-		activity, err = s.store.RenameActivity(r.Context(), id, *body.Name)
-	}
-	if err == nil && body.Notes != nil {
-		activity, err = s.store.UpdateActivityNotes(r.Context(), id, *body.Notes)
-	}
+	activity, err := s.store.UpdateActivity(r.Context(), id, body.Name, body.Notes, body.GearIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity not found")
 		return
@@ -375,6 +369,10 @@ func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, ErrInvalidActivityNotes) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if errors.Is(err, ErrInvalidActivityGearIDs) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

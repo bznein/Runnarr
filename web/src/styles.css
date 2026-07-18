@@ -1271,6 +1271,15 @@ textarea {
   gap: 10px;
 }
 
+.gear-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .column-option {
   display: flex;
   align-items: center;

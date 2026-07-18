@@ -1799,6 +1799,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const gears = useQuery({ queryKey: ["gears"], queryFn: api.gears });
   const deleteActivity = useMutation({
     mutationFn: api.deleteActivity,
     onSuccess: async () => {
@@ -1829,6 +1830,18 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setNotesOpen(false);
     }
   });
+  const updateActivityGear = useMutation({
+    mutationFn: (gearIds: string[]) => api.updateActivity(id!, { gearIds }),
+    onSuccess: async (result) => {
+      queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, result);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["gears"] })
+      ]);
+      setGearOpen(false);
+    }
+  });
   const uploadMedia = useMutation({
     mutationFn: async (files: File[]) => {
       const uploaded: Array<{ media: ActivityMedia }> = [];
@@ -1857,6 +1870,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [gearOpen, setGearOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
@@ -1867,9 +1881,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setActionsOpen(false);
     setRenameOpen(false);
     setNotesOpen(false);
+    setGearOpen(false);
     setExportOpen(false);
     setSelectedMediaId(undefined);
     updateActivityNotes.reset();
+    updateActivityGear.reset();
     uploadMedia.reset();
     setMediaFileInputKey((key) => key + 1);
   }, [id]);
@@ -1911,6 +1927,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const handleSaveNotes = (notes: string) => {
     updateActivityNotes.mutate(notes);
   };
+  const handleSaveGear = (gearIds: string[]) => {
+    updateActivityGear.mutate(gearIds);
+  };
   const handleDeleteNotes = () => {
     if (window.confirm("Delete this note?")) {
       updateActivityNotes.mutate("");
@@ -1951,6 +1970,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
               setNotesOpen(true);
               setActionsOpen(false);
             }}
+            onGear={() => {
+              updateActivityGear.reset();
+              setGearOpen(true);
+              setActionsOpen(false);
+            }}
             onExportGPX={() => {
               setExportOpen(true);
               setActionsOpen(false);
@@ -1977,6 +2001,16 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           error={updateActivityNotes.error}
           onSave={handleSaveNotes}
           onClose={() => setNotesOpen(false)}
+        />
+      )}
+      {gearOpen && (
+        <ActivityGearDialog
+          activity={item}
+          availableGear={(gears.data?.gear ?? []).slice()}
+          saving={updateActivityGear.isPending}
+          error={updateActivityGear.error}
+          onSave={handleSaveGear}
+          onClose={() => setGearOpen(false)}
         />
       )}
       {exportOpen && (
@@ -2197,6 +2231,110 @@ function ActivityNotesDialog({
             Cancel
           </button>
           <button className="primary-button" type="submit" disabled={saving || !valid || !changed}>
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ActivityGearDialog({
+  activity,
+  availableGear,
+  saving,
+  error,
+  onSave,
+  onClose
+}: {
+  activity: Activity;
+  availableGear: Gear[];
+  saving: boolean;
+  error: unknown;
+  onSave: (gearIds: string[]) => void;
+  onClose: () => void;
+}) {
+  const currentGearIds = (activity.gear ?? []).map((item) => item.id);
+  const [selectedGearIds, setSelectedGearIds] = useState<string[]>(currentGearIds);
+  useEffect(() => {
+    setSelectedGearIds(currentGearIds);
+  }, [activity.gear, activity.id]);
+  const sortedAvailableGear = [...availableGear].sort((left, right) => {
+    const leftName = gearDisplayName(left);
+    const rightName = gearDisplayName(right);
+    return leftName.localeCompare(rightName);
+  });
+  const selectedSet = new Set(selectedGearIds);
+  const changed = selectedGearIds.length !== currentGearIds.length || currentGearIds.some((gearId) => !selectedSet.has(gearId));
+  const message = error instanceof Error ? error.message : "";
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <form
+        className="filter-dialog gear-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="activity-gear-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (changed) {
+            onSave(selectedGearIds);
+          }
+        }}
+      >
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Activity</div>
+            <h2 id="activity-gear-title">Assigned gear</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close gear editor" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {sortedAvailableGear.length === 0 ? (
+          <p className="muted">No gear is available yet. Sync gear from Settings first.</p>
+        ) : (
+          <div className="filter-dialog-section">
+            <div className="gear-option-grid">
+              {sortedAvailableGear.map((gear) => (
+                <label className="column-option" key={gear.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedSet.has(gear.id)}
+                    onChange={() => {
+                      setSelectedGearIds((current) => {
+                        if (current.includes(gear.id)) {
+                          return current.filter((id) => id !== gear.id);
+                        }
+                        return current.concat([gear.id]);
+                      });
+                    }}
+                  />
+                  <span>{gearDisplayName(gear)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {message && <div className="error">{message}</div>}
+
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" disabled={saving} onClick={() => onSave([])}>
+            Clear all
+          </button>
+          <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="submit" disabled={saving || !changed}>
             Save
           </button>
         </div>
@@ -2478,6 +2616,7 @@ function ActivityDetailActions({
   onToggle,
   onRename,
   onNotes,
+  onGear,
   onExportGPX,
   onDelete
 }: {
@@ -2488,6 +2627,7 @@ function ActivityDetailActions({
   onToggle: () => void;
   onRename: () => void;
   onNotes: () => void;
+  onGear: () => void;
   onExportGPX: () => void;
   onDelete: () => void;
 }) {
@@ -2505,6 +2645,10 @@ function ActivityDetailActions({
           <button className="action-menu-item" type="button" role="menuitem" onClick={onNotes}>
             <StickyNote size={16} />
             {(activity.notes ?? "").trim() ? "Edit note" : "Add note"}
+          </button>
+          <button className="action-menu-item" type="button" role="menuitem" onClick={onGear}>
+            <Footprints size={16} />
+            Edit gear
           </button>
           <button className="action-menu-item" type="button" role="menuitem" disabled={!canExportGPX} onClick={onExportGPX}>
             <Download size={16} />

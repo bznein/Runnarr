@@ -22,6 +22,7 @@ type Store struct {
 var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
 var ErrInvalidActivityName = errors.New("activity name must be between 1 and 160 characters")
 var ErrInvalidActivityNotes = errors.New("activity notes must be 5000 characters or fewer")
+var ErrInvalidActivityGearIDs = errors.New("activity gear identifiers must be valid gear IDs")
 
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
@@ -896,6 +897,207 @@ func (s *Store) UpdateActivityNotes(ctx context.Context, id, requestedNotes stri
 		return Activity{}, err
 	}
 	return s.GetActivity(ctx, id)
+}
+
+func (s *Store) UpdateActivity(ctx context.Context, id string, requestedName *string, requestedNotes *string, requestedGearIDs *[]string) (Activity, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return Activity{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var sourceName string
+	if err = tx.QueryRow(ctx, `select name from activities where id = $1`, id).Scan(&sourceName); err != nil {
+		return Activity{}, err
+	}
+
+	if requestedName != nil {
+		localName, err := localActivityNameOverride(*requestedName, sourceName)
+		if err != nil {
+			return Activity{}, err
+		}
+		if _, err = tx.Exec(ctx, `
+			update activities
+			set local_name = $2, updated_at = now()
+			where id = $1
+		`, id, localName); err != nil {
+			return Activity{}, err
+		}
+	}
+
+	if requestedNotes != nil {
+		notes, err := localActivityNotesValue(*requestedNotes)
+		if err != nil {
+			return Activity{}, err
+		}
+		if _, err = tx.Exec(ctx, `
+			update activities
+			set local_notes = $2, updated_at = now()
+			where id = $1
+		`, id, notes); err != nil {
+			return Activity{}, err
+		}
+	}
+
+	if requestedGearIDs != nil {
+		if err = s.setActivityGearAssignmentsTx(ctx, tx, id, *requestedGearIDs); err != nil {
+			return Activity{}, err
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return Activity{}, err
+	}
+
+	return s.GetActivity(ctx, id)
+}
+
+func (s *Store) setActivityGearAssignmentsTx(ctx context.Context, tx pgx.Tx, activityID string, requestedGearIDs []string) error {
+	originalGearIDs, err := s.listActivityGearIDsTx(ctx, tx, activityID)
+	if err != nil {
+		return err
+	}
+
+	gearIDs := compactStrings(requestedGearIDs)
+	if sameStringSet(originalGearIDs, gearIDs) {
+		return nil
+	}
+
+	if _, err := tx.Exec(ctx, `delete from activity_gears where activity_id = $1`, activityID); err != nil {
+		return err
+	}
+
+	if len(gearIDs) == 0 {
+		for _, gearID := range originalGearIDs {
+			if err := s.refreshGearUsageTx(ctx, tx, gearID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	existingGearIDs, err := s.verifiedGearIDsTx(ctx, tx, gearIDs)
+	if err != nil {
+		return err
+	}
+	if !sameStringSet(gearIDs, existingGearIDs) {
+		return ErrInvalidActivityGearIDs
+	}
+
+	for _, gearID := range gearIDs {
+		if _, err = tx.Exec(ctx, `
+			insert into activity_gears(activity_id, gear_id)
+			values($1, $2)
+		`, activityID, gearID); err != nil {
+			return err
+		}
+	}
+
+	for _, gearID := range unionStringSet(originalGearIDs, gearIDs) {
+		if err := s.refreshGearUsageTx(ctx, tx, gearID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) listActivityGearIDsTx(ctx context.Context, tx pgx.Tx, activityID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `select gear_id::text from activity_gears where activity_id = $1`, activityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var gearID string
+		if err := rows.Scan(&gearID); err != nil {
+			return nil, err
+		}
+		out = append(out, gearID)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) verifiedGearIDsTx(ctx context.Context, tx pgx.Tx, gearIDs []string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		select id::text
+		from gears
+		where id::text = any($1::text[])
+	`, gearIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var gearID string
+		if err := rows.Scan(&gearID); err != nil {
+			return nil, err
+		}
+		out = append(out, gearID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) refreshGearUsageTx(ctx context.Context, tx pgx.Tx, gearID string) error {
+	_, err := tx.Exec(ctx, `
+		update gears
+		set total_distance_m = coalesce(stats.total_distance_m, 0),
+			first_used_at = stats.first_used_at,
+			last_used_at = stats.last_used_at
+		from (
+			select
+				sum(activities.distance_m) as total_distance_m,
+				min(activities.start_time) as first_used_at,
+				max(activities.start_time) as last_used_at
+			from activity_gears
+			join activities on activities.id = activity_gears.activity_id
+			where activity_gears.gear_id = $1::uuid
+		) as stats
+		where gears.id = $1::uuid
+	`, gearID)
+	return err
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, left := range a {
+		found := false
+		for _, right := range b {
+			if right == left {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func unionStringSet(a, b []string) []string {
+	items := make([]string, 0, len(a)+len(b))
+	seen := make(map[string]bool, len(a)+len(b))
+	for _, item := range append(a, b...) {
+		if seen[item] {
+			continue
+		}
+		seen[item] = true
+		items = append(items, item)
+	}
+	return items
 }
 
 func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummaryStats, error) {
