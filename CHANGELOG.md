@@ -8,6 +8,7 @@
 - Activity list columns can now be toggled, and long activity/gear names are clipped more aggressively to keep the list scannable.
 - Activity detail pages now support local-only notes that do not modify provider activities.
 - Activity detail pages can export a GPX track, with an option to include sensor extensions.
+- Profiling can be enabled with RUNNARR_ENABLE_PROFILING and optionally a dedicated RUNNARR_PROFILING_ADDR.
 - Garmin health sync now imports daily health metrics, including steps, calories, resting heart rate, sleep, stress, body battery, HRV, and body composition where Garmin provides them.
 - Added a Health page with date-range controls, Garmin health sync, summary cards, trend charts, selectable daily rows, and day-level details.
 - Body battery daily views now emphasize gained, drained, and highest values.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -55,6 +56,22 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	var profilingServer *http.Server
+	if cfg.EnableProfiling {
+		profilingServer = &http.Server{
+			Addr:              cfg.ProfilingAddr,
+			Handler:           http.DefaultServeMux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			logger.Info("pprof listening", "addr", cfg.ProfilingAddr)
+			if err := profilingServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("pprof server failed", "error", err)
+				stop()
+			}
+		}()
+	}
+
 	go func() {
 		logger.Info("runnarr listening", "addr", cfg.HTTPAddr)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -68,6 +85,14 @@ func main() {
 	defer cancel()
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown server", "error", err)
+	}
+
+	if profilingServer != nil {
+		profilingShutdownCtx, profilingCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer profilingCancel()
+		if err := profilingServer.Shutdown(profilingShutdownCtx); err != nil {
+			logger.Error("shutdown pprof server", "error", err)
+		}
 	}
 }
 

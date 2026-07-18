@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +16,8 @@ type Config struct {
 	AdminPassword      string
 	AdminPasswordHash  string
 	SecretKey          string
+	EnableProfiling    bool
+	ProfilingAddr      string
 	MapTileURL         string
 	StaticDir          string
 	MediaDir           string
@@ -31,6 +34,8 @@ func LoadConfig() (Config, error) {
 		AdminPassword:      env("RUNNARR_ADMIN_PASSWORD", ""),
 		AdminPasswordHash:  env("RUNNARR_ADMIN_PASSWORD_HASH", ""),
 		SecretKey:          env("RUNNARR_SECRET_KEY", ""),
+		EnableProfiling:    envBool("RUNNARR_ENABLE_PROFILING", false),
+		ProfilingAddr:      env("RUNNARR_PROFILING_ADDR", ":6060"),
 		MapTileURL:         env("MAP_TILE_URL", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"),
 		StaticDir:          env("RUNNARR_STATIC_DIR", "web/dist"),
 		MediaDir:           env("RUNNARR_MEDIA_DIR", "data/media"),
@@ -71,4 +76,16 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
