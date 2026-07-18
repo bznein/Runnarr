@@ -964,7 +964,7 @@ function HealthMetricsTable({
             <th>Date</th>
             <th>Steps</th>
             <th>Calories</th>
-            <th>Sleep</th>
+            <th>Sleep (h)</th>
             <th>RHR</th>
             <th>Stress</th>
             <th>Body battery</th>
@@ -3347,7 +3347,6 @@ function healthDetailItems(metric: DailyHealthMetric) {
     { label: "Light sleep", value: formatHealthDuration(metric.lightSleepS) },
     { label: "REM sleep", value: formatHealthDuration(metric.remSleepS) },
     { label: "Awake", value: formatHealthDuration(metric.awakeSleepS) },
-    { label: "Sleep score", value: formatHealthRounded(metric.sleepScore) },
     { label: "Average stress", value: formatHealthRounded(metric.stressAvg) },
     { label: "Maximum stress", value: formatHealthRounded(metric.stressMax) },
     { label: "Body battery gained", value: formatHealthRounded(metric.bodyBatteryGained) },
