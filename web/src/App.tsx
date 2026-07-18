@@ -8,9 +8,9 @@ import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
-import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
+import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
-import type { Activity, ActivityClimb, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, Gear, GearSummary, ImportFile, SyncJob } from "./types";
+import type { Activity, ActivityClimb, ActivityLap, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, Gear, GearSummary, ImportFile, SyncJob } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
@@ -32,6 +32,7 @@ type ActivityChartPoint = {
   power?: number;
   cadence?: number;
 };
+type RouteColorSource = "pace" | "gap";
 type ActivityChartSeries = {
   key: ActivityChartSeriesKey;
   label: string;
@@ -1854,6 +1855,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
   const [selectedClimbIndex, setSelectedClimbIndex] = useState<number | undefined>();
+  const [routeColorSource, setRouteColorSource] = useState<RouteColorSource>("pace");
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -1886,8 +1888,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const locatedMedia = mediaItems.filter(hasMediaLocation);
   const routePoints = routeForActivity(item);
   const canExportGPX = canExportActivityGPX(item);
-  const paceScale = paceScaleForActivity(item);
-  const paceRouteSegments = paceRouteSegmentsForActivity(item, paceScale);
+  const routeUsesGap = (item.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  const paceScale = paceScaleForActivity(item, "pace");
+  const routePaceScale = paceScaleForActivity(item, routeColorSource);
+  const paceRouteSegments = paceRouteSegmentsForActivity(item, routePaceScale, routeColorSource);
   const chartData = chartDataFor(item.samples ?? [], paceScale);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
   const climbs = item.climbs ?? [];
@@ -1923,6 +1927,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     uploadMedia.reset();
     uploadMedia.mutate(files);
   };
+
+  useEffect(() => {
+    if (!routeUsesGap) {
+      setRouteColorSource("pace");
+    }
+  }, [item.id, routeUsesGap]);
 
   return (
     <Page
@@ -2025,7 +2035,27 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
 
       {(routePoints.length > 1 || locatedMedia.length > 0) && (
         <section className="panel">
-          <div className="panel-heading">Route</div>
+          <div className="route-panel-header">
+            <div className="panel-heading">Route</div>
+            {routeUsesGap && (
+              <div className="segmented-control route-color-source-control" role="group" aria-label="Route color source">
+                <button
+                  type="button"
+                  className={routeColorSource === "pace" ? "active" : ""}
+                  onClick={() => setRouteColorSource("pace")}
+                >
+                  Pace
+                </button>
+                <button
+                  type="button"
+                  className={routeColorSource === "gap" ? "active" : ""}
+                  onClick={() => setRouteColorSource("gap")}
+                >
+                  GAP
+                </button>
+              </div>
+            )}
+          </div>
           <ActivityMap
             points={routePoints}
             paceSegments={paceRouteSegments}
@@ -2037,6 +2067,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             mediaMarkers={locatedMedia}
             selectedMediaId={selectedMediaId}
             onSelectMedia={setSelectedMediaId}
+            routeColorSource={routeColorSource}
           />
         </section>
       )}
@@ -3562,7 +3593,8 @@ function ActivityMap({
   onSelectClimb,
   mediaMarkers = [],
   selectedMediaId,
-  onSelectMedia
+  onSelectMedia,
+  routeColorSource
 }: {
   points: RoutePoint[];
   paceSegments?: PaceRouteSegment[];
@@ -3574,6 +3606,7 @@ function ActivityMap({
   mediaMarkers?: ActivityMedia[];
   selectedMediaId?: string;
   onSelectMedia?: (mediaId: string) => void;
+  routeColorSource?: RouteColorSource;
 }) {
   const mediaPoints = mediaMarkers.map(mediaRoutePoint).filter((point): point is RoutePoint => Boolean(point));
   const mapPoints = [...points, ...mediaPoints];
@@ -3595,17 +3628,18 @@ function ActivityMap({
         <ActivityMediaMapMarkers mediaMarkers={mediaMarkers} selectedMediaId={selectedMediaId} onSelectMedia={onSelectMedia} />
         <FitMapContent points={mapPoints} />
       </MapContainer>
-      {paceSegments.length > 0 && <ActivityPaceRouteLegend />}
+      {paceSegments.length > 0 && <ActivityPaceRouteLegend source={routeColorSource ?? "pace"} />}
     </div>
   );
 }
 
-function ActivityPaceRouteLegend() {
+function ActivityPaceRouteLegend({ source }: { source: RouteColorSource }) {
+  const label = source === "gap" ? "GAP" : "pace";
   return (
     <div className="pace-route-legend" aria-label="Route pace color legend">
-      <span>slowest</span>
+      <span>slowest {label}</span>
       <span className="pace-route-legend-gradient" style={{ background: `linear-gradient(to right, ${PACE_ROUTE_COLORS.join(", ")})` }} />
-      <span>fastest</span>
+      <span>fastest {label}</span>
     </div>
   );
 }
@@ -3791,16 +3825,29 @@ function canExportActivityGPX(activity: Activity) {
   return (activity.samples ?? []).filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number").length > 1;
 }
 
-function paceScaleForActivity(activity: Activity) {
+function paceScaleForActivity(activity: Activity, source: RouteColorSource = "pace") {
+  if (source === "gap") {
+    const gapPaces = (activity.samples ?? [])
+      .map((sample) => lapGapPaceForSample(activity.laps ?? [], sample))
+      .filter((pace): pace is number => typeof pace === "number" && Number.isFinite(pace) && pace > 0);
+    if (gapPaces.length > 0) {
+      return paceScaleFromPaces(gapPaces);
+    }
+  }
   return paceScaleFromSpeeds((activity.samples ?? []).map((sample) => sample.speedMPS));
 }
 
-function paceRouteSegmentsForActivity(activity: Activity, paceScale?: PaceDisplayScale): PaceRouteSegment[] {
+function paceRouteSegmentsForActivity(
+  activity: Activity,
+  paceScale?: PaceDisplayScale,
+  source: RouteColorSource = "pace"
+): PaceRouteSegment[] {
   const samples = (activity.samples ?? [])
     .filter((sample) => typeof sample.latitude === "number" && typeof sample.longitude === "number")
     .map((sample) => ({
       point: [sample.latitude!, sample.longitude!] as RoutePoint,
-      speedMPS: typeof sample.speedMPS === "number" && Number.isFinite(sample.speedMPS) && sample.speedMPS > 0 ? sample.speedMPS : undefined
+      speedMPS: typeof sample.speedMPS === "number" && Number.isFinite(sample.speedMPS) && sample.speedMPS > 0 ? sample.speedMPS : undefined,
+      gapPaceSPKM: lapGapPaceForSample(activity.laps ?? [], sample)
     }));
   if (samples.length < 2) {
     return [];
@@ -3808,7 +3855,9 @@ function paceRouteSegmentsForActivity(activity: Activity, paceScale?: PaceDispla
 
   const segments: Array<{ start: RoutePoint; end: RoutePoint; paceSPKM: number }> = [];
   for (let index = 1; index < samples.length; index += 1) {
-    const paceSPKM = paceForRouteSegment(samples[index - 1].speedMPS, samples[index].speedMPS);
+    const paceSPKM = source === "gap" ? (
+      samples[index].gapPaceSPKM ?? samples[index - 1].gapPaceSPKM ?? paceForRouteSegment(samples[index - 1].speedMPS, samples[index].speedMPS)
+    ) : paceForRouteSegment(samples[index - 1].speedMPS, samples[index].speedMPS);
     if (paceSPKM === undefined) {
       continue;
     }
@@ -3837,6 +3886,23 @@ function paceForRouteSegment(previousSpeedMPS?: number, currentSpeedMPS?: number
   }
   const avgSpeedMPS = speeds.reduce((total, speed) => total + speed, 0) / speeds.length;
   return speedToPaceSPKM(avgSpeedMPS);
+}
+
+function lapGapPaceForSample(laps: ActivityLap[], sample: ActivitySample): number | undefined {
+  if (typeof sample.distanceM !== "number" || !Number.isFinite(sample.distanceM)) {
+    return undefined;
+  }
+  let lapStartDistance = 0;
+  const sortedLaps = laps.slice().sort((left, right) => left.index - right.index);
+  for (const lap of sortedLaps) {
+    const lapEndDistance = lapStartDistance + (typeof lap.distanceM === "number" ? lap.distanceM : 0);
+    if (sample.distanceM >= lapStartDistance && sample.distanceM <= lapEndDistance) {
+      return lap.avgGradeAdjustedPaceSPKM;
+    }
+    lapStartDistance = lapEndDistance;
+  }
+  const fallbackLap = sortedLaps.find((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  return fallbackLap?.avgGradeAdjustedPaceSPKM;
 }
 
 function routePointsEqual(left?: RoutePoint, right?: RoutePoint) {
