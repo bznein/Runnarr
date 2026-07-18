@@ -162,5 +162,6 @@ export const api = {
       body: JSON.stringify(range ?? {})
     }),
   garminGearSync: () => request<{ jobId: string; status: string }>("/api/providers/garmin/gear-sync", { method: "POST" }),
-  syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
+  syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs"),
+  cancelSyncJob: (jobId: string) => request<{ jobId: string; canceled: boolean }>(`/api/sync-jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" })
 };

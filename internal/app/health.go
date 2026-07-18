@@ -24,6 +24,9 @@ func (s *GarminService) SyncHealth(ctx context.Context, opts GarminHealthSyncOpt
 	if progress == nil {
 		progress = func(map[string]any) {}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if _, connected, err := s.Status(ctx); err != nil {
 		return nil, err
 	} else if !connected {
@@ -46,6 +49,9 @@ func (s *GarminService) SyncHealth(ctx context.Context, opts GarminHealthSyncOpt
 
 	processed := 0
 	for current := from; !current.After(to); current = current.AddDate(0, 0, 1) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		currentDate := current.Format("2006-01-02")
 		progress(map[string]any{"provider": garminProvider, "kind": "health", "stage": "Fetching Garmin health", "days": days, "processed": processed, "saved": saved, "failed": failed, "currentDate": currentDate, "from": from.Format("2006-01-02"), "to": to.Format("2006-01-02")})
 

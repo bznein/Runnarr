@@ -1361,6 +1361,11 @@ textarea {
   color: var(--color-danger-strong);
 }
 
+.status.canceled {
+  background: var(--color-danger-muted);
+  color: var(--color-danger-strong);
+}
+
 .row-error {
   display: block;
   margin-top: 4px;

@@ -1047,6 +1047,19 @@ func (s *Store) HasRunningSyncJob(ctx context.Context, provider string) (bool, e
 	return exists, err
 }
 
+func (s *Store) CancelSyncJob(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.Exec(ctx, `
+		update sync_jobs
+		set status = 'canceled', error = 'Canceled by user', finished_at = now()
+		where id = $1 and status = 'running'
+	`, id)
+	if err != nil {
+		return false, err
+	}
+	rows := res.RowsAffected()
+	return rows > 0, nil
+}
+
 func (s *Store) LatestSyncJobCreatedAt(ctx context.Context, provider, kind string) (time.Time, bool, error) {
 	var createdAt time.Time
 	err := s.db.QueryRow(ctx, `

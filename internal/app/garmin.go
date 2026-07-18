@@ -159,6 +159,9 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 	if progress == nil {
 		progress = func(map[string]any) {}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if _, connected, err := s.Status(ctx); err != nil {
 		return nil, err
 	} else if !connected {
@@ -184,6 +187,9 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 	skippedExcluded := 0
 	firstErrors := make([]string, 0, 5)
 	for index, source := range activities {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		processed := index + 1
 		payload := map[string]any{
 			"provider":            garminProvider,
@@ -260,6 +266,9 @@ func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgres
 	if progress == nil {
 		progress = func(map[string]any) {}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if _, connected, err := s.Status(ctx); err != nil {
 		return nil, err
 	} else if !connected {
@@ -281,6 +290,9 @@ func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgres
 	warnings := make([]string, 0)
 	totalGear := len(response.Gear)
 	for index, source := range response.Gear {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		processed := index + 1
 		progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin gear", "gear": totalGear, "processed": index, "saved": saved, "assignments": assignments, "localAssignments": localAssignments, "currentGearName": source.Name, "warnings": warnings})
 
@@ -343,6 +355,9 @@ func (s *GarminService) gearActivitySourceIDs(ctx context.Context, gearID string
 	sourceIDs := make([]string, 0)
 	fetched := 0
 	for start := 0; ; {
+		if err := ctx.Err(); err != nil {
+			return nil, fetched, err
+		}
 		page, err := s.bridge.ListGearActivities(ctx, s.tokenDir, gearID, start, garminGearActivityPageLimit)
 		if err != nil {
 			return sourceIDs, fetched, err
@@ -378,6 +393,9 @@ func appendGarminGearSyncWarning(warnings []string, gearName string, err error) 
 func (s *GarminService) listActivitiesSince(ctx context.Context, oldest time.Time, progress GarminSyncProgress) ([]GarminBridgeActivity, error) {
 	out := make([]GarminBridgeActivity, 0)
 	for start := 0; ; {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		page, err := s.bridge.ListActivities(ctx, s.tokenDir, start, garminActivityPageLimit)
 		if err != nil {
 			return nil, err

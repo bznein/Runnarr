@@ -21,6 +21,8 @@
 
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
+- Health detail now treats sleep as duration only and no longer presents a separate “sleep score” field in the detail panel.
+- Added a user-facing sync cancel path for running Garmin sync/health/gear jobs so syncs can be stopped without waiting for completion.
 
 ## 0.3.0 - 2026-07-16
 

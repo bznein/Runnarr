@@ -13,9 +13,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
@@ -24,13 +26,15 @@ import (
 const sessionCookieName = "runnarr_session"
 
 type Server struct {
-	cfg       Config
-	store     *Store
-	imports   *ImportService
-	garmin    *GarminService
-	media     *MediaService
-	logger    *slog.Logger
-	adminHash []byte
+	cfg           Config
+	store         *Store
+	imports       *ImportService
+	garmin        *GarminService
+	media         *MediaService
+	logger        *slog.Logger
+	adminHash     []byte
+	syncCancelsMu sync.RWMutex
+	syncCancels   map[string]context.CancelFunc
 }
 
 func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
@@ -44,19 +48,21 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		}
 	}
 	return &Server{
-		cfg:       cfg,
-		store:     store,
-		imports:   NewImportService(store),
-		garmin:    NewGarminService(cfg, store),
-		media:     NewMediaService(cfg, store),
-		logger:    logger,
-		adminHash: adminHash,
+		cfg:         cfg,
+		store:       store,
+		imports:     NewImportService(store),
+		garmin:      NewGarminService(cfg, store),
+		media:       NewMediaService(cfg, store),
+		logger:      logger,
+		adminHash:   adminHash,
+		syncCancels: make(map[string]context.CancelFunc),
 	}, nil
 }
 
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(s.recoverer)
+	r.Use(s.logRequest)
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -92,6 +98,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/providers/garmin/health-sync", s.handleGarminHealthSync)
 			r.Post("/providers/garmin/gear-sync", s.handleGarminGearSync)
 			r.Get("/sync-jobs", s.handleSyncJobs)
+			r.Post("/sync-jobs/{jobID}/cancel", s.handleCancelSyncJob)
 		})
 	})
 
@@ -104,13 +111,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.logger.Warn("login invalid payload", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if err := bcrypt.CompareHashAndPassword(s.adminHash, []byte(body.Password)); err != nil {
+		s.logger.Warn("login invalid password", "remote_addr", r.RemoteAddr)
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
+	s.logger.Info("admin login", "remote_addr", r.RemoteAddr)
 	csrf, err := randomToken()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create session")
@@ -150,6 +160,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
 		_ = s.store.DeleteSession(r.Context(), cookie.Value)
 	}
+	s.logger.Info("admin logout", "remote_addr", r.RemoteAddr)
 	http.SetCookie(w, s.sessionCookie("", -1*time.Hour))
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 }
@@ -350,6 +361,7 @@ func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 		Notes *string `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.logger.Warn("activity update invalid payload", "activity_id", chi.URLParam(r, "id"), "error", err)
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -518,6 +530,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGarminSync(w http.ResponseWriter, r *http.Request) {
 	opts, err := decodeGarminSyncOptions(r)
 	if err != nil {
+		s.logger.Warn("garmin sync request invalid payload", "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -528,6 +541,7 @@ func (s *Server) handleGarminSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if running {
+		s.logger.Warn("garmin sync request rejected; sync already running")
 		writeError(w, http.StatusConflict, "Garmin sync is already running")
 		return
 	}
@@ -538,12 +552,18 @@ func (s *Server) handleGarminSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go s.runGarminManualSyncJob(jobID, opts)
+	oldest := "all"
+	if !opts.Oldest.IsZero() {
+		oldest = opts.Oldest.Format("2006-01-02")
+	}
+	s.logger.Info("garmin sync job created", "job_id", jobID, "oldest", oldest)
 	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
 }
 
 func (s *Server) handleGarminHealthSync(w http.ResponseWriter, r *http.Request) {
 	opts, err := decodeGarminHealthSyncOptions(r)
 	if err != nil {
+		s.logger.Warn("garmin health sync request invalid payload", "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -554,6 +574,7 @@ func (s *Server) handleGarminHealthSync(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if running {
+		s.logger.Warn("garmin health sync request rejected; sync already running")
 		writeError(w, http.StatusConflict, "Garmin sync is already running")
 		return
 	}
@@ -564,6 +585,7 @@ func (s *Server) handleGarminHealthSync(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	go s.runGarminManualHealthSyncJob(jobID, opts)
+	s.logger.Info("garmin health sync job created", "job_id", jobID)
 	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
 }
 
@@ -575,6 +597,7 @@ func (s *Server) handleGarminGearSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if running {
+		s.logger.Warn("garmin gear sync request rejected; sync already running")
 		writeError(w, http.StatusConflict, "Garmin sync is already running")
 		return
 	}
@@ -585,6 +608,7 @@ func (s *Server) handleGarminGearSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go s.runGarminManualGearSyncJob(jobID)
+	s.logger.Info("garmin gear sync job created", "job_id", jobID)
 	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
 }
 
@@ -597,8 +621,62 @@ func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
+func (s *Server) handleCancelSyncJob(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "jobID")
+	if strings.TrimSpace(jobID) == "" {
+		writeError(w, http.StatusBadRequest, "missing sync job id")
+		return
+	}
+
+	wasRunning, err := s.store.CancelSyncJob(r.Context(), jobID)
+	if err != nil {
+		s.logger.Error("cancel sync job request", "job_id", jobID, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not cancel sync job")
+		return
+	}
+	if wasRunning {
+		s.cancelSyncJob(jobID)
+	}
+
+	if wasRunning {
+		writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "canceled": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "canceled": false})
+}
+
 func (s *Server) StartBackgroundSync(ctx context.Context) {
 	go s.runGarminScheduledSync(ctx)
+}
+
+func (s *Server) syncJobContext(jobID string, parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	timeoutCtx, timeoutCancel := context.WithTimeout(parent, timeout)
+	ctx, stop := context.WithCancel(timeoutCtx)
+	s.syncCancelsMu.Lock()
+	s.syncCancels[jobID] = stop
+	s.syncCancelsMu.Unlock()
+	cleanup := func() {
+		s.syncCancelsMu.Lock()
+		delete(s.syncCancels, jobID)
+		s.syncCancelsMu.Unlock()
+		timeoutCancel()
+		stop()
+	}
+	return ctx, cleanup
+}
+
+func (s *Server) cancelSyncJob(jobID string) bool {
+	s.syncCancelsMu.Lock()
+	cancel, ok := s.syncCancels[jobID]
+	if ok {
+		delete(s.syncCancels, jobID)
+	}
+	s.syncCancelsMu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
 }
 
 func (s *Server) runGarminScheduledSync(ctx context.Context) {
@@ -630,21 +708,26 @@ func (s *Server) runGarminScheduledSyncOnce(ctx context.Context) {
 		s.logger.Error("create scheduled garmin sync job", "error", err)
 		return
 	}
-	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
+	syncCtx, cleanup := s.syncJobContext(jobID, ctx, 30*time.Minute)
+	defer cleanup()
 	oldest := time.Now().UTC().AddDate(0, 0, -30)
 	if _, err := s.finishGarminSyncJob(syncCtx, jobID, GarminSyncOptions{Oldest: oldest}); err != nil {
 		s.logger.Error("scheduled garmin sync", "error", err)
+		return
 	}
 	s.runGarminScheduledHealthSyncOnce(ctx)
 }
 
 func (s *Server) runGarminManualSyncJob(jobID string, opts GarminSyncOptions) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
-	defer cancel()
+	start := time.Now()
+	s.logger.Info("garmin manual sync started", "job_id", jobID)
+	ctx, cleanup := s.syncJobContext(jobID, context.Background(), 6*time.Hour)
+	defer cleanup()
 	if _, err := s.finishGarminSyncJob(ctx, jobID, opts); err != nil {
-		s.logger.Error("manual garmin sync", "job_id", jobID, "error", err)
+		s.logger.Error("garmin manual sync failed", "job_id", jobID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
+		return
 	}
+	s.logger.Info("garmin manual sync completed", "job_id", jobID, "duration_ms", time.Since(start).Milliseconds())
 }
 
 func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts GarminSyncOptions) (map[string]any, error) {
@@ -655,7 +738,11 @@ func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts Gar
 	}
 	payload, err := s.garmin.Sync(ctx, opts, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		status := "failed"
+		if errors.Is(err, context.Canceled) {
+			status = "canceled"
+		}
+		_ = s.store.FinishSyncJob(ctx, jobID, status, err.Error(), nil)
 		return nil, err
 	}
 	gearPayload, gearErr := s.garmin.SyncGear(ctx, progress)
@@ -689,8 +776,8 @@ func (s *Server) runGarminScheduledHealthSyncOnce(ctx context.Context) {
 		s.logger.Error("create scheduled garmin health sync job", "error", err)
 		return
 	}
-	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
+	syncCtx, cleanup := s.syncJobContext(jobID, ctx, 30*time.Minute)
+	defer cleanup()
 	to := time.Now().UTC()
 	from := to.AddDate(0, 0, -(garminHealthScheduledRefreshDays - 1))
 	if _, err := s.finishGarminHealthSyncJob(syncCtx, jobID, GarminHealthSyncOptions{From: from, To: to}); err != nil {
@@ -710,19 +797,42 @@ func (s *Server) garminScheduledHealthSyncDue(ctx context.Context) (bool, error)
 }
 
 func (s *Server) runGarminManualHealthSyncJob(jobID string, opts GarminHealthSyncOptions) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
-	defer cancel()
+	start := time.Now()
+	s.logger.Info("garmin manual health sync started", "job_id", jobID)
+	ctx, cleanup := s.syncJobContext(jobID, context.Background(), 6*time.Hour)
+	defer cleanup()
 	if _, err := s.finishGarminHealthSyncJob(ctx, jobID, opts); err != nil {
-		s.logger.Error("manual garmin health sync", "job_id", jobID, "error", err)
+		s.logger.Error("garmin manual health sync failed", "job_id", jobID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
+		return
 	}
+	s.logger.Info("garmin manual health sync completed", "job_id", jobID, "duration_ms", time.Since(start).Milliseconds())
 }
 
 func (s *Server) runGarminManualGearSyncJob(jobID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-	defer cancel()
+	start := time.Now()
+	s.logger.Info("garmin manual gear sync started", "job_id", jobID)
+	ctx, cleanup := s.syncJobContext(jobID, context.Background(), 2*time.Hour)
+	defer cleanup()
 	if _, err := s.finishGarminGearSyncJob(ctx, jobID); err != nil {
-		s.logger.Error("manual garmin gear sync", "job_id", jobID, "error", err)
+		s.logger.Error("garmin manual gear sync failed", "job_id", jobID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
+		return
 	}
+	s.logger.Info("garmin manual gear sync completed", "job_id", jobID, "duration_ms", time.Since(start).Milliseconds())
+}
+
+func (s *Server) logRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		writer := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		start := time.Now()
+		next.ServeHTTP(writer, r)
+		duration := time.Since(start)
+		s.logger.Info("api request", "method", r.Method, "path", r.URL.Path, "status", writer.Status(), "bytes", writer.BytesWritten(), "duration_ms", duration.Milliseconds())
+	})
 }
 
 func (s *Server) finishGarminGearSyncJob(ctx context.Context, jobID string) (map[string]any, error) {
@@ -733,7 +843,11 @@ func (s *Server) finishGarminGearSyncJob(ctx context.Context, jobID string) (map
 	}
 	payload, err := s.garmin.SyncGear(ctx, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		status := "failed"
+		if errors.Is(err, context.Canceled) {
+			status = "canceled"
+		}
+		_ = s.store.FinishSyncJob(ctx, jobID, status, err.Error(), nil)
 		return nil, err
 	}
 	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
@@ -750,7 +864,11 @@ func (s *Server) finishGarminHealthSyncJob(ctx context.Context, jobID string, op
 	}
 	payload, err := s.garmin.SyncHealth(ctx, opts, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		status := "failed"
+		if errors.Is(err, context.Canceled) {
+			status = "canceled"
+		}
+		_ = s.store.FinishSyncJob(ctx, jobID, status, err.Error(), nil)
 		return nil, err
 	}
 	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {

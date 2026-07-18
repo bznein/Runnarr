@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, Square, StickyNote, Sun, Trash2, Upload, X } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -2997,6 +2997,13 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   if (!job || job.provider !== "garmin") {
     return null;
   }
+  const queryClient = useQueryClient();
+  const cancelSync = useMutation({
+    mutationFn: api.cancelSyncJob,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["sync-jobs"] });
+    }
+  });
   const healthSync = isHealthSyncJob(job);
   const gearSync = isGearSyncJob(job);
   const payload = job.payload ?? {};
@@ -3032,6 +3039,17 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
       <div className="filter-header">
         <div className="panel-heading">{gearSync ? "Garmin gear sync progress" : healthSync ? "Garmin health sync progress" : "Garmin sync progress"}</div>
         <span className={`status ${job.status}`}>{job.status}</span>
+        {job.status === "running" && (
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => cancelSync.mutate(job.id)}
+            disabled={cancelSync.isPending}
+          >
+            <Square size={16} />
+            {cancelSync.isPending ? "Cancelling" : "Cancel"}
+          </button>
+        )}
       </div>
       <SyncProgressBar job={job} />
       <div className="sync-progress-grid">
@@ -3076,6 +3094,7 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
           {firstErrors.map((message) => <span key={`error-${message}`}>{message}</span>)}
         </div>
       )}
+      {cancelSync.error && <div className="error">{cancelSync.error instanceof Error ? cancelSync.error.message : "Failed to cancel sync job"}</div>}
     </section>
   );
 }
