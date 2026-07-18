@@ -1097,11 +1097,11 @@ function GearPage() {
   }, [latestGearJob?.id, latestGearJob?.status, queryClient]);
 
   return (
-    <Page
+        <Page
       title="Gear"
       actions={
         <>
-          <label className="field compact-field" htmlFor="gear-sort-by">
+          <label className="compact-field gear-sort-control" htmlFor="gear-sort-by">
             <span>Sort by</span>
             <select
               id="gear-sort-by"

@@ -1636,6 +1636,14 @@ textarea {
   font-weight: 680;
 }
 
+.gear-sort-control {
+  align-items: center;
+}
+
+.gear-sort-control select {
+  height: 40px;
+}
+
 .sync-progress-panel {
   display: grid;
   gap: 14px;
