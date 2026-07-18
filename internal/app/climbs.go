@@ -118,16 +118,16 @@ func detectClimbsFromPoints(points []climbPoint, profile climbActivityProfile) [
 		current := points[index]
 
 		if !inClimb {
-		if current.elevationM <= points[index-1].elevationM {
-			lowIndex = index
-			continue
-		}
-		gain := current.elevationM - points[lowIndex].elevationM
-		distance := current.distanceM - points[lowIndex].distanceM
-		if gain >= profile.climbStartGainM && averageGradePct(gain, distance) >= profile.minClimbAverageGradePct {
-			inClimb = true
-			startIndex = lowIndex
-			peakIndex = index
+			if current.elevationM <= points[index-1].elevationM {
+				lowIndex = index
+				continue
+			}
+			gain := current.elevationM - points[lowIndex].elevationM
+			distance := current.distanceM - points[lowIndex].distanceM
+			if gain >= profile.climbStartGainM && averageGradePct(gain, distance) >= profile.minClimbAverageGradePct {
+				inClimb = true
+				startIndex = lowIndex
+				peakIndex = index
 				dipLowIndex = index
 			}
 			continue
