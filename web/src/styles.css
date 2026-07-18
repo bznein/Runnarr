@@ -1172,6 +1172,20 @@ textarea {
   font-size: 18px;
 }
 
+.gear-distance-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.gear-distance-meta strong {
+  color: var(--color-heading);
+  font-size: 14px;
+}
+
 .gear-progress {
   height: 8px;
   overflow: hidden;
@@ -1856,12 +1870,17 @@ textarea {
 }
 
 .field input,
+.field select,
 .upload-panel input {
   min-height: 40px;
   padding: 0 10px;
   border: 1px solid var(--color-border-control);
   border-radius: 6px;
   background: var(--color-surface);
+}
+
+.field select {
+  color: var(--color-text);
 }
 
 .error {

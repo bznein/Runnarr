@@ -62,6 +62,7 @@ type Gear struct {
 	MaxDistanceM         *float64       `json:"maxDistanceM,omitempty"`
 	FirstUsedAt          *time.Time     `json:"firstUsedAt,omitempty"`
 	LastUsedAt           *time.Time     `json:"lastUsedAt,omitempty"`
+	ActivityCount        int            `json:"activityCount,omitempty"`
 	DefaultActivityTypes []string       `json:"defaultActivityTypes,omitempty"`
 	Raw                  map[string]any `json:"raw,omitempty"`
 	StatsRaw             map[string]any `json:"statsRaw,omitempty"`

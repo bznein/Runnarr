@@ -16,6 +16,7 @@ type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
 type HealthDateRange = { from: string; to: string };
+type GearSortBy = "first_used" | "last_used" | "activity_count" | "distance" | "distance_percent";
 type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
@@ -78,6 +79,7 @@ const garminHealthDefaultDays = 90;
 const healthBarChartMaxDays = 30;
 const themePreferenceStorageKey = "runnarr-theme-preference";
 const activityColumnsStorageKey = "runnarr-activity-list-columns";
+const gearSortByStorageKey = "runnarr-gear-sort-by";
 const activityTableColumnOptions: Array<{ key: ActivityTableColumnKey; label: string }> = [
   { key: "date", label: "Date" },
   { key: "type", label: "Type" },
@@ -89,6 +91,14 @@ const activityTableColumnOptions: Array<{ key: ActivityTableColumnKey; label: st
 ];
 const defaultActivityTableColumns: ActivityTableColumnKey[] = activityTableColumnOptions.map((option) => option.key);
 const compactActivityTableColumns: ActivityTableColumnKey[] = ["date", "distance", "time"];
+const defaultGearSortBy: GearSortBy = "distance_percent";
+const gearSortByOptions: Array<{ value: GearSortBy; label: string }> = [
+  { value: "distance", label: "Total distance" },
+  { value: "distance_percent", label: "Percent of distance limit" },
+  { value: "last_used", label: "Last used" },
+  { value: "first_used", label: "First used" },
+  { value: "activity_count", label: "Activity count" }
+];
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
 const chartTooltipContentStyle: CSSProperties = {
@@ -174,6 +184,23 @@ function readStoredActivityTableColumns(): ActivityTableColumnKey[] {
 function storeActivityTableColumns(columns: ActivityTableColumnKey[]) {
   try {
     window.localStorage.setItem(activityColumnsStorageKey, JSON.stringify(columns));
+  } catch {
+    // Local storage can be unavailable in private or restricted browser contexts.
+  }
+}
+
+function readStoredGearSortBy(): GearSortBy {
+  try {
+    const raw = window.localStorage.getItem(gearSortByStorageKey);
+    return isGearSortBy(raw) ? raw : defaultGearSortBy;
+  } catch {
+    return defaultGearSortBy;
+  }
+}
+
+function storeGearSortBy(sortBy: GearSortBy) {
+  try {
+    window.localStorage.setItem(gearSortByStorageKey, sortBy);
   } catch {
     // Local storage can be unavailable in private or restricted browser contexts.
   }
@@ -1038,10 +1065,17 @@ function GearPage() {
       ]);
     }
   });
+  const [gearSortBy, setGearSortBy] = useState<GearSortBy>(readStoredGearSortBy);
   const activeGear = gears.data?.active ?? [];
   const retiredGear = gears.data?.retired ?? [];
   const allGear = gears.data?.gear ?? [];
+  const sortedActiveGear = sortGears(activeGear, gearSortBy);
+  const sortedRetiredGear = sortGears(retiredGear, gearSortBy);
   const syncDisabled = !garminStatus.data?.connected || gearSync.isPending || anyGarminSyncRunning;
+
+  useEffect(() => {
+    storeGearSortBy(gearSortBy);
+  }, [gearSortBy]);
 
   useEffect(() => {
     if (!latestGearJob || latestGearJob.status === "running") {
@@ -1054,10 +1088,26 @@ function GearPage() {
     <Page
       title="Gear"
       actions={
-        <button className="primary-button" type="button" disabled={syncDisabled} onClick={() => gearSync.mutate()}>
-          <RefreshCw size={16} />
-          {gearSyncRunning ? "Syncing" : "Sync gear"}
-        </button>
+        <>
+          <label className="field compact-field" htmlFor="gear-sort-by">
+            <span>Sort by</span>
+            <select
+              id="gear-sort-by"
+              value={gearSortBy}
+              onChange={(event) => setGearSortBy(event.target.value as GearSortBy)}
+            >
+              {gearSortByOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="primary-button" type="button" disabled={syncDisabled} onClick={() => gearSync.mutate()}>
+            <RefreshCw size={16} />
+            {gearSyncRunning ? "Syncing" : "Sync gear"}
+          </button>
+        </>
       }
     >
       <SyncProgressCard job={latestGearJob} />
@@ -1077,8 +1127,8 @@ function GearPage() {
           )}
         />
       )}
-      {activeGear.length > 0 && <GearSection title="Active gear" gear={activeGear} />}
-      {retiredGear.length > 0 && <GearSection title="Retired gear" gear={retiredGear} retired />}
+      {sortedActiveGear.length > 0 && <GearSection title="Active gear" gear={sortedActiveGear} />}
+      {sortedRetiredGear.length > 0 && <GearSection title="Retired gear" gear={sortedRetiredGear} retired />}
     </Page>
   );
 }
@@ -1111,25 +1161,30 @@ function GearCard({ gear, retired = false }: { gear: Gear; retired?: boolean }) 
   );
 }
 
-function GearDistanceBlock({ gear }: { gear: GearSummary }) {
+function GearDistanceBlock({ gear }: { gear: Gear }) {
   if (!isFiniteNumber(gear.totalDistanceM)) {
     return null;
   }
   const total = gear.totalDistanceM;
   const max = isFiniteNumber(gear.maxDistanceM) && gear.maxDistanceM > 0 ? gear.maxDistanceM : undefined;
-  const percent = max ? Math.min(100, Math.round((total / max) * 100)) : 0;
+  const usagePercent = gearDistanceUsagePercentRaw(total, max);
+  const usagePercentLabel = gearDistanceUsagePercent(total, max);
   return (
     <div className="gear-distance-block">
       <div className="gear-distance-label">
         <span>Total distance</span>
         <strong>{formatGearDistance(total)}</strong>
       </div>
+      <div className="gear-distance-meta">
+        <span>Activities</span>
+        <strong>{formatGearActivityCount(gear.activityCount)}</strong>
+      </div>
       {max && (
         <>
-          <div className="gear-progress" aria-label={`Gear distance ${percent}%`}>
-            <span style={{ width: `${percent}%` }} />
+          <div className="gear-progress" aria-label={`Gear distance ${usagePercentLabel}`}>
+            <span style={{ width: `${usagePercent}%` }} />
           </div>
-          <div className="gear-progress-label">{formatGearDistance(total)} of {formatGearDistance(max)}</div>
+          <div className="gear-progress-label">{formatGearDistance(total)} of {formatGearDistance(max)} · {usagePercentLabel}</div>
         </>
       )}
     </div>
@@ -3972,6 +4027,52 @@ function parseActivitySortBy(value: string | null): ActivitySortBy {
   return activitySortOptions().some((option) => option.value === value) ? (value as ActivitySortBy) : defaultActivitySort.sortBy;
 }
 
+function isGearSortBy(value: string | null): value is GearSortBy {
+  return gearSortByOptions.some((option) => option.value === value);
+}
+
+function sortGears(gears: Gear[], sortBy: GearSortBy) {
+  return [...gears].sort((left, right) => {
+    const leftValue = gearSortValue(left, sortBy);
+    const rightValue = gearSortValue(right, sortBy);
+    if ((leftValue ?? Number.NEGATIVE_INFINITY) > (rightValue ?? Number.NEGATIVE_INFINITY)) {
+      return -1;
+    }
+    if ((leftValue ?? Number.NEGATIVE_INFINITY) < (rightValue ?? Number.NEGATIVE_INFINITY)) {
+      return 1;
+    }
+    const leftName = gearDisplayName(left);
+    const rightName = gearDisplayName(right);
+    return leftName.localeCompare(rightName);
+  });
+}
+
+function gearSortValue(gear: Gear, sortBy: GearSortBy): number {
+  switch (sortBy) {
+    case "activity_count":
+      return typeof gear.activityCount === "number" && Number.isFinite(gear.activityCount) ? gear.activityCount : Number.NEGATIVE_INFINITY;
+    case "first_used":
+      return parseGearDate(gear.firstUsedAt);
+    case "last_used":
+      return parseGearDate(gear.lastUsedAt);
+    case "distance_percent": {
+      const percent = gearDistanceUsagePercentRaw(gear.totalDistanceM, gear.maxDistanceM);
+      return Number.isFinite(percent) ? percent : Number.NEGATIVE_INFINITY;
+    }
+    case "distance":
+    default:
+      return isFiniteNumber(gear.totalDistanceM) ? gear.totalDistanceM : Number.NEGATIVE_INFINITY;
+  }
+}
+
+function parseGearDate(value?: string): number {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
+}
+
 function parseActivitySortOrder(value: string | null) {
   return value === "asc" || value === "desc" ? value : defaultActivitySort.sortOrder;
 }
@@ -4339,6 +4440,7 @@ function gearDetailItems(gear: Gear) {
     { label: "Brand", value: gear.brand?.trim() ?? "" },
     { label: "Model", value: gear.model?.trim() ?? "" },
     { label: "Garmin distance", value: formatOptionalGearDistance(gear.totalDistanceM) },
+    { label: "Activity count", value: formatGearActivityCount(gear.activityCount) },
     { label: "Distance limit", value: formatOptionalGearDistance(gear.maxDistanceM) },
     { label: "First used", value: formatOptionalDate(gear.firstUsedAt) },
     { label: "Last used", value: formatOptionalDate(gear.lastUsedAt) },
@@ -4373,6 +4475,27 @@ function formatGearDistance(value: number) {
   const kilometers = value / 1000;
   const precision = kilometers >= 100 ? 0 : 1;
   return `${kilometers.toFixed(precision)} km`;
+}
+
+function formatGearActivityCount(value?: number) {
+  if (value === undefined || !Number.isFinite(value)) {
+    return "0";
+  }
+  return value.toLocaleString();
+}
+
+function gearDistanceUsagePercent(totalDistanceM?: number, maxDistanceM?: number) {
+  const raw = gearDistanceUsagePercentRaw(totalDistanceM, maxDistanceM);
+  return `${Math.max(0, raw)}%`;
+}
+
+function gearDistanceUsagePercentRaw(totalDistanceM?: number, maxDistanceM?: number) {
+  if (totalDistanceM === undefined || maxDistanceM === undefined || !Number.isFinite(totalDistanceM) || !Number.isFinite(maxDistanceM) || maxDistanceM <= 0) {
+    return Number.NaN;
+  }
+  const ratio = totalDistanceM / maxDistanceM;
+  const percent = ratio * 100;
+  return percent >= 0 ? Math.min(100, Math.round(percent)) : 0;
 }
 
 function formatDistance(value: number) {
