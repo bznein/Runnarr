@@ -415,6 +415,7 @@ function HealthPage() {
   const latestHealthJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin" && job.kind.startsWith("health"));
   const anyGarminSyncRunning = (jobs.data?.jobs ?? []).some((job) => job.provider === "garmin" && job.status === "running");
   const healthSyncRunning = latestHealthJob?.status === "running";
+  const dayDetailRef = useRef<HTMLElement | null>(null);
   const health = useQuery({
     queryKey: ["health-daily", range],
     queryFn: () => api.healthDaily(range),
@@ -444,6 +445,12 @@ function HealthPage() {
     setDraftRange(nextRange);
     setSelectedDate("");
   };
+  useEffect(() => {
+    if (!selectedMetric || !dayDetailRef.current) {
+      return;
+    }
+    dayDetailRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedMetric?.date]);
 
   return (
     <Page title="Health">
@@ -562,7 +569,11 @@ function HealthPage() {
             />
           </section>
 
-          {selectedMetric && <HealthDayDetail metric={selectedMetric} />}
+          {selectedMetric && (
+            <div ref={dayDetailRef}>
+              <HealthDayDetail metric={selectedMetric} />
+            </div>
+          )}
         </>
       )}
     </Page>
