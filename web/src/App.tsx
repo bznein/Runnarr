@@ -415,7 +415,7 @@ function HealthPage() {
   const latestHealthJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin" && job.kind.startsWith("health"));
   const anyGarminSyncRunning = (jobs.data?.jobs ?? []).some((job) => job.provider === "garmin" && job.status === "running");
   const healthSyncRunning = latestHealthJob?.status === "running";
-  const dayDetailRef = useRef<HTMLElement | null>(null);
+  const dayDetailRef = useRef<HTMLDivElement | null>(null);
   const health = useQuery({
     queryKey: ["health-daily", range],
     queryFn: () => api.healthDaily(range),
