@@ -115,10 +115,27 @@ func TestFITSessionCaloriesKcal(t *testing.T) {
 	}
 }
 
-func TestNormalizeSportStrength(t *testing.T) {
-	for _, value := range []string{"WeightTraining", "weight lifting", "StrengthTraining"} {
-		if got := normalizeSport(value); got != "Strength" {
-			t.Fatalf("normalizeSport(%q) = %q", value, got)
+func TestNormalizeSport(t *testing.T) {
+	cases := map[string]string{
+		"Run":               "Run",
+		"Treadmill_running": "Treadmill Run",
+		"Lap_swimming":      "Swimming",
+		"Kayaking_v2":       "Kayaking",
+		"Ride":              "Cycling",
+		"Walk":              "Walk",
+		"Strength_training": "Strength Training",
+		"Weight training":   "Strength Training",
+		"WeightTraining":    "Strength Training",
+		"strength training": "Strength Training",
+		"virtualride":       "Cycling",
+		"StrengthTraining":  "Strength Training",
+		"weightlifting":     "Strength Training",
+		"Biking":            "Cycling",
+		"Hike":              "Hike",
+	}
+	for value, expect := range cases {
+		if got := normalizeSport(value); got != expect {
+			t.Fatalf("normalizeSport(%q) = %q, want %q", value, got, expect)
 		}
 	}
 }
