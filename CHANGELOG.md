@@ -9,6 +9,7 @@
 - Activity detail pages now support local-only notes that do not modify provider activities.
 - Activity detail pages can export a GPX track, with an option to include sensor extensions.
 - Garmin health sync now imports daily health metrics, including steps, calories, resting heart rate, sleep, stress, body battery, HRV, and body composition where Garmin provides them.
+- Health defaults now open on a 7-day range by default, matching the 7D preset.
 - Added a Health page with date-range controls, Garmin health sync, summary cards, trend charts, selectable daily rows, and day-level details.
 - Body battery daily views now emphasize gained, drained, and highest values.
 - Health charts now switch from bars to lines for date ranges longer than 30 days.
