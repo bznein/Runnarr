@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Footprints, HeartPulse, LogOut, Map as MapIcon, Monitor, Moon, MoreVertical, Pencil, RefreshCw, RotateCcw, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -368,10 +368,10 @@ function Dashboard() {
         onChange={setFilters}
       />
       <section className="metric-grid">
-        <Metric label="Activities" value={summary.data.activityCount.toLocaleString()} />
-        <Metric label="Distance" value={formatDistance(summary.data.distanceM)} />
-        <Metric label="Moving Time" value={formatDuration(summary.data.movingTimeS)} />
-        <Metric label="Elevation" value={`${Math.round(summary.data.elevationGainM).toLocaleString()} m`} />
+        <Metric label="Activities" value={summary.data.activityCount.toLocaleString()} icon={<ActivityIcon size={18} />} />
+        <Metric label="Distance" value={formatDistance(summary.data.distanceM)} icon={<RouteIcon size={18} />} />
+        <Metric label="Moving Time" value={formatDuration(summary.data.movingTimeS)} icon={<Timer size={18} />} />
+        <Metric label="Elevation" value={`${Math.round(summary.data.elevationGainM).toLocaleString()} m`} icon={<Mountain size={18} />} />
       </section>
 
       <section className="split-layout">
@@ -514,7 +514,7 @@ function HealthPage() {
 
       {cardItems.length > 0 && (
         <section className="metric-grid">
-          {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} />)}
+          {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
         </section>
       )}
 
@@ -3324,13 +3324,13 @@ function healthMetricCards(metric?: DailyHealthMetric) {
     return [];
   }
   return [
-    { label: "Steps", value: formatHealthInteger(metric.steps) },
-    { label: "Calories", value: formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal) },
-    { label: "Sleep", value: formatHealthDuration(metric.sleepDurationS) },
-    { label: "Resting HR", value: formatHealthBPM(metric.restingHeartRateBpm) },
-    { label: "Body battery", value: formatBodyBatteryGainDrain(metric) },
-    { label: "HRV", value: formatHealthMS(metric.hrvAvgMs) },
-    { label: "Weight", value: formatHealthWeight(metric.weightKg) }
+    { label: "Steps", value: formatHealthInteger(metric.steps), icon: <Footprints size={18} /> },
+    { label: "Calories", value: formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal), icon: <Flame size={18} /> },
+    { label: "Sleep", value: formatHealthDuration(metric.sleepDurationS), icon: <Moon size={18} /> },
+    { label: "Resting HR", value: formatHealthBPM(metric.restingHeartRateBpm), icon: <HeartPulse size={18} /> },
+    { label: "Body battery", value: formatBodyBatteryGainDrain(metric), icon: <BatteryCharging size={18} /> },
+    { label: "HRV", value: formatHealthMS(metric.hrvAvgMs), icon: <ActivityIcon size={18} /> },
+    { label: "Weight", value: formatHealthWeight(metric.weightKg), icon: <Scale size={18} /> }
   ].filter((item) => item.value !== "");
 }
 
@@ -3454,9 +3454,10 @@ function Page({ title, eyebrow, actions, children }: { title: string; eyebrow?: 
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, icon }: { label: string; value: string; icon?: JSX.Element }) {
   return (
     <div className="metric">
+      {icon && <span className="metric-icon" aria-hidden>{icon}</span>}
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
