@@ -200,7 +200,9 @@ export function App() {
     );
   }
 
-  return <AuthenticatedApp themePreference={themePreference} onThemePreferenceChange={setThemePreference} />;
+  return (
+    <AuthenticatedApp themePreference={themePreference} onThemePreferenceChange={setThemePreference} />
+  );
 }
 
 function AuthenticatedApp({

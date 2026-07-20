@@ -16,11 +16,17 @@
 - Garmin-synced activities now preserve grade-adjusted pace when provided and show GAP on activity details and laps.
 - Activity lap tables now show per-lap pace derived from lap distance and elapsed time.
 - Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
+- Added a self-bootstrap local development flow: `scripts/dev.sh` now creates `.env` from `.env.example` and seeds missing credentials/defaults for first-run non-Docker setup.
+- Improved non-Docker dev bootstrapping by auto-selecting a high random backend port (instead of `:8080`) and auto-starting local PostgreSQL via `docker compose up -d db` when `DATABASE_URL` points to localhost.
+- Fixed local dev bootstrap false-failure with Dockerized postgres by exposing postgres in compose on `RUNNARR_DB_HOST_PORT` (default `5432`) and adding clearer error guidance in `scripts/dev.sh` when local DB reachability is blocked by missing host port mapping.
+- `scripts/dev.sh` now proactively clears a stale local Runnarr Vite process on `5173` (unless `RUNNARR_KEEP_LEGACY_FRONTEND=1`) to avoid accidentally opening old frontend instances that send `/api` calls to the wrong port.
+- `scripts/dev.sh` no longer overwrites a user-provided `RUNNARR_ADMIN_PASSWORD` (including `change-me`); it only auto-generates one when missing, so the login value you set stays valid.
 
 ### Fixes
 
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
+- `scripts/dev.sh` now selects and reports the actual Vite port it starts on (with optional `RUNNARR_FRONTEND_PORT`), which prevents logging stale localhost:5173 URLs when ports are already taken and avoids loading the wrong frontend instance that causes `/api/...` 404s.
 
 ## 0.3.0 - 2026-07-16
 

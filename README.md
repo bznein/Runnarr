@@ -38,11 +38,16 @@ npm run dev
 For local non-docker full-stack development with Vite hot-reload, use:
 
 ```sh
-cp .env.example .env
-# update at least DATABASE_URL, RUNNARR_SECRET_KEY, and login credentials
-source .env
 scripts/dev.sh
 ```
+
+`scripts/dev.sh` will create `.env` from `.env.example` on first run, generate a `RUNNARR_SECRET_KEY` if missing,
+and run backend+frontend. `RUNNARR_ADMIN_PASSWORD` is preserved unless missing.
+If `RUNNARR_HTTP_ADDR` is unset or `:8080`, it will be replaced with a random high port.
+`RUNNARR_FRONTEND_PORT` (default `5173`) sets the preferred Vite port.
+Point `DATABASE_URL` in `.env` at your local PostgreSQL before running if you want a
+non-default database URL.
+When using `docker compose up -d db` for local DB, keep `RUNNARR_DB_HOST_PORT` in `.env` aligned to the host-mapped postgres port (default `5432`).
 
 See [docs/development.md](docs/development.md) for full non-dockerized setup notes.
 
