@@ -3,6 +3,7 @@ import type {
   ActivityClimbPreviewResponse,
   ActivityListPage,
   ActivityMedia,
+  ActivityCalendar,
   ActivityTypeFilters,
   AppConfig,
   ClimbDetectionSettingsUpdate,
@@ -125,6 +126,7 @@ export const api = {
   logout: () => request<Session>("/api/session/logout", { method: "POST" }),
   config: () => request<AppConfig>("/api/config"),
   summary: (filters?: ActivityTypeFilters) => request<SummaryStats>(`/api/stats/summary?${activityFilterQuery(filters)}`),
+  activityCalendar: (filters?: ActivityTypeFilters) => request<ActivityCalendar>(`/api/stats/calendar?${activityFilterQuery(filters)}`),
   healthDaily: (range?: HealthRange) => {
     const query = healthRangeQuery(range);
     return request<{ metrics: DailyHealthMetric[] | null }>(`/api/health/daily${query ? `?${query}` : ""}`);

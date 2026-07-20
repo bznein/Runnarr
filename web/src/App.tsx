@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -50,6 +50,7 @@ type ActivityChartPoint = {
   cadence?: number;
 };
 type RouteColorSource = "pace" | "gap";
+type CalendarMonth = { year: number; month: number };
 type ActivityChartSeries = {
   key: ActivityChartSeriesKey;
   label: string;
@@ -158,6 +159,7 @@ const chartTooltipCursorStyle = {
   fill: "var(--color-surface-soft)",
   opacity: 0.72
 };
+const calendarWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const activityChartSeries: ActivityChartSeries[] = [
   { key: "elevationM", label: "Elevation", color: "#4664c9", defaultVisible: true, format: (value) => `${Math.round(value).toLocaleString()} m` },
   { key: "heartRate", label: "Heart rate", color: "#c84d4d", defaultVisible: true, format: (value) => `${Math.round(value)} bpm` },
@@ -303,6 +305,7 @@ function AuthenticatedApp({
         <nav className="nav">
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
+          <NavItem to="/calendar" icon={<CalendarDays size={18} />} label="Calendar" />
           <NavItem to="/health" icon={<HeartPulse size={18} />} label="Health" />
           <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
           <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
@@ -320,6 +323,7 @@ function AuthenticatedApp({
           <Route path="/" element={<Dashboard />} />
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
+          <Route path="/calendar" element={<ActivityCalendarPage />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/gear" element={<GearPage />} />
@@ -1668,6 +1672,114 @@ function ActivitiesPage() {
           action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/settings#import">Import a file</Link>}
         />
       )}
+    </Page>
+  );
+}
+
+function ActivityCalendarPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const month = parseCalendarMonth(searchParams.get("month"));
+  const monthRange = calendarMonthRange(month);
+  const filters: ActivityTypeFiltersValue = {
+    ...emptyActivityTypeFilters,
+    dateFrom: monthRange.start,
+    dateTo: monthRange.end
+  };
+  const calendar = useQuery({
+    queryKey: ["activity-calendar", month.year, month.month],
+    queryFn: () => api.activityCalendar(filters)
+  });
+  const monthLabel = formatCalendarMonthLabel(month);
+  const dayByDate = new Map(calendar.data?.days?.map((day) => [day.date, day]) ?? []);
+  const updateMonth = (nextMonth: CalendarMonth) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("month", formatCalendarMonth(nextMonth));
+    setSearchParams(params, { replace: true });
+  };
+  const firstDay = new Date(month.year, month.month - 1, 1);
+  const startWeekday = (firstDay.getDay() + 6) % 7;
+  const daysInMonth = new Date(month.year, month.month, 0).getDate();
+  const totalSlots = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
+  const monthCells = Array.from({ length: totalSlots }, (_, index) => {
+    const day = index - startWeekday + 1;
+    if (day < 1 || day > daysInMonth) {
+      return null;
+    }
+    const date = formatCalendarDate(month.year, month.month, day);
+    const dayData = dayByDate.get(date);
+    return {
+      day,
+      dayData,
+      date
+    };
+  });
+
+  return (
+    <Page
+      title="Calendar"
+      actions={
+        <div className="calendar-controls">
+          <button
+            className="secondary-button small-button"
+            type="button"
+            onClick={() => updateMonth(calendarMonthOffset(month, -1))}
+          >
+            <ChevronLeft size={16} />
+            Prev
+          </button>
+          <span className="calendar-month-label">{monthLabel}</span>
+          <button
+            className="secondary-button small-button"
+            type="button"
+            onClick={() => updateMonth(calendarMonthOffset(month, 1))}
+          >
+            Next
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      }
+    >
+      <section className="panel">
+        <div className="panel-heading">Monthly activity calendar</div>
+        {calendar.isLoading && <LoadingRow />}
+        {calendar.error && <div className="error">{calendar.error instanceof Error ? calendar.error.message : "Could not load calendar"}</div>}
+        <div className="calendar-weekday-header">
+          {calendarWeekdays.map((weekday) => (
+            <span key={weekday}>{weekday}</span>
+          ))}
+        </div>
+        <div className="calendar-grid">
+          {monthCells.map((entry, index) => {
+            if (entry === null) {
+              return <div className="calendar-day-cell empty" key={`empty-${index}`} />;
+            }
+            const hasActivities = entry.dayData && entry.dayData.activityCount > 0;
+            return (
+              <div
+                className={`calendar-day-cell ${hasActivities ? "calendar-day-cell--active" : ""}`}
+                key={entry.date}
+              >
+                <div className="calendar-day-number">{entry.day}</div>
+                {hasActivities && (
+                  <ul className="calendar-day-list">
+                    {entry.dayData?.activities.map((activity) => (
+                      <li key={activity.id} className="calendar-day-activity">
+                        <Link to={`/activities/${activity.id}`}>
+                          {activity.name}
+                        </Link>
+                        <span className="calendar-day-activity-meta">
+                          {activity.sportType}
+                          {activity.sportType && ` · ${activity.movingTimeS ? formatDuration(activity.movingTimeS) : ""}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </Page>
   );
 }
@@ -3730,6 +3842,46 @@ function localDateFromString(value: string) {
     return undefined;
   }
   return new Date(year, month - 1, day);
+}
+
+function parseCalendarMonth(value: string | null): CalendarMonth {
+  const now = new Date();
+  if (!value) {
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  }
+  const [year, month] = value.split("-").map(Number);
+  if (!year || !month || month < 1 || month > 12) {
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  }
+  return { year, month };
+}
+
+function formatCalendarMonth(month: CalendarMonth) {
+  return `${month.year}-${String(month.month).padStart(2, "0")}`;
+}
+
+function formatCalendarMonthLabel(month: CalendarMonth) {
+  return new Date(month.year, month.month - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function formatCalendarDate(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function calendarMonthRange(month: CalendarMonth) {
+  return {
+    start: formatCalendarDate(month.year, month.month, 1),
+    end: formatCalendarDate(month.year, month.month, new Date(month.year, month.month, 0).getDate())
+  };
+}
+
+function calendarMonthOffset(month: CalendarMonth, offset: number): CalendarMonth {
+  const date = new Date(month.year, month.month - 1, 1);
+  date.setMonth(date.getMonth() + offset);
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1
+  };
 }
 
 function localDateString(value = new Date()) {
