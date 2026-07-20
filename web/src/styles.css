@@ -298,8 +298,14 @@ textarea {
 
 .metric {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   padding: 18px;
+  position: relative;
+}
+
+.metric-icon {
+  color: var(--color-muted-strong);
+  opacity: 0.9;
 }
 
 .metric span,
