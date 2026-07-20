@@ -136,7 +136,7 @@ export const api = {
   },
   deleteActivityMedia: (activityId: string, mediaId: string) =>
     request<DeleteActivityMediaResult>(`/api/activities/${activityId}/media/${mediaId}`, { method: "DELETE" }),
-  updateActivityMediaLocation: (activityId: string, mediaId: string, latitude: number, longitude: number) =>
+  updateActivityMediaLocation: (activityId: string, mediaId: string, latitude: number | null, longitude: number | null) =>
     request<{ media: ActivityMedia }>(`/api/activities/${activityId}/media/${mediaId}`, {
       method: "PATCH",
       body: JSON.stringify({ latitude, longitude })

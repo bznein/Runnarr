@@ -40,7 +40,8 @@ import {
   Upload,
   X,
   BatteryCharging,
-  RotateCcw
+  RotateCcw,
+  MapPinOff
 } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
@@ -1920,7 +1921,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [id, routeUsesGap]);
   const [pinningMediaId, setPinningMediaId] = useState<string>();
   const pinActivityMedia = useMutation({
-    mutationFn: ({ mediaId, latitude, longitude }: { mediaId: string; latitude: number; longitude: number }) =>
+    mutationFn: ({ mediaId, latitude, longitude }: { mediaId: string; latitude: number | null; longitude: number | null }) =>
       api.updateActivityMediaLocation(id!, mediaId, latitude, longitude),
     onSuccess: (result) => {
       queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, (current) => {
@@ -2003,20 +2004,25 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     uploadMedia.reset();
     uploadMedia.mutate(files);
   };
-  const handlePinMedia = (mediaId: string) => {
+  const handlePinMediaFromDetail = (mediaId: string) => {
     setPinningMediaId(mediaId);
-    setSelectedMediaId(mediaId);
+    setSelectedMediaId(undefined);
   };
-  const handleCancelPinMedia = () => {
-    setPinningMediaId(undefined);
+  const handleClearMediaPin = (mediaId: string) => {
+    pinActivityMedia.reset();
+    pinActivityMedia.mutate({ mediaId, latitude: null, longitude: null });
+    if (pinningMediaId === mediaId) {
+      setPinningMediaId(undefined);
+    }
+    if (selectedMediaId === mediaId) {
+      setSelectedMediaId(undefined);
+    }
   };
   const handleMapPin = (mediaId: string, latitude: number, longitude: number) => {
     pinActivityMedia.reset();
     pinActivityMedia.mutate({ mediaId, latitude, longitude });
   };
   const pinningMedia = mediaItems.find((item) => item.id === pinningMediaId);
-
-  const mediaPanelError = pinActivityMedia.error ? pinActivityMedia.error : null;
 
   return (
     <Page
@@ -2106,17 +2112,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       )}
 
       {mediaItems.length > 0 ? (
-          <ActivityMediaPanel
-            activity={item}
-            uploading={uploadMedia.isPending}
-            uploadError={uploadMedia.error}
-            pinError={mediaPanelError}
-            pinningMediaId={pinningMediaId}
-            selectedMediaId={selectedMediaId}
-            onSelectMedia={setSelectedMediaId}
-            onStartPin={handlePinMedia}
-            onCancelPin={handleCancelPinMedia}
-          />
+        <ActivityMediaPanel
+          activity={item}
+          selectedMediaId={selectedMediaId}
+          onSelectMedia={setSelectedMediaId}
+          onStartPin={handlePinMediaFromDetail}
+          onClearPin={handleClearMediaPin}
+        />
       ) : (
         Boolean(uploadMedia.error) && <div className="error">{uploadMedia.error instanceof Error ? uploadMedia.error.message : "Upload failed"}</div>
       )}
@@ -2408,29 +2410,20 @@ function ActivityMediaUploadAction({
 
 function ActivityMediaPanel({
   activity,
-  uploading,
-  uploadError,
-  pinError,
-  pinningMediaId,
   selectedMediaId,
   onSelectMedia,
   onStartPin,
-  onCancelPin
+  onClearPin
 }: {
   activity: Activity;
-  uploading: boolean;
-  uploadError: unknown;
-  pinError: unknown;
-  pinningMediaId?: string;
   selectedMediaId?: string;
   onSelectMedia: (mediaId?: string) => void;
   onStartPin: (mediaId: string) => void;
-  onCancelPin: () => void;
+  onClearPin: (mediaId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const media = activity.media ?? [];
   const previewMedia = media.find((item) => item.id === selectedMediaId);
-  const previewIsPinning = Boolean(previewMedia && previewMedia.id === pinningMediaId);
   const previewMediaIndex = selectedMediaId ? media.findIndex((item) => item.id === selectedMediaId) : -1;
   const previousMedia = previewMediaIndex > 0 ? media[previewMediaIndex - 1] : undefined;
   const nextMedia = previewMediaIndex >= 0 && previewMediaIndex < media.length - 1 ? media[previewMediaIndex + 1] : undefined;
@@ -2450,7 +2443,6 @@ function ActivityMediaPanel({
       });
     }
   });
-  const mediaCountLabel = media.length === 1 ? "1 photo" : `${media.length} photos`;
   const handleDeleteMedia = (item: ActivityMedia) => {
     deleteMedia.reset();
     if (window.confirm(`Delete "${item.originalFilename}" from this activity?`)) {
@@ -2467,13 +2459,8 @@ function ActivityMediaPanel({
     <section className="panel media-panel">
       <div className="media-panel-header">
         <div className="panel-heading">Media</div>
-        <span className="media-count">{mediaCountLabel}</span>
+        <span className="media-count">{media.length === 1 ? "1 photo" : `${media.length} photos`}</span>
       </div>
-
-      {uploading && <div className="media-upload-status"><Upload size={16} /> Uploading photos</div>}
-      {Boolean(uploadError) && <div className="error">{uploadError instanceof Error ? uploadError.message : "Upload failed"}</div>}
-      {Boolean(pinError) && <div className="error">{pinError instanceof Error ? pinError.message : "Pin failed"}</div>}
-      {deleteMedia.error && <div className="error">{deleteMedia.error instanceof Error ? deleteMedia.error.message : "Delete failed"}</div>}
 
       {media.length > 0 ? (
         <div className="media-grid">
@@ -2486,6 +2473,7 @@ function ActivityMediaPanel({
       ) : (
         <EmptyState title="No photos attached" />
       )}
+      {deleteMedia.error && <div className="error">{deleteMedia.error instanceof Error ? deleteMedia.error.message : "Delete failed"}</div>}
 
       {previewMedia && (
         <ActivityMediaPreview
@@ -2496,8 +2484,7 @@ function ActivityMediaPanel({
           onPrevious={previousMedia ? () => onSelectMedia(previousMedia.id) : undefined}
           onNext={nextMedia ? () => onSelectMedia(nextMedia.id) : undefined}
           onStartPin={onStartPin}
-          onCancelPin={onCancelPin}
-          isPinning={previewIsPinning}
+          onClearPin={onClearPin}
         />
       )}
     </section>
@@ -2512,8 +2499,7 @@ function ActivityMediaPreview({
   onPrevious,
   onNext,
   onStartPin,
-  onCancelPin,
-  isPinning
+  onClearPin
 }: {
   media: ActivityMedia;
   deleting: boolean;
@@ -2522,9 +2508,9 @@ function ActivityMediaPreview({
   onPrevious?: () => void;
   onNext?: () => void;
   onStartPin: (mediaId: string) => void;
-  onCancelPin: () => void;
-  isPinning: boolean;
+  onClearPin: (mediaId: string) => void;
 }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -2543,6 +2529,22 @@ function ActivityMediaPreview({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose, onNext, onPrevious]);
+  const handlePinAction = () => {
+    setActionsOpen(false);
+    onClose();
+    onStartPin(media.id);
+  };
+  const handleDeletePinAction = () => {
+    setActionsOpen(false);
+    onClearPin(media.id);
+  };
+  const handleDeleteAction = () => {
+    setActionsOpen(false);
+    onDelete();
+  };
+  const handleOpenOriginalAction = () => {
+    setActionsOpen(false);
+  };
 
   return (
     <div
@@ -2559,9 +2561,67 @@ function ActivityMediaPreview({
             <div className="eyebrow">Media</div>
             <h2 id="activity-media-preview-title">{media.originalFilename}</h2>
           </div>
-          <button className="icon-button" type="button" aria-label="Close media preview" onClick={onClose}>
-            <X size={16} />
-          </button>
+          <div className="dialog-actions">
+            <div className="action-menu-wrap">
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Media actions"
+                aria-expanded={actionsOpen}
+                onClick={() => setActionsOpen((current) => !current)}
+              >
+                <MoreVertical size={18} />
+              </button>
+              {actionsOpen && (
+                <div className="action-menu" role="menu">
+                  <button
+                    className="action-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={handlePinAction}
+                  >
+                    <MapPin size={16} />
+                    {hasMediaLocation(media) ? "Re-pin media on map" : "Pin media on map"}
+                  </button>
+                  {hasMediaLocation(media) && (
+                    <button
+                      className="action-menu-item danger"
+                      type="button"
+                      role="menuitem"
+                      onClick={handleDeletePinAction}
+                    >
+                      <MapPinOff size={16} />
+                      Delete pin
+                    </button>
+                  )}
+                  <a
+                    className="action-menu-item"
+                    role="menuitem"
+                    href={activityMediaOriginalURL(media.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={handleOpenOriginalAction}
+                  >
+                    <ExternalLink size={16} />
+                    Open original
+                  </a>
+                  <button
+                    className="action-menu-item danger"
+                    type="button"
+                    role="menuitem"
+                    disabled={deleting}
+                    onClick={handleDeleteAction}
+                  >
+                    <Trash2 size={16} />
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+            <button className="icon-button" type="button" aria-label="Close media preview" onClick={onClose}>
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="media-preview-stage">
@@ -2578,21 +2638,6 @@ function ActivityMediaPreview({
         <div className="media-preview-meta">
           <span>{formatActivityMediaMeta(media)}</span>
           {hasMediaLocation(media) && <span>{formatMediaLocation(media)}</span>}
-        </div>
-
-        <div className="dialog-actions">
-          <button className="secondary-button" type="button" onClick={() => (isPinning ? onCancelPin() : onStartPin(media.id))}>
-            <MapPin size={16} />
-            {isPinning ? "Cancel pin" : hasMediaLocation(media) ? "Re-pin on map" : "Pin on map"}
-          </button>
-          <a className="secondary-button" href={activityMediaOriginalURL(media.id)} target="_blank" rel="noreferrer">
-            <ExternalLink size={16} />
-            Open original
-          </a>
-          <button className="danger-button" type="button" disabled={deleting} onClick={onDelete}>
-            <Trash2 size={16} />
-            Delete
-          </button>
         </div>
       </section>
     </div>
@@ -3748,7 +3793,7 @@ function ActivityMap({
       {paceSegments.length > 0 && <ActivityPaceRouteLegend source={routeColorSource ?? "pace"} />}
       {pinningMedia && (
         <div className="media-pin-hint">
-          Pin <strong>{pinningMedia.originalFilename}</strong> by clicking the map
+          Pin media on map
         </div>
       )}
     </div>

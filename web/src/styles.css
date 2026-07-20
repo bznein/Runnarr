@@ -967,6 +967,13 @@ textarea {
   gap: 12px;
 }
 
+.media-thumb {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
 .media-thumb-button {
   width: 100%;
   aspect-ratio: 4 / 3;
@@ -987,6 +994,44 @@ textarea {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.media-thumb-pin-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  color: var(--color-heading);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  border-color: var(--color-border-hover);
+}
+
+.media-thumb-pin-text-button {
+  align-self: end;
+  width: 100%;
+  justify-self: end;
+}
+
+.media-thumb-pin-button:hover {
+  color: var(--color-primary-text);
+}
+
+.media-thumb-pin-button.is-pinning {
+  color: var(--color-danger-strong);
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-soft);
+}
+
+.media-thumb-pin-button:focus-visible {
+  outline: 2px solid var(--color-primary-strong);
+  outline-offset: 2px;
+}
+
+.media-thumb-pin-button.is-pinning:focus-visible {
+  outline-color: var(--color-danger-border);
 }
 
 .media-preview-dialog {
