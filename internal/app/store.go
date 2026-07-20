@@ -705,6 +705,7 @@ func (s *Store) SetTrainingSheetConfig(ctx context.Context, config TrainingSheet
 		checkEveryHours = 24
 	}
 	sheetURL := strings.TrimSpace(config.SheetURL)
+	defaults := defaultClimbDetectionSettings()
 
 	_, err := s.db.Exec(ctx, `
 		insert into app_settings(
@@ -713,16 +714,49 @@ func (s *Store) SetTrainingSheetConfig(ctx context.Context, config TrainingSheet
 			training_sheet_sheet_url,
 			training_sheet_check_every_hours,
 			training_sheet_last_synced_at,
+			climb_smoothing_radius_m,
+			min_climb_distance_m,
+			min_climb_elevation_gain_m,
+			min_climb_average_grade_pct,
+			max_climb_merge_dip_distance_m,
+			max_climb_merge_elevation_loss_m,
+			climb_start_gain_m,
+			climb_detection_preset,
 			created_at,
 			updated_at
 		)
-		values($1, $2, $3, $4, null, now(), now())
+		values(
+			$1,
+			$2,
+			$3,
+			$4,
+			null,
+			coalesce((select climb_smoothing_radius_m from app_settings where id = $1), $5),
+			coalesce((select min_climb_distance_m from app_settings where id = $1), $6),
+			coalesce((select min_climb_elevation_gain_m from app_settings where id = $1), $7),
+			coalesce((select min_climb_average_grade_pct from app_settings where id = $1), $8),
+			coalesce((select max_climb_merge_dip_distance_m from app_settings where id = $1), $9),
+			coalesce((select max_climb_merge_elevation_loss_m from app_settings where id = $1), $10),
+			coalesce((select climb_start_gain_m from app_settings where id = $1), $11),
+			coalesce((select climb_detection_preset from app_settings where id = $1), $12),
+			now(),
+			now()
+		)
 		on conflict(id) do update set
 			training_sheet_enabled = excluded.training_sheet_enabled,
 			training_sheet_sheet_url = excluded.training_sheet_sheet_url,
 			training_sheet_check_every_hours = excluded.training_sheet_check_every_hours,
 			updated_at = now()
-	`, appSettingsID, config.Enabled, sheetURL, checkEveryHours)
+	`, appSettingsID, config.Enabled, sheetURL, checkEveryHours,
+		defaults.ClimbSmoothingRadiusM,
+		defaults.MinClimbDistanceM,
+		defaults.MinClimbElevationGainM,
+		defaults.MinClimbAverageGradePct,
+		defaults.MaxClimbMergeDipDistanceM,
+		defaults.MaxClimbMergeElevationLossM,
+		defaults.ClimbStartGainM,
+		defaultClimbDetectionPreset,
+	)
 	return err
 }
 
