@@ -373,7 +373,7 @@ func discoverTrainingSheetColumns(headers []string) trainingSheetColumnIndex {
 		if norm == "" {
 			continue
 		}
-		if indices.Name < 0 && containsAny(
+		if indices.Name < 0 && containsAnyInText(
 			norm,
 			"activity",
 			"workout",
@@ -385,22 +385,22 @@ func discoverTrainingSheetColumns(headers []string) trainingSheetColumnIndex {
 			indices.Name = index
 			continue
 		}
-		if indices.Date < 0 && containsAny(norm, "date", "day", "when") {
+		if indices.Date < 0 && containsAnyInText(norm, "date", "day", "when") {
 			indices.Date = index
 		}
-		if indices.Distance < 0 && containsAny(norm, "distance", "km", "mile", "miles", "meter") {
+		if indices.Distance < 0 && containsAnyInText(norm, "distance", "km", "mile", "miles", "meter") {
 			indices.Distance = index
 		}
-		if indices.Duration < 0 && containsAny(norm, "duration", "time", "length", "durationmin") {
+		if indices.Duration < 0 && containsAnyInText(norm, "duration", "time", "length", "durationmin") {
 			indices.Duration = index
 		}
-		if indices.Pace < 0 && containsAny(norm, "pace", "targetpace", "speed") {
+		if indices.Pace < 0 && containsAnyInText(norm, "pace", "targetpace", "speed") {
 			indices.Pace = index
 		}
-		if indices.Note < 0 && containsAny(norm, "note", "comment", "details", "commentary") {
+		if indices.Note < 0 && containsAnyInText(norm, "note", "comment", "details", "commentary") {
 			indices.Note = index
 		}
-		if indices.Sport < 0 && containsAny(
+		if indices.Sport < 0 && containsAnyInText(
 			norm,
 			"type",
 			"sport",
@@ -410,7 +410,7 @@ func discoverTrainingSheetColumns(headers []string) trainingSheetColumnIndex {
 		) {
 			indices.Sport = index
 		}
-		if indices.SourceID < 0 && containsAny(norm, "sourceid", "source_id", "sheetid", "id") {
+		if indices.SourceID < 0 && containsAnyInText(norm, "sourceid", "source_id", "sheetid", "id") {
 			indices.SourceID = index
 		}
 	}
@@ -732,7 +732,7 @@ func normalizeHeaderForSheet(value string) string {
 	return clean
 }
 
-func containsAny(value string, needles ...string) bool {
+func containsAnyInText(value string, needles ...string) bool {
 	for _, needle := range needles {
 		if strings.Contains(value, needle) {
 			return true
