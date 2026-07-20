@@ -9,19 +9,25 @@
 - Activity detail pages now support local-only notes that do not modify provider activities.
 - Activity detail pages can export a GPX track, with an option to include sensor extensions.
 - Garmin health sync now imports daily health metrics, including steps, calories, resting heart rate, sleep, stress, body battery, HRV, and body composition where Garmin provides them.
+- Health defaults now open on a 7-day range by default, matching the 7D preset.
 - Added a Health page with date-range controls, Garmin health sync, summary cards, trend charts, selectable daily rows, and day-level details.
 - Body battery daily views now emphasize gained, drained, and highest values.
 - Health charts now switch from bars to lines for date ranges longer than 30 days.
+- Selecting a health metrics row now auto-scrolls to the opened day-detail section.
 - Garmin body-composition weight is now normalized from grams to kilograms and shown as measurement-only points.
 - Garmin-synced activities now preserve grade-adjusted pace when provided and show GAP on activity details and laps.
 - Activity lap tables now show per-lap pace derived from lap distance and elapsed time.
 - Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
 - Gear list and gear detail pages now support sorting by last used, first used, distance, percent-to-limit, and activity count.
+- Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
+- Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
 
 ### Fixes
 
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
+- Activity type names from providers are now normalized for UI consistency (for example, Cycling, Treadmill Run, and Swimming variants render with readable labels).
+- Route GAP/PACE selector now uses a clean sliding control without an extra divider edge under Pace.
 
 ## 0.3.0 - 2026-07-16
 
