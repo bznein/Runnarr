@@ -18,6 +18,7 @@
 - Garmin-synced activities now preserve grade-adjusted pace when provided and show GAP on activity details and laps.
 - Activity lap tables now show per-lap pace derived from lap distance and elapsed time.
 - Imported activities now preserve provider/file calories when available, show them on activity detail and list views, and support sorting by calories.
+- Gear list and gear detail pages now support sorting by last used, first used, distance, percent-to-limit, and activity count.
 - Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
 
