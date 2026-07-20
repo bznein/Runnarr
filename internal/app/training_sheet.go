@@ -79,13 +79,12 @@ func (s *TrainingSheetService) Sync(ctx context.Context, cfg TrainingSheetConfig
 	worksheets, err := s.discoverWorksheets(ctx, sheetID)
 	if err != nil || len(worksheets) == 0 {
 		if strings.TrimSpace(requestedGID) == "" {
-			if err == nil {
-				err = fmt.Errorf("could not discover worksheets")
-			}
-			return nil, err
+			s.logger.Warn("could not discover training sheet worksheets, falling back to gid=0", "sheetId", sheetID, "error", err)
+			worksheets = []trainingSheetWorksheet{{Name: "Worksheet 0", GID: "0"}}
+		} else {
+			worksheets = []trainingSheetWorksheet{{Name: "Selected", GID: requestedGID}}
 		}
-		worksheets = []trainingSheetWorksheet{{Name: "Selected", GID: requestedGID}}
-	} else {
+	} else if strings.TrimSpace(requestedGID) != "" {
 		worksheets = prioritizeWorksheet(worksheets, requestedGID)
 	}
 
