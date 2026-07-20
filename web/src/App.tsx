@@ -2439,6 +2439,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
         <Metric label="Pace" value={formatPace(item.avgPaceSPKM)} />
+        {item.avgHeartRate !== undefined && <Metric label="Avg HR" value={formatBPM(item.avgHeartRate)} />}
+        {item.maxHeartRate !== undefined && <Metric label="Max HR" value={formatBPM(item.maxHeartRate)} />}
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
         {item.avgGradeAdjustedPaceSPKM !== undefined && <Metric label="GAP" value={formatPace(item.avgGradeAdjustedPaceSPKM)} />}
         {item.caloriesKcal !== undefined && <Metric label="Calories" value={formatCalories(item.caloriesKcal)} />}
@@ -5025,6 +5027,13 @@ function formatPace(secondsPerKm?: number) {
   const minutes = Math.floor(secondsPerKm / 60);
   const seconds = Math.round(secondsPerKm % 60);
   return `${minutes}:${String(seconds).padStart(2, "0")} /km`;
+}
+
+function formatBPM(value?: number) {
+  if (value === undefined || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${Math.round(value).toLocaleString()} bpm`;
 }
 
 function climbSensitivityPresetForValue(value: number) {
