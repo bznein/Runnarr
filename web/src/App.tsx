@@ -10,7 +10,23 @@ import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, Respons
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
-import type { Activity, ActivityClimb, ActivityLap, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, Gear, GearSummary, ImportFile, SyncJob, ToolsPaceResponse, ToolsVdotResponse } from "./types";
+import type {
+  Activity,
+  ActivityClimb,
+  ActivityLap,
+  ActivityMedia,
+  ActivitySample,
+  ActivitySortBy,
+  ActivityTypeFilters as ActivityTypeFiltersValue,
+  AppConfig,
+  DailyHealthMetric,
+  Gear,
+  GearSummary,
+  ImportFile,
+  SyncJob,
+  ToolsPaceResponse,
+  ToolsVdotResponse
+} from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
@@ -78,6 +94,7 @@ const emptyActivityTypeFilters: ActivityTypeFiltersValue = { sports: [], exclude
 const ACTIVITY_LIST_PAGE_SIZE = 100;
 const garminHealthDefaultDays = 7;
 const healthBarChartMaxDays = 30;
+const defaultClimbSensitivity = 50;
 const themePreferenceStorageKey = "runnarr-theme-preference";
 const activityColumnsStorageKey = "runnarr-activity-list-columns";
 const gearSortByStorageKey = "runnarr-gear-sort-by";
@@ -87,6 +104,23 @@ const vdotDistancePresets: Array<{ id: string; label: string; distanceKm: string
   { id: "10m", label: "10M", distanceKm: "16.0934" },
   { id: "10k", label: "10K", distanceKm: "10" },
   { id: "5k", label: "5K", distanceKm: "5" }
+];
+const climbSensitivityPresets: Array<{ id: string; label: string; value: number }> = [
+  {
+    id: "conservative",
+    label: "Conservative",
+    value: 0
+  },
+  {
+    id: "balanced",
+    label: "Balanced",
+    value: 50
+  },
+  {
+    id: "aggressive",
+    label: "Aggressive",
+    value: 100
+  }
 ];
 const activityTableColumnOptions: Array<{ key: ActivityTableColumnKey; label: string }> = [
   { key: "date", label: "Date" },
@@ -2152,7 +2186,33 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
+  const [climbSensitivityDraft, setClimbSensitivityDraft] = useState(defaultClimbSensitivity);
+  const [climbSensitivityPreview, setClimbSensitivityPreview] = useState(defaultClimbSensitivity);
   const routeUsesGap = (activity.data?.activity.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  const configuredClimbSensitivity = config?.climbDetection?.sensitivity ?? defaultClimbSensitivity;
+  const climbSensitivity = clampClimbSensitivity(climbSensitivityDraft);
+  const climbSensitivityForPreview = clampClimbSensitivity(climbSensitivityPreview);
+  const isPreviewPending = climbSensitivity !== climbSensitivityForPreview;
+  const climbPreview = useQuery({
+    queryKey: ["activity-climb-preview", id, climbSensitivityForPreview],
+    queryFn: () => api.activityClimbPreview(id!, climbSensitivityForPreview),
+    placeholderData: (previousData) => previousData,
+    enabled: Boolean(activity.data)
+  });
+  const saveClimbSensitivity = useMutation({
+    mutationFn: (sensitivity: number) => api.updateClimbDetectionSettings({ sensitivity }),
+    onSuccess: async (updatedConfig) => {
+      const nextSensitivity = updatedConfig.climbDetection.sensitivity;
+      setClimbSensitivityDraft(nextSensitivity);
+      setClimbSensitivityPreview(nextSensitivity);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["config"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity", id] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
 
   useEffect(() => {
     if (!routeUsesGap) {
@@ -2171,31 +2231,57 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     updateActivityNotes.reset();
     uploadMedia.reset();
     setMediaFileInputKey((key) => key + 1);
-  }, [id]);
+    setClimbSensitivityDraft(configuredClimbSensitivity);
+    setClimbSensitivityPreview(configuredClimbSensitivity);
+  }, [id, configuredClimbSensitivity]);
+
+  useEffect(() => {
+    const nextValue = clampClimbSensitivity(climbSensitivity);
+    const timeout = window.setTimeout(() => setClimbSensitivityPreview(nextValue), 120);
+    return () => window.clearTimeout(timeout);
+  }, [climbSensitivity]);
+
+  const item = activity.data?.activity;
+  const effectiveClimbs = item ? (climbPreview.data?.climbs ?? item.climbs ?? []) : [];
+
+  useEffect(() => {
+    if (selectedClimbIndex === undefined) {
+      return;
+    }
+    if (!effectiveClimbs.some((climb) => climb.index === selectedClimbIndex)) {
+      setSelectedClimbIndex(undefined);
+    }
+  }, [effectiveClimbs, selectedClimbIndex]);
 
   if (activity.isLoading) {
     return <Page title="Activity"><LoadingRow /></Page>;
   }
-  if (!activity.data) {
+  if (!activity.data || !item) {
     return <Page title="Activity"><EmptyState title="Activity not found" /></Page>;
   }
 
-  const item = activity.data.activity;
+  const confirmedItem = item;
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
-  const routePoints = routeForActivity(item);
-  const canExportGPX = canExportActivityGPX(item);
-  const paceScale = paceScaleForActivity(item, "pace");
-  const routePaceScale = paceScaleForActivity(item, routeColorSource);
-  const paceRouteSegments = paceRouteSegmentsForActivity(item, routePaceScale, routeColorSource);
-  const chartData = chartDataFor(item.samples ?? [], paceScale);
+  const routePoints = routeForActivity(confirmedItem);
+  const canExportGPX = canExportActivityGPX(confirmedItem);
+  const paceScale = paceScaleForActivity(confirmedItem, "pace");
+  const routePaceScale = paceScaleForActivity(confirmedItem, routeColorSource);
+  const paceRouteSegments = paceRouteSegmentsForActivity(confirmedItem, routePaceScale, routeColorSource);
+  const chartData = chartDataFor(confirmedItem.samples ?? [], paceScale);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
-  const climbs = item.climbs ?? [];
-  const selectedClimb = selectedClimbIndex === undefined ? undefined : climbs.find((climb) => climb.index === selectedClimbIndex);
-  const climbMapSegments = climbMapSegmentsFor(item, climbs);
-  const selectedClimbProfile = climbProfileFor(item, selectedClimb);
-  const showLapElevation = (item.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
-  const showLapGap = (item.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  const climbs = confirmedItem.climbs ?? [];
+  const finalClimbs = effectiveClimbs;
+  const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
+  const climbMapSegments = climbMapSegmentsFor(confirmedItem, finalClimbs);
+  const selectedClimbProfile = climbProfileFor(confirmedItem, selectedClimb);
+  const showLapElevation = (confirmedItem.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
+  const showLapGap = (confirmedItem.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  const isClimbSensitivitySaved = climbSensitivity === configuredClimbSensitivity;
+  const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
+  const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
+  const canSaveClimbSensitivity = !isClimbSensitivitySaved;
+
   const handleSelectClimb = (climb: ActivityClimb) => {
     setSelectedClimbIndex((current) => current === climb.index ? undefined : climb.index);
   };
@@ -2223,11 +2309,75 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     uploadMedia.reset();
     uploadMedia.mutate(files);
   };
+  const handleClimbSensitivityChange = (value: number) => {
+    setClimbSensitivityDraft(clampClimbSensitivity(value));
+  };
+  const selectClimbSensitivityPreset = (presetId: string) => {
+    const preset = climbSensitivityPresets.find((candidate) => candidate.id === presetId);
+    if (preset) {
+      handleClimbSensitivityChange(preset.value);
+    }
+  };
+  const restoreClimbSensitivityDefaults = () => {
+    setClimbSensitivityDraft(defaultClimbSensitivity);
+  };
+  const saveClimbSensitivitySetting = () => {
+    if (!canSaveClimbSensitivity) {
+      return;
+    }
+    saveClimbSensitivity.mutate(climbSensitivity);
+  };
+  const climbSensitivityControls = (
+    <div className="climb-sensitivity-controls" role="region" aria-label="Climb sensitivity controls">
+      <div className="climb-sensitivity-range">
+        <span>Sensitivity</span>
+        <strong>{climbSensitivity}</strong>
+      </div>
+      <input
+        className="climb-sensitivity-slider"
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={climbSensitivity}
+        aria-label="Climb sensitivity"
+        onChange={(event) => handleClimbSensitivityChange(Number(event.target.value))}
+      />
+      <div className="climb-sensitivity-preset-row">
+        <span className="climb-sensitivity-preset-label muted">{activeClimbPresetLabel}</span>
+        <span className="muted">{climbSensitivity}</span>
+        {isPreviewPending && <span className="muted">Recalculating…</span>}
+      </div>
+      <div className="climb-sensitivity-presets">
+        {climbSensitivityPresets.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className={`secondary-button small-button ${activeClimbPreset === preset.id ? "active" : ""}`}
+            aria-pressed={activeClimbPreset === preset.id}
+            onClick={() => selectClimbSensitivityPreset(preset.id)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+      <div className="climb-sensitivity-actions">
+        <button className="secondary-button small-button" type="button" disabled={climbSensitivity === defaultClimbSensitivity || isPreviewPending} onClick={restoreClimbSensitivityDefaults}>
+          Restore defaults
+        </button>
+        <button className="primary-button small-button" type="button" disabled={!canSaveClimbSensitivity || saveClimbSensitivity.isPending || isPreviewPending} onClick={saveClimbSensitivitySetting}>
+          {saveClimbSensitivity.isPending ? "Saving..." : "Save permanently"}
+        </button>
+      </div>
+      {saveClimbSensitivity.error && <div className="error">{saveClimbSensitivity.error instanceof Error ? saveClimbSensitivity.error.message : "Could not save climb sensitivity"}</div>}
+      {saveClimbSensitivity.isSuccess && <div className="muted">Climb sensitivity saved.</div>}
+    </div>
+  );
 
   return (
     <Page
-      title={item.name}
-      eyebrow={`${item.sportType} · ${formatDate(item.startTime)}`}
+      title={confirmedItem.name}
+      eyebrow={`${confirmedItem.sportType} · ${formatDate(confirmedItem.startTime)}`}
       actions={
         <>
           <ActivityMediaUploadAction
@@ -2346,14 +2496,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
 
-      {climbs.length > 0 && (
-        <ActivityClimbsPanel
-          climbs={climbs}
-          selectedClimb={selectedClimb}
-          profileData={selectedClimbProfile}
-          onSelect={handleSelectClimb}
-        />
-      )}
+      <ActivityClimbsPanel
+        climbs={effectiveClimbs}
+        selectedClimb={selectedClimb}
+        profileData={selectedClimbProfile}
+        sensitivityControls={climbSensitivityControls}
+        onSelect={handleSelectClimb}
+      />
 
       <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
 
@@ -2914,65 +3063,74 @@ function ActivityClimbsPanel({
   climbs,
   selectedClimb,
   profileData,
+  sensitivityControls,
   onSelect
 }: {
   climbs: ActivityClimb[];
   selectedClimb?: ActivityClimb;
   profileData: ClimbProfilePoint[];
+  sensitivityControls?: ReactNode;
   onSelect: (climb: ActivityClimb) => void;
 }) {
   return (
     <section className="panel climbs-panel">
-      <div className="chart-header">
-        <div className="panel-heading">Climbs</div>
-        <span className="muted">{climbs.length.toLocaleString()} detected</span>
-      </div>
-      <div className={`climbs-layout ${selectedClimb ? "" : "list-only"}`}>
-        <div className="climb-list">
-          {climbs.map((climb) => {
-            const active = selectedClimb?.index === climb.index;
-            return (
-              <button key={climb.index} className={`climb-item ${active ? "active" : ""}`} type="button" aria-pressed={active} onClick={() => onSelect(climb)}>
-                <span className="climb-item-header">
-                  <strong>Climb {climb.index + 1}</strong>
-                  <span className={`climb-difficulty ${difficultyClass(climb.difficulty)}`}>{climb.difficulty}</span>
-                </span>
-                <span className="climb-item-metrics">
-                  <span>{formatGrade(climb.avgGradePct)}</span>
-                  <span>{formatDistance(climb.distanceM)}</span>
-                  <span>{Math.round(climb.elevationGainM).toLocaleString()} m</span>
-                </span>
-                <span className="muted">{formatDistanceRange(climb.startDistanceM, climb.endDistanceM)}</span>
-              </button>
-            );
-          })}
+      <div className="chart-header climbs-panel-header">
+        <div>
+          <div className="panel-heading">Climbs</div>
+          <span className="muted">{climbs.length.toLocaleString()} detected</span>
         </div>
-        {selectedClimb && (
-          <div className="climb-detail">
-            <div className="climb-detail-metrics">
-              <ClimbStat label="Difficulty" value={selectedClimb.difficulty} />
-              <ClimbStat label="Avg Grade" value={formatGrade(selectedClimb.avgGradePct)} />
-              <ClimbStat label="Distance" value={formatDistance(selectedClimb.distanceM)} />
-              <ClimbStat label="Total Ascent" value={`${Math.round(selectedClimb.elevationGainM).toLocaleString()} m`} />
-            </div>
-            <div className="climb-profile">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={profileData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" minTickGap={26} />
-                  <YAxis width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
-                  <Tooltip
-                    contentStyle={chartTooltipContentStyle}
-                    labelStyle={chartTooltipLabelStyle}
-                    formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Height above start"]}
-                  />
-                  <Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
       </div>
+      {sensitivityControls && <div className="climb-sensitivity-panel-controls">{sensitivityControls}</div>}
+      {climbs.length === 0 ? (
+        <div className="muted">No climbs detected at this sensitivity.</div>
+      ) : (
+        <div className={`climbs-layout ${selectedClimb ? "" : "list-only"}`}>
+          <div className="climb-list">
+            {climbs.map((climb) => {
+              const active = selectedClimb?.index === climb.index;
+              return (
+                <button key={climb.index} className={`climb-item ${active ? "active" : ""}`} type="button" aria-pressed={active} onClick={() => onSelect(climb)}>
+                  <span className="climb-item-header">
+                    <strong>Climb {climb.index + 1}</strong>
+                    <span className={`climb-difficulty ${difficultyClass(climb.difficulty)}`}>{climb.difficulty}</span>
+                  </span>
+                  <span className="climb-item-metrics">
+                    <span>{formatGrade(climb.avgGradePct)}</span>
+                    <span>{formatDistance(climb.distanceM)}</span>
+                    <span>{Math.round(climb.elevationGainM).toLocaleString()} m</span>
+                  </span>
+                  <span className="muted">{formatDistanceRange(climb.startDistanceM, climb.endDistanceM)}</span>
+                </button>
+              );
+            })}
+          </div>
+          {selectedClimb && (
+            <div className="climb-detail">
+              <div className="climb-detail-metrics">
+                <ClimbStat label="Difficulty" value={selectedClimb.difficulty} />
+                <ClimbStat label="Avg Grade" value={formatGrade(selectedClimb.avgGradePct)} />
+                <ClimbStat label="Distance" value={formatDistance(selectedClimb.distanceM)} />
+                <ClimbStat label="Total Ascent" value={`${Math.round(selectedClimb.elevationGainM).toLocaleString()} m`} />
+              </div>
+              <div className="climb-profile">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={profileData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" minTickGap={26} />
+                    <YAxis width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
+                    <Tooltip
+                      contentStyle={chartTooltipContentStyle}
+                      labelStyle={chartTooltipLabelStyle}
+                      formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Height above start"]}
+                    />
+                    <Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -4867,6 +5025,22 @@ function formatPace(secondsPerKm?: number) {
   const minutes = Math.floor(secondsPerKm / 60);
   const seconds = Math.round(secondsPerKm % 60);
   return `${minutes}:${String(seconds).padStart(2, "0")} /km`;
+}
+
+function climbSensitivityPresetForValue(value: number) {
+  return climbSensitivityPresets.find((preset) => preset.value === value)?.id ?? "custom";
+}
+
+function climbSensitivityPresetLabel(value: number) {
+  const preset = climbSensitivityPresets.find((candidate) => candidate.id === climbSensitivityPresetForValue(value));
+  return preset ? preset.label : "Custom";
+}
+
+function clampClimbSensitivity(value: number) {
+  if (!Number.isFinite(value)) {
+    return defaultClimbSensitivity;
+  }
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function formatCalories(value?: number) {
