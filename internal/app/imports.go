@@ -343,6 +343,7 @@ func (TCXParser) Parse(_ context.Context, filename string, data []byte) (Importe
 				var cadence *int
 				if point.Cadence != nil {
 					cadenceValue := *point.Cadence
+					cadenceValue = normalizeCadence(cadenceValue, sport)
 					cadence = &cadenceValue
 				}
 
@@ -532,7 +533,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 
 		var cadence *int
 		if record.Cadence > 0 && record.Cadence < 255 {
-			value := int(record.Cadence)
+			value := normalizeCadence(int(record.Cadence), sport)
 			cadence = &value
 		}
 
@@ -726,6 +727,25 @@ func parseExtensions(value string) (*int, *int) {
 		}
 	}
 	return hr, cadence
+}
+
+func normalizeCadence(value int, sport string) int {
+	if value <= 0 {
+		return value
+	}
+	if !isRunningSport(sport) {
+		return value
+	}
+	return value * 2
+}
+
+func isRunningSport(value string) bool {
+	switch normalizeSport(value) {
+	case "Run", "Treadmill Run":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeImported(activity *ImportedActivity) {
