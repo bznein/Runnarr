@@ -1873,6 +1873,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
+  const routeUsesGap = (activity.data?.activity.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+
+  useEffect(() => {
+    if (!routeUsesGap) {
+      setRouteColorSource("pace");
+    }
+  }, [id, routeUsesGap]);
 
   useEffect(() => {
     setHighlightedSample(undefined);
@@ -1899,7 +1906,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const locatedMedia = mediaItems.filter(hasMediaLocation);
   const routePoints = routeForActivity(item);
   const canExportGPX = canExportActivityGPX(item);
-  const routeUsesGap = (item.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
   const paceScale = paceScaleForActivity(item, "pace");
   const routePaceScale = paceScaleForActivity(item, routeColorSource);
   const paceRouteSegments = paceRouteSegmentsForActivity(item, routePaceScale, routeColorSource);
@@ -1938,12 +1944,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     uploadMedia.reset();
     uploadMedia.mutate(files);
   };
-
-  useEffect(() => {
-    if (!routeUsesGap) {
-      setRouteColorSource("pace");
-    }
-  }, [item.id, routeUsesGap]);
 
   return (
     <Page
@@ -2048,24 +2048,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <section className="panel">
           <div className="route-panel-header">
             <div className="panel-heading">Route</div>
-            {routeUsesGap && (
-              <div className="segmented-control route-color-source-control" role="group" aria-label="Route color source">
-                <button
-                  type="button"
-                  className={routeColorSource === "pace" ? "active" : ""}
-                  onClick={() => setRouteColorSource("pace")}
-                >
-                  Pace
-                </button>
-                <button
-                  type="button"
-                  className={routeColorSource === "gap" ? "active" : ""}
-                  onClick={() => setRouteColorSource("gap")}
-                >
-                  GAP
-                </button>
-              </div>
-            )}
           </div>
           <ActivityMap
             points={routePoints}
@@ -2079,6 +2061,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             selectedMediaId={selectedMediaId}
             onSelectMedia={setSelectedMediaId}
             routeColorSource={routeColorSource}
+            onRouteColorSourceChange={setRouteColorSource}
+            showRouteColorSelector={routeUsesGap}
           />
         </section>
       )}
@@ -3606,7 +3590,9 @@ function ActivityMap({
   mediaMarkers = [],
   selectedMediaId,
   onSelectMedia,
-  routeColorSource
+  routeColorSource,
+  onRouteColorSourceChange,
+  showRouteColorSelector
 }: {
   points: RoutePoint[];
   paceSegments?: PaceRouteSegment[];
@@ -3619,6 +3605,8 @@ function ActivityMap({
   selectedMediaId?: string;
   onSelectMedia?: (mediaId: string) => void;
   routeColorSource?: RouteColorSource;
+  onRouteColorSourceChange?: (next: RouteColorSource) => void;
+  showRouteColorSelector?: boolean;
 }) {
   const mediaPoints = mediaMarkers.map(mediaRoutePoint).filter((point): point is RoutePoint => Boolean(point));
   const mapPoints = [...points, ...mediaPoints];
@@ -3640,6 +3628,12 @@ function ActivityMap({
         <ActivityMediaMapMarkers mediaMarkers={mediaMarkers} selectedMediaId={selectedMediaId} onSelectMedia={onSelectMedia} />
         <FitMapContent points={mapPoints} />
       </MapContainer>
+      {showRouteColorSelector && onRouteColorSourceChange && (
+        <ActivityRouteColorSourceControl
+          source={routeColorSource ?? "pace"}
+          onSelect={onRouteColorSourceChange}
+        />
+      )}
       {paceSegments.length > 0 && <ActivityPaceRouteLegend source={routeColorSource ?? "pace"} />}
     </div>
   );
@@ -3652,6 +3646,36 @@ function ActivityPaceRouteLegend({ source }: { source: RouteColorSource }) {
       <span>slowest {label}</span>
       <span className="pace-route-legend-gradient" style={{ background: `linear-gradient(to right, ${PACE_ROUTE_COLORS.join(", ")})` }} />
       <span>fastest {label}</span>
+    </div>
+  );
+}
+
+function ActivityRouteColorSourceControl({
+  source,
+  onSelect
+}: {
+  source: RouteColorSource;
+  onSelect: (source: RouteColorSource) => void;
+}) {
+  return (
+    <div className={`route-color-source-slider${source === "gap" ? " gap" : ""}`} role="radiogroup" aria-label="Route color source">
+      <span className="route-color-source-slider-thumb" aria-hidden="true" />
+      <button
+        type="button"
+        className={source === "pace" ? "active" : ""}
+        aria-pressed={source === "pace"}
+        onClick={() => onSelect("pace")}
+      >
+        Pace
+      </button>
+      <button
+        type="button"
+        className={source === "gap" ? "active" : ""}
+        aria-pressed={source === "gap"}
+        onClick={() => onSelect("gap")}
+      >
+        GAP
+      </button>
     </div>
   );
 }
