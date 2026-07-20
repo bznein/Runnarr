@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-07-20
+
 ### Features
 
 - Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.
