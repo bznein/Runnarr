@@ -23,6 +23,8 @@ var ErrActivitySyncExcluded = errors.New("activity is excluded from provider syn
 var ErrInvalidActivityName = errors.New("activity name must be between 1 and 160 characters")
 var ErrInvalidActivityNotes = errors.New("activity notes must be 5000 characters or fewer")
 
+const appSettingsID = "default"
+
 func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
 }
@@ -490,8 +492,107 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 		return activity, err
 	}
 	activity.Gear = gear
-	activity.Climbs = detectActivityClimbs(samples)
+	climbSettings, err := s.GetClimbDetectionSettings(ctx)
+	if err != nil {
+		return activity, err
+	}
+	activity.Climbs = detectActivityClimbsWithSettings(samples, climbSettings.Settings)
 	return activity, nil
+}
+
+func (s *Store) GetClimbDetectionSettings(ctx context.Context) (ClimbDetectionConfig, error) {
+	settings := ClimbDetectionConfig{
+		Preset:      defaultClimbDetectionPreset,
+		Settings:    defaultClimbDetectionSettings(),
+		Sensitivity: defaultClimbDetectionSensitivity,
+	}
+
+	row := s.db.QueryRow(ctx, `
+		select
+			climb_smoothing_radius_m,
+			min_climb_distance_m,
+			min_climb_elevation_gain_m,
+			min_climb_average_grade_pct,
+			max_climb_merge_dip_distance_m,
+			max_climb_merge_elevation_loss_m,
+			climb_start_gain_m,
+			climb_detection_preset
+		from app_settings
+		where id = $1
+	`, appSettingsID)
+
+	var smoothingRadius, minDistance, minElevationGain, minGradePct, maxDipDistance, maxDipLoss, startGain float64
+	var preset string
+	if err := row.Scan(&smoothingRadius, &minDistance, &minElevationGain, &minGradePct, &maxDipDistance, &maxDipLoss, &startGain, &preset); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return settings, nil
+		}
+		return settings, err
+	}
+
+	configured := ClimbDetectionSettings{
+		ClimbSmoothingRadiusM:       smoothingRadius,
+		MinClimbDistanceM:           minDistance,
+		MinClimbElevationGainM:      minElevationGain,
+		MinClimbAverageGradePct:     minGradePct,
+		MaxClimbMergeDipDistanceM:   maxDipDistance,
+		MaxClimbMergeElevationLossM: maxDipLoss,
+		ClimbStartGainM:             startGain,
+	}
+	if err := validateClimbDetectionSettings(configured); err == nil {
+		settings.Settings = configured
+	}
+	if preset != "" {
+		settings.Preset = preset
+	}
+	settings.Sensitivity = climbDetectionSensitivityFromSettings(settings.Settings)
+	return settings, nil
+}
+
+func (s *Store) SetClimbDetectionSettings(ctx context.Context, preset string, settings ClimbDetectionSettings) error {
+	if err := validateClimbDetectionSettings(settings); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(ctx, `
+		insert into app_settings(
+			id,
+			climb_smoothing_radius_m,
+			min_climb_distance_m,
+			min_climb_elevation_gain_m,
+			min_climb_average_grade_pct,
+			max_climb_merge_dip_distance_m,
+			max_climb_merge_elevation_loss_m,
+			climb_start_gain_m,
+			climb_detection_preset,
+			created_at,
+			updated_at
+		)
+		values(
+			$1, $2, $3, $4, $5, $6, $7, $8, $9,
+			now(),
+			now()
+		)
+		on conflict(id) do update set
+			climb_smoothing_radius_m = excluded.climb_smoothing_radius_m,
+			min_climb_distance_m = excluded.min_climb_distance_m,
+			min_climb_elevation_gain_m = excluded.min_climb_elevation_gain_m,
+			min_climb_average_grade_pct = excluded.min_climb_average_grade_pct,
+			max_climb_merge_dip_distance_m = excluded.max_climb_merge_dip_distance_m,
+			max_climb_merge_elevation_loss_m = excluded.max_climb_merge_elevation_loss_m,
+			climb_start_gain_m = excluded.climb_start_gain_m,
+			climb_detection_preset = excluded.climb_detection_preset,
+			updated_at = now()
+	`, appSettingsID,
+		settings.ClimbSmoothingRadiusM,
+		settings.MinClimbDistanceM,
+		settings.MinClimbElevationGainM,
+		settings.MinClimbAverageGradePct,
+		settings.MaxClimbMergeDipDistanceM,
+		settings.MaxClimbMergeElevationLossM,
+		settings.ClimbStartGainM,
+		preset,
+	)
+	return err
 }
 
 func (s *Store) ActivityExists(ctx context.Context, id string) (bool, error) {

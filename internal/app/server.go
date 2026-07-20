@@ -69,11 +69,13 @@ func (s *Server) Routes() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
 			r.Get("/config", s.handleConfig)
+			r.Patch("/config/climb-detection", s.handleUpdateClimbDetection)
 			r.Post("/tools/pace", s.handleToolsPace)
 			r.Post("/tools/vdot", s.handleToolsVDOT)
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
+			r.Post("/activities/{id}/climbs-preview", s.handleActivityClimbsPreview)
 			r.Get("/activities/{id}", s.handleGetActivity)
 			r.Patch("/activities/{id}", s.handleRenameActivity)
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
@@ -99,6 +101,26 @@ func (s *Server) Routes() http.Handler {
 
 	r.NotFound(s.serveSPA)
 	return r
+}
+
+type climbDetectionUpdateRequest struct {
+	Settings    *ClimbDetectionSettings `json:"settings"`
+	Preset      string                 `json:"preset"`
+	Sensitivity *int                   `json:"sensitivity"`
+}
+
+type climbDetectionPayload struct {
+	MapTileURL     string             `json:"mapTileURL"`
+	BaseURL        string             `json:"baseURL"`
+	ClimbDetection ClimbDetectionConfig `json:"climbDetection"`
+}
+
+type climbPreviewRequest struct {
+	Sensitivity int `json:"sensitivity"`
+}
+
+type climbPreviewPayload struct {
+	Climbs []ActivityClimb `json:"climbs"`
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -184,11 +206,89 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 }
 
-func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"mapTileURL": s.cfg.MapTileURL,
-		"baseURL":    s.cfg.BaseURL,
-	})
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	payload, err := s.climbDetectionPayload(r.Context())
+	if err != nil {
+		s.logger.Error("load config", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load config")
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) handleUpdateClimbDetection(w http.ResponseWriter, r *http.Request) {
+	var body climbDetectionUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	var settings ClimbDetectionSettings
+	preset := strings.TrimSpace(body.Preset)
+	if body.Sensitivity != nil {
+		settings = climbDetectionSettingsForSensitivity(*body.Sensitivity)
+		if preset == "" {
+			preset = "custom"
+		}
+	} else if body.Settings != nil {
+		settings = *body.Settings
+		if err := validateClimbDetectionSettings(settings); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
+		writeError(w, http.StatusBadRequest, "either settings or sensitivity must be provided")
+		return
+	}
+	if preset == "" {
+		preset = "custom"
+	}
+	if err := s.store.SetClimbDetectionSettings(r.Context(), preset, settings); err != nil {
+		s.logger.Error("update climb detection settings", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not save climb detection settings")
+		return
+	}
+	payload, err := s.climbDetectionPayload(r.Context())
+	if err != nil {
+		s.logger.Error("load config", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load config")
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) handleActivityClimbsPreview(w http.ResponseWriter, r *http.Request) {
+	var body climbPreviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	activity, err := s.store.GetActivity(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("get activity for climb preview", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not get activity")
+		return
+	}
+
+	payload := climbPreviewPayload{
+		Climbs: detectActivityClimbsWithSettings(activity.Samples, climbDetectionSettingsForSensitivity(body.Sensitivity)),
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) climbDetectionPayload(ctx context.Context) (climbDetectionPayload, error) {
+	climbDetection, err := s.store.GetClimbDetectionSettings(ctx)
+	if err != nil {
+		return climbDetectionPayload{}, err
+	}
+	return climbDetectionPayload{
+		MapTileURL:     s.cfg.MapTileURL,
+		BaseURL:        s.cfg.BaseURL,
+		ClimbDetection: climbDetection,
+	}, nil
 }
 
 func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
