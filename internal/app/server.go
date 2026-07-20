@@ -85,6 +85,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activity-media/{mediaId}/thumbnail", s.handleServeThumbnailMedia)
 			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
+			r.Get("/stats/calendar", s.handleCalendar)
 			r.Get("/health/daily", s.handleDailyHealthMetrics)
 			r.Get("/gears", s.handleListGears)
 			r.Get("/gears/{id}", s.handleGetGear)
@@ -105,13 +106,13 @@ func (s *Server) Routes() http.Handler {
 
 type climbDetectionUpdateRequest struct {
 	Settings    *ClimbDetectionSettings `json:"settings"`
-	Preset      string                 `json:"preset"`
-	Sensitivity *int                   `json:"sensitivity"`
+	Preset      string                  `json:"preset"`
+	Sensitivity *int                    `json:"sensitivity"`
 }
 
 type climbDetectionPayload struct {
-	MapTileURL     string             `json:"mapTileURL"`
-	BaseURL        string             `json:"baseURL"`
+	MapTileURL     string               `json:"mapTileURL"`
+	BaseURL        string               `json:"baseURL"`
 	ClimbDetection ClimbDetectionConfig `json:"climbDetection"`
 }
 
@@ -524,6 +525,24 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, stats)
+}
+
+func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
+	filters := activityFiltersFromQuery(r)
+	dateFrom, dateTo, err := calendarDateRangeFromQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	filters.DateFrom = dateFrom
+	filters.DateTo = dateTo
+	calendar, err := s.store.ActivityCalendar(r.Context(), filters)
+	if err != nil {
+		s.logger.Error("calendar activities", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load calendar")
+		return
+	}
+	writeJSON(w, http.StatusOK, calendar)
 }
 
 func (s *Server) handleDailyHealthMetrics(w http.ResponseWriter, r *http.Request) {
@@ -973,6 +992,33 @@ func parseOptionalAPIDate(value, field string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("%s must use YYYY-MM-DD format", field)
 	}
 	return parsed, nil
+}
+
+func calendarDateRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
+	values := r.URL.Query()
+	dateFrom, err := parseOptionalAPIDate(values.Get("dateFrom"), "dateFrom")
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	dateTo, err := parseOptionalAPIDate(values.Get("dateTo"), "dateTo")
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if dateFrom.IsZero() && dateTo.IsZero() {
+		now := time.Now().UTC()
+		dateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+		dateTo = dateFrom.AddDate(0, 1, 0).Add(-24 * time.Hour)
+	}
+	if dateFrom.IsZero() {
+		dateFrom = dateTo
+	}
+	if dateTo.IsZero() {
+		dateTo = dateFrom
+	}
+	if dateFrom.After(dateTo) {
+		return time.Time{}, time.Time{}, errors.New("dateFrom must be before or equal to dateTo")
+	}
+	return dateFrom, dateTo, nil
 }
 
 func activityFiltersFromQuery(r *http.Request) ActivityFilters {

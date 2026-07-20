@@ -380,6 +380,97 @@ textarea {
   font-weight: 680;
 }
 
+.calendar-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.calendar-month-label {
+  font-weight: 700;
+}
+
+.calendar-weekday-header {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+  font-weight: 680;
+  font-size: 12px;
+  color: var(--color-muted-strong);
+}
+
+.calendar-weekday-header span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface-soft);
+  border: 1px solid var(--color-border-soft);
+  border-radius: 6px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar-day-cell {
+  min-height: 122px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 6px;
+}
+
+.calendar-day-cell.empty {
+  border-color: transparent;
+  background: transparent;
+}
+
+.calendar-day-cell--active {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary-soft) 45%, var(--color-surface-muted));
+}
+
+.calendar-day-number {
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--color-text-soft);
+}
+
+.calendar-day-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+  align-content: start;
+  list-style: none;
+  min-height: 0;
+  overflow: auto;
+}
+
+.calendar-day-activity {
+  display: grid;
+  gap: 3px;
+}
+
+.calendar-day-activity a {
+  font-size: 12px;
+  color: var(--color-primary-text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.calendar-day-activity-meta {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
 .panel {
   min-width: 0;
   padding: 18px;
@@ -2165,6 +2256,20 @@ textarea {
   .theme-control {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .calendar-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .calendar-month-label {
+    width: 100%;
+    text-align: left;
+  }
+
+  .calendar-day-cell {
+    min-height: 95px;
   }
 
   .media-preview-dialog {

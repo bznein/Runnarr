@@ -448,6 +448,60 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 	return page, nil
 }
 
+func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (ActivityCalendar, error) {
+	where, args := activityFilterWhere(filters, 1)
+	rows, err := s.db.Query(ctx, `
+		select
+			date(start_time) as day,
+			id::text,
+			coalesce(nullif(local_name, ''), name),
+			start_time,
+			sport_type,
+			coalesce(distance_m, 0),
+			coalesce(moving_time_s, 0)
+		from activities
+	`+where+`
+		order by day, start_time
+	`, args...)
+	if err != nil {
+		return ActivityCalendar{}, err
+	}
+	defer rows.Close()
+
+	activityByDay := map[string][]CalendarActivity{}
+	orderedDays := make([]string, 0)
+	for rows.Next() {
+		var day time.Time
+		var item CalendarActivity
+		if err := rows.Scan(&day, &item.ID, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS); err != nil {
+			return ActivityCalendar{}, err
+		}
+		dayKey := day.Format("2006-01-02")
+		if _, seen := activityByDay[dayKey]; !seen {
+			orderedDays = append(orderedDays, dayKey)
+		}
+		activityByDay[dayKey] = append(activityByDay[dayKey], item)
+	}
+	if err := rows.Err(); err != nil {
+		return ActivityCalendar{}, err
+	}
+
+	calendar := ActivityCalendar{
+		MonthStart: formatCalendarMonthDate(filters.DateFrom),
+		MonthEnd:   formatCalendarMonthDate(filters.DateTo),
+		Days:       make([]CalendarDay, 0, len(orderedDays)),
+	}
+	for _, day := range orderedDays {
+		calendar.Days = append(calendar.Days, CalendarDay{
+			Date:          day,
+			ActivityCount: len(activityByDay[day]),
+			Activities:    activityByDay[day],
+		})
+	}
+
+	return calendar, nil
+}
+
 func normalizeActivityPage(limit, offset int) (int, int) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
@@ -456,6 +510,13 @@ func normalizeActivityPage(limit, offset int) (int, int) {
 		offset = 0
 	}
 	return limit, offset
+}
+
+func formatCalendarMonthDate(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format("2006-01-02")
 }
 
 func (s *Store) IsActivitySyncExcluded(ctx context.Context, source, sourceID string) (bool, error) {

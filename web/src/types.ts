@@ -211,6 +211,27 @@ export type ActivityListPage = {
   hasMore: boolean;
 };
 
+export type CalendarActivitySummary = {
+  id: string;
+  name: string;
+  startTime: string;
+  sportType: string;
+  distanceM: number;
+  movingTimeS: number;
+};
+
+export type CalendarDay = {
+  date: string;
+  activityCount: number;
+  activities: CalendarActivitySummary[];
+};
+
+export type ActivityCalendar = {
+  monthStart: string;
+  monthEnd: string;
+  days: CalendarDay[];
+};
+
 export type SummaryStats = {
   activityCount: number;
   distanceM: number;

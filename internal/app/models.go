@@ -43,8 +43,8 @@ type ClimbDetectionSettings struct {
 
 type ClimbDetectionConfig struct {
 	Settings    ClimbDetectionSettings `json:"settings"`
-	Preset      string                `json:"preset"`
-	Sensitivity int                   `json:"sensitivity"`
+	Preset      string                 `json:"preset"`
+	Sensitivity int                    `json:"sensitivity"`
 }
 
 type DeleteActivityResult struct {
@@ -271,4 +271,25 @@ type SummaryStats struct {
 type WeeklyBucket struct {
 	WeekStart time.Time `json:"weekStart"`
 	DistanceM float64   `json:"distanceM"`
+}
+
+type CalendarActivity struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	StartTime   time.Time `json:"startTime"`
+	SportType   string    `json:"sportType"`
+	DistanceM   float64   `json:"distanceM"`
+	MovingTimeS int       `json:"movingTimeS"`
+}
+
+type CalendarDay struct {
+	Date          string             `json:"date"`
+	ActivityCount int                `json:"activityCount"`
+	Activities    []CalendarActivity `json:"activities"`
+}
+
+type ActivityCalendar struct {
+	MonthStart string        `json:"monthStart"`
+	MonthEnd   string        `json:"monthEnd"`
+	Days       []CalendarDay `json:"days"`
 }
