@@ -1710,9 +1710,21 @@ textarea {
   border-radius: 8px;
 }
 
+.route-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .route-map {
   width: 100%;
   height: 100%;
+}
+
+.route-color-source-control {
+  min-width: 148px;
+  grid-template-columns: 1fr 1fr;
 }
 
 .pace-route-legend {
