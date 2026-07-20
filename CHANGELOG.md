@@ -25,6 +25,7 @@
 
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
+- Activity type names from providers are now normalized for UI consistency (for example, Cycling, Treadmill Run, and Swimming variants render with readable labels).
 - Route GAP/PACE selector now uses a clean sliding control without an extra divider edge under Pace.
 
 ## 0.3.0 - 2026-07-16
