@@ -714,14 +714,42 @@ func parseTrainingSheetID(sheetURL string) (string, string, error) {
 	pathParts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	for i, part := range pathParts {
 		if part == "d" && i+1 < len(pathParts) {
-			return pathParts[i+1], parsed.Query().Get("gid"), nil
+			reqGID := parsed.Query().Get("gid")
+			if reqGID == "" {
+				reqGID = parseTrainingSheetGIDFromFragment(parsed.Fragment)
+			}
+			return pathParts[i+1], reqGID, nil
 		}
 	}
 	if strings.Contains(parsed.Host, "docs.google.com") && len(pathParts) >= 1 {
-		return pathParts[len(pathParts)-1], parsed.Query().Get("gid"), nil
+		reqGID := parsed.Query().Get("gid")
+		if reqGID == "" {
+			reqGID = parseTrainingSheetGIDFromFragment(parsed.Fragment)
+		}
+		return pathParts[len(pathParts)-1], reqGID, nil
 	}
 
 	return "", "", fmt.Errorf("could not extract spreadsheet id")
+}
+
+func parseTrainingSheetGIDFromFragment(fragment string) string {
+	fragment = strings.TrimPrefix(strings.TrimSpace(fragment), "#")
+	if fragment == "" {
+		return ""
+	}
+	if parsedFragment, err := url.Parse("?" + fragment); err == nil {
+		if value := parsedFragment.Query().Get("gid"); value != "" {
+			return value
+		}
+	}
+	if idx := strings.Index(fragment, "gid="); idx >= 0 {
+		fragment = fragment[idx+4:]
+		if amp := strings.Index(fragment, "&"); amp >= 0 {
+			fragment = fragment[:amp]
+		}
+		return fragment
+	}
+	return ""
 }
 
 func normalizeHeaderForSheet(value string) string {
