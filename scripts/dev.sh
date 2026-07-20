@@ -194,9 +194,14 @@ bootstrap_env() {
   set +a
 
   local updated=0
+  local persisted=0
+  local persist_runtime_defaults="${RUNNARR_PERSIST_RUNTIME_DEFAULTS:-0}"
   if [ -z "${DATABASE_URL:-}" ] || [ "${DATABASE_URL}" = "postgres://runnarr:runnarr@db:5432/runnarr?sslmode=disable" ]; then
     DATABASE_URL="postgres://runnarr:runnarr@localhost:5432/runnarr?sslmode=disable"
-    write_env_line "DATABASE_URL" "${DATABASE_URL}"
+    if [ "${persist_runtime_defaults}" = "1" ]; then
+      write_env_line "DATABASE_URL" "${DATABASE_URL}"
+      persisted=1
+    fi
     export DATABASE_URL
     updated=1
   fi
@@ -213,7 +218,10 @@ bootstrap_env() {
       backend_port=59000
     fi
     RUNNARR_HTTP_ADDR=":${backend_port}"
-    write_env_line "RUNNARR_HTTP_ADDR" "${RUNNARR_HTTP_ADDR}"
+    if [ "${persist_runtime_defaults}" = "1" ]; then
+      write_env_line "RUNNARR_HTTP_ADDR" "${RUNNARR_HTTP_ADDR}"
+      persisted=1
+    fi
     export RUNNARR_HTTP_ADDR
     updated=1
   fi
@@ -223,6 +231,7 @@ bootstrap_env() {
     write_env_line "RUNNARR_SECRET_KEY" "${RUNNARR_SECRET_KEY}"
     export RUNNARR_SECRET_KEY
     updated=1
+    persisted=1
     echo "Generated RUNNARR_SECRET_KEY in .env"
   fi
 
@@ -231,11 +240,14 @@ bootstrap_env() {
     write_env_line "RUNNARR_ADMIN_PASSWORD" "${RUNNARR_ADMIN_PASSWORD}"
     export RUNNARR_ADMIN_PASSWORD
     updated=1
+    persisted=1
     echo "Generated RUNNARR_ADMIN_PASSWORD in .env: ${RUNNARR_ADMIN_PASSWORD}"
   fi
 
-  if [ "${updated}" -eq 1 ]; then
+  if [ "${persisted}" -eq 1 ]; then
     echo "Updated ${ENV_FILE} with runtime defaults."
+  elif [ "${updated}" -eq 1 ]; then
+    echo "Using runtime defaults in this session from ${ENV_FILE}."
   fi
 
   set -a

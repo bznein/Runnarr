@@ -140,6 +140,21 @@ func TestNormalizeSport(t *testing.T) {
 	}
 }
 
+func TestNormalizeCadence(t *testing.T) {
+	if got, want := normalizeCadence(88, "Run"), 176; got != want {
+		t.Fatalf("normalizeCadence(88, \"Run\") = %d, want %d", got, want)
+	}
+	if got, want := normalizeCadence(178, "Run"), 356; got != want {
+		t.Fatalf("normalizeCadence(178, \"Run\") = %d, want %d", got, want)
+	}
+	if got, want := normalizeCadence(90, "Treadmill Run"), 180; got != want {
+		t.Fatalf("normalizeCadence(90, \"Treadmill Run\") = %d, want %d", got, want)
+	}
+	if got, want := normalizeCadence(88, "Cycling"), 88; got != want {
+		t.Fatalf("normalizeCadence(88, \"Cycling\") = %d, want %d", got, want)
+	}
+}
+
 func TestIsProviderSyncedSource(t *testing.T) {
 	if !isProviderSyncedSource("garmin", "123", true) {
 		t.Fatal("garmin source should be provider synced")
