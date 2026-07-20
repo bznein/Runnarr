@@ -4,6 +4,8 @@
 
 ### Features
 
+- Added a new `/tools` page and backend `/api/tools/pace` endpoint for pace calculations. Users can enter any two of distance, time, and pace to compute the missing value while calculation remains server-side.
+
 - Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.
 - Activity list columns can now be toggled, and long activity/gear names are clipped more aggressively to keep the list scannable.
 - Activity detail pages now support local-only notes that do not modify provider activities.

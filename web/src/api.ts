@@ -1,4 +1,4 @@
-import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DailyHealthMetric, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, GearDetailResponse, GearListResponse, ImportFile, Session, SummaryStats, SyncJob } from "./types";
+import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DailyHealthMetric, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, GearDetailResponse, GearListResponse, ImportFile, Session, SummaryStats, SyncJob, ToolsPaceRequest, ToolsPaceResponse, ToolsVdotRequest, ToolsVdotResponse } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -107,6 +107,14 @@ export const api = {
     const query = healthRangeQuery(range);
     return request<{ metrics: DailyHealthMetric[] | null }>(`/api/health/daily${query ? `?${query}` : ""}`);
   },
+  toolsPace: (body: ToolsPaceRequest) => request<ToolsPaceResponse>("/api/tools/pace", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
+  toolsVDOT: (body: ToolsVdotRequest) => request<ToolsVdotResponse>("/api/tools/vdot", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
   activities: (filters?: ActivityTypeFilters, page?: ActivityPageOptions) => {
     const query = activityFilterQuery(filters, page);
     return request<ActivityListPage>(`/api/activities${query ? `?${query}` : ""}`);
