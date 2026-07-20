@@ -22,6 +22,7 @@
 
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
+- Route GAP/PACE selector now uses a clean sliding control without an extra divider edge under Pace.
 
 ## 0.3.0 - 2026-07-16
 
