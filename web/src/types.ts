@@ -3,6 +3,45 @@ export type Session = {
   csrfToken?: string;
 };
 
+export type ToolsPaceRequest = {
+  distanceKm?: string;
+  time?: string;
+  pace?: string;
+};
+
+export type ToolsPaceResponse = {
+  distanceKm: number;
+  timeSeconds: number;
+  paceSecondsPerKm: number;
+  computed: "distance" | "time" | "pace";
+  distanceLabel: string;
+  timeLabel: string;
+  paceLabel: string;
+};
+
+export type ToolsVdotEquivalent = {
+  race: string;
+  distanceKm: number;
+  distanceLabel: string;
+  timeSeconds: number;
+  timeLabel: string;
+};
+
+export type ToolsVdotRequest = {
+  distanceKm?: string;
+  time?: string;
+};
+
+export type ToolsVdotResponse = {
+  distanceKm: number;
+  timeSeconds: number;
+  vdot: number;
+  vdotLabel: string;
+  distanceLabel: string;
+  timeLabel: string;
+  equivalents: ToolsVdotEquivalent[];
+};
+
 export type AppConfig = {
   mapTileURL: string;
   baseURL: string;

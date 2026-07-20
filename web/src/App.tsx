@@ -3,14 +3,14 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
-import type { Activity, ActivityClimb, ActivityLap, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, Gear, GearSummary, ImportFile, SyncJob } from "./types";
+import type { Activity, ActivityClimb, ActivityLap, ActivityMedia, ActivitySample, ActivitySortBy, ActivityTypeFilters as ActivityTypeFiltersValue, AppConfig, DailyHealthMetric, Gear, GearSummary, ImportFile, SyncJob, ToolsPaceResponse, ToolsVdotResponse } from "./types";
 
 type RoutePoint = [number, number];
 type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
@@ -81,6 +81,13 @@ const healthBarChartMaxDays = 30;
 const themePreferenceStorageKey = "runnarr-theme-preference";
 const activityColumnsStorageKey = "runnarr-activity-list-columns";
 const gearSortByStorageKey = "runnarr-gear-sort-by";
+const vdotDistancePresets: Array<{ id: string; label: string; distanceKm: string }> = [
+  { id: "marathon", label: "Marathon", distanceKm: "42.195" },
+  { id: "half-marathon", label: "HM", distanceKm: "21.0975" },
+  { id: "10m", label: "10M", distanceKm: "16.0934" },
+  { id: "10k", label: "10K", distanceKm: "10" },
+  { id: "5k", label: "5K", distanceKm: "5" }
+];
 const activityTableColumnOptions: Array<{ key: ActivityTableColumnKey; label: string }> = [
   { key: "date", label: "Date" },
   { key: "type", label: "Type" },
@@ -263,6 +270,7 @@ function AuthenticatedApp({
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/health" icon={<HeartPulse size={18} />} label="Health" />
+          <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
           <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
         </nav>
         <div className="sidebar-bottom">
@@ -279,6 +287,7 @@ function AuthenticatedApp({
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
           <Route path="/health" element={<HealthPage />} />
+          <Route path="/tools" element={<ToolsPage />} />
           <Route path="/gear" element={<GearPage />} />
           <Route path="/gear/:id" element={<GearDetailPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
@@ -605,6 +614,219 @@ function HealthPage() {
             </div>
           )}
         </>
+      )}
+    </Page>
+  );
+}
+
+function ToolsPage() {
+  const [distanceKm, setDistanceKm] = useState("");
+  const [time, setTime] = useState("");
+  const [pace, setPace] = useState("");
+  const [result, setResult] = useState<ToolsPaceResponse>();
+  const [vdotDistanceKm, setVdotDistanceKm] = useState("");
+  const [vdotTime, setVdotTime] = useState("");
+  const [vdotResult, setVdotResult] = useState<ToolsVdotResponse>();
+  const [error, setError] = useState("");
+  const [vdotError, setVdotError] = useState("");
+  const [vdotDistancePresetId, setVdotDistancePresetId] = useState("");
+  const calculatePace = useMutation({
+    mutationFn: api.toolsPace,
+    onSuccess: (payload) => {
+      setResult(payload);
+      setError("");
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Could not calculate pace values")
+  });
+  const calculateVdot = useMutation({
+    mutationFn: api.toolsVDOT,
+    onSuccess: (payload) => {
+      setVdotResult(payload);
+      setVdotError("");
+    },
+    onError: (err) => setVdotError(err instanceof ApiError ? err.message : "Could not calculate VDOT")
+  });
+  const filledInputs = [distanceKm, time, pace].filter((value) => value.trim().length > 0).length;
+  const canSubmit = filledInputs === 2;
+  const canSubmitVDOT = vdotDistanceKm.trim().length > 0 && vdotTime.trim().length > 0;
+
+  const clearForm = () => {
+    setDistanceKm("");
+    setTime("");
+    setPace("");
+    setResult(undefined);
+    setError("");
+  };
+  const clearVdotForm = () => {
+    setVdotDistanceKm("");
+    setVdotTime("");
+    setVdotDistancePresetId("");
+    setVdotResult(undefined);
+    setVdotError("");
+  };
+  const setVdotDistancePreset = (presetId: string, distanceKm: string) => {
+    setVdotDistancePresetId(presetId);
+    setVdotDistanceKm(distanceKm);
+  };
+  const clearDistancePreset = () => setVdotDistancePresetId("");
+
+  return (
+    <Page title="Tools">
+      <section className="panel">
+        <div className="panel-heading">Pace calculator</div>
+        <p className="tools-help-text">
+          Fill in exactly two fields and submit to compute the missing one. Distance is in km, time is MM:SS or HH:MM:SS, pace is MM:SS /km.
+        </p>
+        <div className="tools-section-spacer" />
+        <form
+          className="tools-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setError("");
+            calculatePace.mutate({
+              distanceKm: distanceKm.trim(),
+              time: time.trim(),
+              pace: pace.trim()
+            });
+          }}
+        >
+          <div className="tools-form-grid">
+            <label className="field">
+              <span>Distance</span>
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                value={distanceKm}
+                placeholder="10.0"
+                onChange={(event) => setDistanceKm(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Time</span>
+              <input
+                type="text"
+                value={time}
+                placeholder="45:00 or 1:45:00"
+                onChange={(event) => setTime(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>Pace</span>
+              <input
+                type="text"
+                value={pace}
+                placeholder="4:30"
+                onChange={(event) => setPace(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="tools-form-actions">
+            <button className="secondary-button small-button" type="button" onClick={clearForm}>
+              Clear
+            </button>
+            <button className="primary-button" type="submit" disabled={!canSubmit || calculatePace.isPending}>
+              {calculatePace.isPending ? "Calculating..." : "Calculate"}
+            </button>
+          </div>
+        </form>
+        {error && <div className="error">{error}</div>}
+      </section>
+
+      {result && (
+        <section className="panel">
+          <div className="panel-heading">Result</div>
+          <section className="tools-result-grid">
+            <Metric label="Distance" value={result.distanceLabel} icon={<RouteIcon size={18} />} />
+            <Metric label="Time" value={result.timeLabel} icon={<Timer size={18} />} />
+            <Metric label="Pace" value={result.paceLabel} icon={<Scale size={18} />} />
+          </section>
+        </section>
+      )}
+
+      <section className="panel">
+        <div className="panel-heading">VDOT calculator</div>
+        <p className="tools-help-text">
+          Enter a race distance and finishing time to estimate your VDOT and predicted times for common race distances.
+        </p>
+        <div className="tools-section-spacer" />
+        <div className="tools-preset-list">
+          {vdotDistancePresets.map((preset) => (
+            <button
+              type="button"
+              key={preset.id}
+              className={`filter-chip ${vdotDistancePresetId === preset.id ? "active" : ""}`}
+              onClick={() => setVdotDistancePreset(preset.id, preset.distanceKm)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="tools-preset-spacer" />
+        <form
+          className="tools-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setVdotError("");
+            calculateVdot.mutate({
+              distanceKm: vdotDistanceKm.trim(),
+              time: vdotTime.trim()
+            });
+          }}
+        >
+          <div className="tools-form-grid">
+            <label className="field">
+              <span>Distance</span>
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                value={vdotDistanceKm}
+                placeholder="10.0"
+                onChange={(event) => {
+                  clearDistancePreset();
+                  setVdotDistanceKm(event.target.value);
+                }}
+              />
+            </label>
+            <label className="field">
+              <span>Time</span>
+              <input
+                type="text"
+                value={vdotTime}
+                placeholder="40:00 or 1:40:00"
+                onChange={(event) => setVdotTime(event.target.value)}
+              />
+            </label>
+            <div className="tools-form-spacer" />
+          </div>
+          <div className="tools-form-actions">
+            <button className="secondary-button small-button" type="button" onClick={clearVdotForm}>
+              Clear
+            </button>
+            <button className="primary-button" type="submit" disabled={!canSubmitVDOT || calculateVdot.isPending}>
+              {calculateVdot.isPending ? "Calculating..." : "Calculate"}
+            </button>
+          </div>
+        </form>
+        {vdotError && <div className="error">{vdotError}</div>}
+      </section>
+
+      {vdotResult && (
+        <section className="panel">
+          <div className="panel-heading">VDOT result</div>
+          <section className="tools-result-grid">
+            <Metric label="Distance" value={vdotResult.distanceLabel} icon={<RouteIcon size={18} />} />
+            <Metric label="Time" value={vdotResult.timeLabel} icon={<Timer size={18} />} />
+            <Metric label="VDOT" value={vdotResult.vdotLabel} icon={<Flame size={18} />} />
+          </section>
+          <p className="tools-help-text tools-result-subtitle">Equivalent race predictions</p>
+          <section className="tools-equivalent-grid">
+            {vdotResult.equivalents.map((equivalent) => (
+              <Metric key={equivalent.race} label={equivalent.race} value={equivalent.timeLabel} icon={<RouteIcon size={18} />} />
+            ))}
+          </section>
+        </section>
       )}
     </Page>
   );

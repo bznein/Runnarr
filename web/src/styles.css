@@ -324,6 +324,62 @@ textarea {
   gap: 16px;
 }
 
+.tools-form {
+  display: grid;
+  gap: 12px;
+}
+
+.tools-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tools-section-spacer {
+  height: 8px;
+}
+
+.tools-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.tools-preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tools-preset-spacer {
+  height: 10px;
+}
+
+.tools-result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tools-equivalent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tools-help-text {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.tools-result-subtitle {
+  margin-top: 10px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 680;
+}
+
 .panel {
   min-width: 0;
   padding: 18px;
@@ -2008,6 +2064,9 @@ textarea {
 
   .metric-grid,
   .split-layout,
+  .tools-form-grid,
+  .tools-equivalent-grid,
+  .tools-result-grid,
   .filter-grid,
   .date-range-grid,
   .search-panel,

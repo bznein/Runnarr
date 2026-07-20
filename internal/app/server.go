@@ -69,6 +69,8 @@ func (s *Server) Routes() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
 			r.Get("/config", s.handleConfig)
+			r.Post("/tools/pace", s.handleToolsPace)
+			r.Post("/tools/vdot", s.handleToolsVDOT)
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
@@ -144,6 +146,34 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"csrfToken":     csrf,
 	})
+}
+
+func (s *Server) handleToolsPace(w http.ResponseWriter, r *http.Request) {
+	var body toolsPaceRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	result, err := calculateToolsPace(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleToolsVDOT(w http.ResponseWriter, r *http.Request) {
+	var body toolsVDOTRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	result, err := calculateToolsVDOT(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
