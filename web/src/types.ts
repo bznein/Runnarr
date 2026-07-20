@@ -42,9 +42,36 @@ export type ToolsVdotResponse = {
   equivalents: ToolsVdotEquivalent[];
 };
 
+export type ClimbDetectionSettings = {
+  climbSmoothingRadiusM: number;
+  minClimbDistanceM: number;
+  minClimbElevationGainM: number;
+  minClimbAverageGradePct: number;
+  maxClimbMergeDipDistanceM: number;
+  maxClimbMergeElevationLossM: number;
+  climbStartGainM: number;
+};
+
+export type ClimbDetectionConfig = {
+  preset: string;
+  settings: ClimbDetectionSettings;
+  sensitivity: number;
+};
+
+export type ClimbDetectionSettingsUpdate = {
+  preset?: string;
+  settings?: ClimbDetectionSettings;
+  sensitivity?: number;
+};
+
 export type AppConfig = {
   mapTileURL: string;
   baseURL: string;
+  climbDetection: ClimbDetectionConfig;
+};
+
+export type ActivityClimbPreviewResponse = {
+  climbs: ActivityClimb[];
 };
 
 export type ActivitySample = {

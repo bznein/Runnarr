@@ -31,6 +31,22 @@ type Activity struct {
 	CreatedAt                time.Time        `json:"createdAt"`
 }
 
+type ClimbDetectionSettings struct {
+	ClimbSmoothingRadiusM       float64 `json:"climbSmoothingRadiusM"`
+	MinClimbDistanceM           float64 `json:"minClimbDistanceM"`
+	MinClimbElevationGainM      float64 `json:"minClimbElevationGainM"`
+	MinClimbAverageGradePct     float64 `json:"minClimbAverageGradePct"`
+	MaxClimbMergeDipDistanceM   float64 `json:"maxClimbMergeDipDistanceM"`
+	MaxClimbMergeElevationLossM float64 `json:"maxClimbMergeElevationLossM"`
+	ClimbStartGainM             float64 `json:"climbStartGainM"`
+}
+
+type ClimbDetectionConfig struct {
+	Settings    ClimbDetectionSettings `json:"settings"`
+	Preset      string                `json:"preset"`
+	Sensitivity int                   `json:"sensitivity"`
+}
+
 type DeleteActivityResult struct {
 	Deleted              bool   `json:"deleted"`
 	ExcludedFromSync     bool   `json:"excludedFromSync"`

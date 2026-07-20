@@ -1,4 +1,26 @@
-import type { Activity, ActivityListPage, ActivityMedia, ActivityTypeFilters, AppConfig, DailyHealthMetric, DeleteActivityMediaResult, DeleteActivityResult, GarminStatus, GearDetailResponse, GearListResponse, ImportFile, Session, SummaryStats, SyncJob, ToolsPaceRequest, ToolsPaceResponse, ToolsVdotRequest, ToolsVdotResponse } from "./types";
+import type {
+  Activity,
+  ActivityClimbPreviewResponse,
+  ActivityListPage,
+  ActivityMedia,
+  ActivityTypeFilters,
+  AppConfig,
+  ClimbDetectionSettingsUpdate,
+  DailyHealthMetric,
+  DeleteActivityMediaResult,
+  DeleteActivityResult,
+  GarminStatus,
+  GearDetailResponse,
+  GearListResponse,
+  ImportFile,
+  Session,
+  SummaryStats,
+  SyncJob,
+  ToolsPaceRequest,
+  ToolsPaceResponse,
+  ToolsVdotRequest,
+  ToolsVdotResponse
+} from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -113,6 +135,14 @@ export const api = {
   }),
   toolsVDOT: (body: ToolsVdotRequest) => request<ToolsVdotResponse>("/api/tools/vdot", {
     method: "POST",
+    body: JSON.stringify(body)
+  }),
+  activityClimbPreview: (id: string, sensitivity: number) => request<ActivityClimbPreviewResponse>(`/api/activities/${encodeURIComponent(id)}/climbs-preview`, {
+    method: "POST",
+    body: JSON.stringify({ sensitivity })
+  }),
+  updateClimbDetectionSettings: (body: ClimbDetectionSettingsUpdate) => request<AppConfig>("/api/config/climb-detection", {
+    method: "PATCH",
     body: JSON.stringify(body)
   }),
   activities: (filters?: ActivityTypeFilters, page?: ActivityPageOptions) => {
