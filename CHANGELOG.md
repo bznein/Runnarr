@@ -30,6 +30,7 @@
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
 - Added configurable server-side climb detection settings in Settings with preset profiles and manual tuning; activity climb detections now re-compute after saves.
 - Added a new Calendar view with a month-by-month activity grid, month navigation, and clickable activity links.
+- Added experimental training-plan import integration with Google Sheets: optional settings in Settings, manual/scheduled sync jobs, training plan activity notes in calendar cards, and source labeling for imported plan items.
 
 ### Fixes
 
@@ -38,6 +39,7 @@
 - `scripts/dev.sh` now selects and reports the actual Vite port it starts on (with optional `RUNNARR_FRONTEND_PORT`), which prevents logging stale localhost:5173 URLs when ports are already taken and avoids loading the wrong frontend instance that causes `/api/...` 404s.
 - Activity type names from providers are now normalized for UI consistency (for example, Cycling, Treadmill Run, and Swimming variants render with readable labels).
 - Route GAP/PACE selector now uses a clean sliding control without an extra divider edge under Pace.
+- Fixed training calendar data scan errors by reading sheet dates with binary-safe day parsing in PostgreSQL and normalizing notes rendering for activity cards.
 
 ## 0.3.0 - 2026-07-16
 

@@ -331,13 +331,15 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	}
 
 	var id string
+	localName := strings.TrimSpace(activity.LocalName)
+	localNotes := strings.TrimSpace(activity.LocalNotes)
 	err = tx.QueryRow(ctx, `
 		insert into activities(
-			source, source_id, source_file_id, name, sport_type, start_time, distance_m,
+			source, source_id, source_file_id, name, local_name, local_notes, sport_type, start_time, distance_m,
 			moving_time_s, elapsed_time_s, elevation_gain_m, avg_heart_rate, max_heart_rate,
 			avg_pace_s_per_km, avg_grade_adjusted_pace_s_per_km, calories_kcal, original_provider_url, summary_polyline, raw
 		)
-		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		on conflict (source, source_id) do update set
 			source_file_id = excluded.source_file_id,
 			name = excluded.name,
@@ -360,7 +362,7 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 			raw = excluded.raw,
 			updated_at = now()
 		returning id::text
-	`, source, sourceID, sourceFileID, fallbackName(activity), activity.SportType, activity.StartTime,
+	`, source, sourceID, sourceFileID, fallbackName(activity), localName, localNotes, activity.SportType, activity.StartTime,
 		activity.DistanceM, activity.MovingTimeS, activity.ElapsedTimeS, activity.ElevationGainM,
 		activity.AvgHeartRate, activity.MaxHeartRate, avgPace, activity.AvgGradeAdjustedPaceSPKM,
 		activity.CaloriesKcal, activity.OriginalProviderURL, activity.SummaryPolyline, rawBytes).Scan(&id)
@@ -457,6 +459,8 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 			coalesce(nullif(local_name, ''), name),
 			start_time,
 			sport_type,
+			source,
+			coalesce(nullif(local_notes, ''), ''),
 			coalesce(distance_m, 0),
 			coalesce(moving_time_s, 0)
 		from activities
@@ -473,7 +477,7 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 	for rows.Next() {
 		var day time.Time
 		var item CalendarActivity
-		if err := rows.Scan(&day, &item.ID, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS); err != nil {
+		if err := rows.Scan(&day, &item.ID, &item.Name, &item.StartTime, &item.SportType, &item.Source, &item.Notes, &item.DistanceM, &item.MovingTimeS); err != nil {
 			return ActivityCalendar{}, err
 		}
 		dayKey := day.Format("2006-01-02")
@@ -653,6 +657,82 @@ func (s *Store) SetClimbDetectionSettings(ctx context.Context, preset string, se
 		settings.ClimbStartGainM,
 		preset,
 	)
+	return err
+}
+
+func (s *Store) GetTrainingSheetConfig(ctx context.Context) (TrainingSheetConfig, error) {
+	config := TrainingSheetConfig{
+		Enabled:         false,
+		SheetURL:        "",
+		CheckEveryHours: 24,
+	}
+
+	var (
+		enabled    bool
+		sheetURL   string
+		checkHours int
+		lastSynced sql.NullTime
+	)
+	if err := s.db.QueryRow(ctx, `
+		select
+			coalesce(training_sheet_enabled, false),
+			coalesce(training_sheet_sheet_url, ''),
+			coalesce(training_sheet_check_every_hours, 24),
+			training_sheet_last_synced_at
+		from app_settings
+		where id = $1
+	`, appSettingsID).Scan(&enabled, &sheetURL, &checkHours, &lastSynced); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return config, nil
+		}
+		return TrainingSheetConfig{}, err
+	}
+
+	config.Enabled = enabled
+	config.SheetURL = sheetURL
+	if checkHours > 0 {
+		config.CheckEveryHours = checkHours
+	}
+	if lastSynced.Valid {
+		config.LastSyncedAt = lastSynced.Time.UTC().Format(time.RFC3339)
+	}
+	return config, nil
+}
+
+func (s *Store) SetTrainingSheetConfig(ctx context.Context, config TrainingSheetConfig) error {
+	checkEveryHours := config.CheckEveryHours
+	if checkEveryHours <= 0 || checkEveryHours > 720 {
+		checkEveryHours = 24
+	}
+	sheetURL := strings.TrimSpace(config.SheetURL)
+
+	_, err := s.db.Exec(ctx, `
+		insert into app_settings(
+			id,
+			training_sheet_enabled,
+			training_sheet_sheet_url,
+			training_sheet_check_every_hours,
+			training_sheet_last_synced_at,
+			created_at,
+			updated_at
+		)
+		values($1, $2, $3, $4, null, now(), now())
+		on conflict(id) do update set
+			training_sheet_enabled = excluded.training_sheet_enabled,
+			training_sheet_sheet_url = excluded.training_sheet_sheet_url,
+			training_sheet_check_every_hours = excluded.training_sheet_check_every_hours,
+			updated_at = now()
+	`, appSettingsID, config.Enabled, sheetURL, checkEveryHours)
+	return err
+}
+
+func (s *Store) TouchTrainingSheetConfigLastSyncedAt(ctx context.Context, syncedAt time.Time) error {
+	_, err := s.db.Exec(ctx, `
+		update app_settings
+		set training_sheet_last_synced_at = $2,
+			updated_at = now()
+		where id = $1
+	`, appSettingsID, syncedAt)
 	return err
 }
 

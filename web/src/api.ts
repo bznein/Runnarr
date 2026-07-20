@@ -20,7 +20,8 @@ import type {
   ToolsPaceRequest,
   ToolsPaceResponse,
   ToolsVdotRequest,
-  ToolsVdotResponse
+  ToolsVdotResponse,
+  TrainingSheetConfig
 } from "./types";
 
 export class ApiError extends Error {
@@ -146,6 +147,13 @@ export const api = {
   updateClimbDetectionSettings: (body: ClimbDetectionSettingsUpdate) => request<AppConfig>("/api/config/climb-detection", {
     method: "PATCH",
     body: JSON.stringify(body)
+  }),
+  updateTrainingSheetConfig: (body: Partial<TrainingSheetConfig> & { restoreDefaults?: boolean }) => request<AppConfig>("/api/config/training-sheet", {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", {
+    method: "POST"
   }),
   activities: (filters?: ActivityTypeFilters, page?: ActivityPageOptions) => {
     const query = activityFilterQuery(filters, page);

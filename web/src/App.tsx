@@ -96,6 +96,7 @@ const ACTIVITY_LIST_PAGE_SIZE = 100;
 const garminHealthDefaultDays = 7;
 const healthBarChartMaxDays = 30;
 const defaultClimbSensitivity = 50;
+const defaultTrainingSheetCheckEveryHours = 24;
 const themePreferenceStorageKey = "runnarr-theme-preference";
 const activityColumnsStorageKey = "runnarr-activity-list-columns";
 const gearSortByStorageKey = "runnarr-gear-sort-by";
@@ -329,7 +330,14 @@ function AuthenticatedApp({
           <Route path="/gear" element={<GearPage />} />
           <Route path="/gear/:id" element={<GearDetailPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
-          <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} />} />
+          <Route
+            path="/settings"
+            element={<SettingsPage
+              themePreference={themePreference}
+              onThemePreferenceChange={onThemePreferenceChange}
+              config={config.data}
+            />}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -364,6 +372,8 @@ function formatSourceName(source: string) {
       return "Garmin Connect";
     case "file":
       return "manual upload";
+    case "training_sheet":
+      return "training sheet";
     default:
       return source;
   }
@@ -1768,9 +1778,11 @@ function ActivityCalendarPage() {
                           {activity.name}
                         </Link>
                         <span className="calendar-day-activity-meta">
-                          {activity.sportType}
-                          {activity.sportType && ` · ${activity.movingTimeS ? formatDuration(activity.movingTimeS) : ""}`}
+                        {activity.sportType}
+                        {activity.sportType && activity.movingTimeS ? ` · ${formatDuration(activity.movingTimeS)}` : ""}
+                        {activity.source && ` · ${formatSourceName(activity.source)}`}
                         </span>
+                        {activity.notes && <span className="calendar-day-activity-meta calendar-day-activity-note">{activity.notes}</span>}
                       </li>
                     ))}
                   </ul>
@@ -3260,10 +3272,12 @@ function ClimbStat({ label, value }: { label: string; value: string }) {
 
 function SettingsPage({
   themePreference,
-  onThemePreferenceChange
+  onThemePreferenceChange,
+  config
 }: {
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
+  config?: AppConfig;
 }) {
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -3275,15 +3289,28 @@ function SettingsPage({
   const [garminPassword, setGarminPassword] = useState("");
   const [garminMFACode, setGarminMFACode] = useState("");
   const [garminOldest, setGarminOldest] = useState("1970-01-01");
+  const [trainingSheetEnabled, setTrainingSheetEnabled] = useState(false);
+  const [trainingSheetURL, setTrainingSheetURL] = useState("");
+  const [trainingSheetCheckEveryHours, setTrainingSheetCheckEveryHours] = useState(defaultTrainingSheetCheckEveryHours);
   const garminJobs = jobs.data?.jobs ?? [];
   const latestGearJob = garminJobs.find((job) => job.provider === "garmin" && isGearSyncJob(job));
   const latestGarminJob = garminJobs.find((job) => job.provider === "garmin" && !isGearSyncJob(job)) ?? latestGearJob;
+  const latestTrainingSheetJob = garminJobs.find((job) => job.provider === "training_sheet");
   const anyGarminSyncRunning = garminJobs.some((job) => job.provider === "garmin" && job.status === "running");
+  const anySyncRunning = garminJobs.some((job) => job.status === "running");
   const garminSyncRunning = latestGarminJob?.status === "running";
   const gearSyncRunning = latestGearJob?.status === "running";
-  const visibleSyncJobs = [latestGarminJob, latestGearJob]
+  const trainingSheetSyncRunning = latestTrainingSheetJob?.status === "running";
+  const visibleSyncJobs = [latestGarminJob, latestGearJob, latestTrainingSheetJob]
     .filter((job): job is SyncJob => Boolean(job))
     .filter((job, index, list) => list.findIndex((item) => item.id === job.id) === index);
+
+  const activeConfig = config?.trainingSheet;
+  const storedTrainingSheetEnabled = activeConfig?.enabled ?? false;
+  const storedTrainingSheetURL = activeConfig?.sheetURL ?? "";
+  const storedTrainingSheetCheckEveryHours = activeConfig?.checkEveryHours ?? defaultTrainingSheetCheckEveryHours;
+  const hasTrainingSheetChanges = storedTrainingSheetEnabled !== trainingSheetEnabled || storedTrainingSheetURL !== trainingSheetURL || storedTrainingSheetCheckEveryHours !== trainingSheetCheckEveryHours;
+  const normalizedTrainingSheetCheckEveryHours = Number.isFinite(trainingSheetCheckEveryHours) ? Math.max(1, Math.min(720, Math.round(trainingSheetCheckEveryHours))) : defaultTrainingSheetCheckEveryHours;
 
   useEffect(() => {
     if (location.hash !== "#import") {
@@ -3294,6 +3321,12 @@ function SettingsPage({
     });
     return () => window.clearTimeout(timeout);
   }, [location.hash]);
+
+  useEffect(() => {
+    setTrainingSheetEnabled(storedTrainingSheetEnabled);
+    setTrainingSheetURL(storedTrainingSheetURL);
+    setTrainingSheetCheckEveryHours(storedTrainingSheetCheckEveryHours);
+  }, [storedTrainingSheetEnabled, storedTrainingSheetURL, storedTrainingSheetCheckEveryHours]);
 
   const garminConnect = useMutation({
     mutationFn: api.garminConnect,
@@ -3331,6 +3364,38 @@ function SettingsPage({
       ]);
     }
   });
+  const trainingSheetSync = useMutation({
+    mutationFn: api.trainingSheetSync,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["sync-jobs"] });
+    }
+  });
+  const updateTrainingSheetConfig = useMutation({
+    mutationFn: api.updateTrainingSheetConfig,
+    onSuccess: async (updatedConfig) => {
+      setTrainingSheetEnabled(updatedConfig.trainingSheet.enabled);
+      setTrainingSheetURL(updatedConfig.trainingSheet.sheetURL);
+      setTrainingSheetCheckEveryHours(updatedConfig.trainingSheet.checkEveryHours);
+      await queryClient.invalidateQueries({ queryKey: ["config"] });
+      await queryClient.invalidateQueries({ queryKey: ["sync-jobs"] });
+    }
+  });
+
+  const restoreTrainingSheetDefaults = () => {
+    setTrainingSheetEnabled(false);
+    setTrainingSheetURL("");
+    setTrainingSheetCheckEveryHours(defaultTrainingSheetCheckEveryHours);
+  };
+  const saveTrainingSheetSettings = () => {
+    updateTrainingSheetConfig.mutate({
+      enabled: trainingSheetEnabled,
+      sheetURL: trainingSheetURL.trim(),
+      checkEveryHours: normalizedTrainingSheetCheckEveryHours
+    });
+  };
+  const canSaveTrainingSheetSettings = hasTrainingSheetChanges &&
+    (!trainingSheetEnabled || (Boolean(trainingSheetURL.trim()) && normalizedTrainingSheetCheckEveryHours >= 1));
+  const canRunTrainingSheetSync = trainingSheetEnabled && !trainingSheetSyncRunning && trainingSheetURL.trim().length > 0;
 
   useEffect(() => {
     if (!latestGearJob || latestGearJob.status === "running") {
@@ -3397,10 +3462,70 @@ function SettingsPage({
           </button>
         </div>
       </section>
+      <section className="panel training-sheet-panel">
+        <details className="settings-advanced-details">
+          <summary>
+            <span>
+              <span className="panel-heading">Training plan import (Experimental)</span>
+              <span className="muted">Optional Google Sheets integration for coach-generated plans.</span>
+            </span>
+          </summary>
+          <div className="settings-advanced-content">
+            <p className="training-sheet-disclaimer">
+              This feature is intentionally opt-in and intended for structured Google Sheet plans shared by a coach.
+              If you do not have this workflow, leave it disabled; random sheet links will not work.
+            </p>
+            <div className="training-sheet-grid">
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={trainingSheetEnabled}
+                  onChange={(event) => setTrainingSheetEnabled(event.target.checked)}
+                />
+                Enable training plan sync
+              </label>
+              <label className="field">
+                <span>Google Sheet URL</span>
+                <input
+                  type="url"
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  value={trainingSheetURL}
+                  onChange={(event) => setTrainingSheetURL(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Check every (hours)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={720}
+                  value={trainingSheetCheckEveryHours}
+                  onChange={(event) => setTrainingSheetCheckEveryHours(Number(event.target.value))}
+                />
+              </label>
+            </div>
+            <p className="muted">{activeConfig?.lastSyncedAt ? `Last synced at ${formatDate(activeConfig.lastSyncedAt)}` : "Not synced yet."}</p>
+            <div className="training-sheet-actions">
+              <button className="secondary-button small-button" type="button" onClick={restoreTrainingSheetDefaults}>
+                Restore defaults
+              </button>
+              <button className="primary-button small-button" type="button" disabled={updateTrainingSheetConfig.isPending || !canSaveTrainingSheetSettings} onClick={saveTrainingSheetSettings}>
+                {updateTrainingSheetConfig.isPending ? "Saving..." : "Save settings"}
+              </button>
+              <button className="secondary-button small-button" type="button" disabled={anySyncRunning || !canRunTrainingSheetSync || trainingSheetSync.isPending} onClick={() => trainingSheetSync.mutate()}>
+                <RefreshCw size={16} />
+                {trainingSheetSyncRunning ? "Syncing" : "Sync now"}
+              </button>
+            </div>
+          </div>
+        </details>
+      </section>
       {visibleSyncJobs.map((job) => <SyncProgressCard key={job.id} job={job} />)}
       {garminConnect.error && <div className="error">{garminConnect.error instanceof Error ? garminConnect.error.message : "Garmin connection failed"}</div>}
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
+      {trainingSheetSync.error && <div className="error">{trainingSheetSync.error instanceof Error ? trainingSheetSync.error.message : "Training sheet sync failed"}</div>}
+      {updateTrainingSheetConfig.error && <div className="error">{updateTrainingSheetConfig.error instanceof Error ? updateTrainingSheetConfig.error.message : "Could not save training sheet settings"}</div>}
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} />
       <section id="import" className="panel upload-panel">
         <div>
@@ -3571,9 +3696,10 @@ function RecentImportsTable({ imports }: { imports: ImportFile[] }) {
 }
 
 function SyncProgressCard({ job }: { job?: SyncJob }) {
-  if (!job || job.provider !== "garmin") {
+  if (!job) {
     return null;
   }
+  const isTrainingSheetSync = isTrainingSheetSyncJob(job);
   const healthSync = isHealthSyncJob(job);
   const gearSync = isGearSyncJob(job);
   const payload = job.payload ?? {};
@@ -3583,7 +3709,8 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   const activities = payloadNumber(payload, "activities");
   const days = payloadNumber(payload, "days");
   const gear = payloadNumber(payload, "gear");
-  const total = healthSync ? days : gearSync ? gear : activities;
+  const skipped = payloadNumber(payload, "skipped");
+  const total = isTrainingSheetSync ? activities : healthSync ? days : gearSync ? gear : activities;
   const failed = payloadNumber(payload, "failed");
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const assignments = payloadNumber(payload, "assignments");
@@ -3607,7 +3734,9 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   return (
     <section className="panel sync-progress-panel">
       <div className="filter-header">
-        <div className="panel-heading">{gearSync ? "Garmin gear sync progress" : healthSync ? "Garmin health sync progress" : "Garmin sync progress"}</div>
+        <div className="panel-heading">
+          {isTrainingSheetSync ? "Training sheet sync progress" : gearSync ? "Garmin gear sync progress" : healthSync ? "Garmin health sync progress" : "Garmin sync progress"}
+        </div>
         <span className={`status ${job.status}`}>{job.status}</span>
       </div>
       <SyncProgressBar job={job} />
@@ -3625,6 +3754,13 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
             <SyncStat label="Saved" value={saved.toLocaleString()} />
             <SyncStat label="Failed" value={failed.toLocaleString()} />
             <SyncStat label="Range" value={from && to ? `${from} to ${to}` : "Recent"} />
+          </>
+        ) : isTrainingSheetSync ? (
+          <>
+            <SyncStat label="Completed" value={`${processed.toLocaleString()} / ${activities.toLocaleString()} ${foundLabel}`} />
+            <SyncStat label="Saved" value={saved.toLocaleString()} />
+            <SyncStat label="Ignored" value={skipped.toLocaleString()} />
+            <SyncStat label="Failed" value={failed.toLocaleString()} />
           </>
         ) : listing ? (
           <>
@@ -3676,7 +3812,7 @@ function SyncProgressBar({ job }: { job: SyncJob }) {
   const percent = hasKnownTotal ? Math.min(100, Math.round((processed / total) * 100)) : 0;
   return (
     <div className="progress-cell">
-      <div className={`progress-bar${listing ? " indeterminate" : ""}`} aria-label={listing ? "Listing Garmin data" : `Sync progress ${percent}%`}>
+      <div className={`progress-bar${listing ? " indeterminate" : ""}`} aria-label={listing ? "Listing source data" : `Sync progress ${percent}%`}>
         <span style={listing ? undefined : { width: `${percent}%` }} />
       </div>
       <span>{listing ? "Listing" : hasKnownTotal ? `${percent}%` : job.status}</span>
@@ -3690,6 +3826,7 @@ function formatSyncJobDetails(job: SyncJob) {
   const saved = payloadNumber(payload, "saved");
   const processed = payloadNumber(payload, "processed");
   const failed = payloadNumber(payload, "failed");
+  const skipped = payloadNumber(payload, "skipped");
   const skippedExcluded = payloadNumber(payload, "skippedExcluded");
   const activities = payloadNumber(payload, "activities");
   const days = payloadNumber(payload, "days");
@@ -3725,6 +3862,21 @@ function formatSyncJobDetails(job: SyncJob) {
     }
     return parts.length > 0 ? parts.join(" · ") : "-";
   }
+  if (isTrainingSheetSyncJob(job)) {
+    if (activities > 0) {
+      parts.push(`${processed}/${activities} processed`);
+    }
+    if (saved > 0) {
+      parts.push(`${saved} saved`);
+    }
+    if (skipped > 0) {
+      parts.push(`${skipped} skipped`);
+    }
+    if (failed > 0) {
+      parts.push(`${failed} failed`);
+    }
+    return parts.length > 0 ? parts.join(" · ") : "-";
+  }
   if (isSyncListingStage(stage)) {
     if (activities > 0) {
       parts.push(`${activities} found`);
@@ -3753,6 +3905,10 @@ function isSyncListingStage(stage: string) {
   return stage.toLowerCase().includes("listing");
 }
 
+function isTrainingSheetSyncJob(job: SyncJob) {
+  return job.provider === "training_sheet";
+}
+
 function isHealthSyncJob(job: SyncJob) {
   return job.kind.startsWith("health") || payloadText(job.payload ?? {}, "kind") === "health";
 }
@@ -3762,6 +3918,18 @@ function isGearSyncJob(job: SyncJob) {
 }
 
 function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, currentGearName: string, currentDate: string, oldest: string, from: string, to: string, total: number) {
+  if (isTrainingSheetSyncJob(job)) {
+    if (currentActivityName) {
+      return currentActivityName;
+    }
+    if (isSyncListingStage(stage)) {
+      return oldest ? `Searching from ${oldest}` : "Reading training sheet";
+    }
+    if (job.status === "completed") {
+      return total > 0 ? "Training sheet sync finished" : "No planned activities found";
+    }
+    return "Waiting for first sheet entry";
+  }
   if (isGearSyncJob(job)) {
     if (currentGearName) {
       return currentGearName;

@@ -471,6 +471,11 @@ textarea {
   font-size: 11px;
 }
 
+.calendar-day-activity-note {
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
 .panel {
   min-width: 0;
   padding: 18px;
@@ -1822,6 +1827,83 @@ textarea {
 .row-actions {
   width: 1%;
   text-align: right;
+}
+
+.settings-advanced-details {
+  padding: 0;
+}
+
+.settings-advanced-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.settings-advanced-details summary::after {
+  content: "Show";
+  color: var(--color-primary-text);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.settings-advanced-details[open] summary::after {
+  content: "Hide";
+}
+
+.settings-advanced-details summary::marker,
+.settings-advanced-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-advanced-details summary .panel-heading {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.settings-advanced-content {
+  display: grid;
+  gap: 10px;
+  padding: 14px 2px 2px;
+}
+
+.training-sheet-panel {
+  padding: 18px;
+}
+
+.training-sheet-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.training-sheet-grid .field,
+.training-sheet-grid .checkbox-field {
+  margin: 0;
+}
+
+.training-sheet-grid input[type="number"],
+.training-sheet-grid input[type="url"] {
+  width: 100%;
+}
+
+.training-sheet-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.training-sheet-disclaimer {
+  margin: 0;
+  color: var(--color-danger-text);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--color-danger) 30%, var(--color-border));
+  border-radius: 8px;
+  padding: 10px 12px;
+  line-height: 1.45;
 }
 
 .provider-controls {

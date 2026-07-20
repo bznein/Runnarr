@@ -157,7 +157,9 @@ type ActivityMedia struct {
 
 type ImportedActivity struct {
 	Name                     string           `json:"name"`
+	LocalName                string           `json:"localName,omitempty"`
 	SportType                string           `json:"sportType"`
+	LocalNotes               string           `json:"localNotes,omitempty"`
 	StartTime                time.Time        `json:"startTime"`
 	DistanceM                float64          `json:"distanceM"`
 	MovingTimeS              int              `json:"movingTimeS"`
@@ -278,6 +280,8 @@ type CalendarActivity struct {
 	Name        string    `json:"name"`
 	StartTime   time.Time `json:"startTime"`
 	SportType   string    `json:"sportType"`
+	Source      string    `json:"source"`
+	Notes       string    `json:"notes"`
 	DistanceM   float64   `json:"distanceM"`
 	MovingTimeS int       `json:"movingTimeS"`
 }
@@ -292,4 +296,11 @@ type ActivityCalendar struct {
 	MonthStart string        `json:"monthStart"`
 	MonthEnd   string        `json:"monthEnd"`
 	Days       []CalendarDay `json:"days"`
+}
+
+type TrainingSheetConfig struct {
+	Enabled         bool   `json:"enabled"`
+	SheetURL        string `json:"sheetURL"`
+	CheckEveryHours int    `json:"checkEveryHours"`
+	LastSyncedAt    string `json:"lastSyncedAt,omitempty"`
 }

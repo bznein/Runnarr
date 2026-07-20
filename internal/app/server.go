@@ -24,13 +24,14 @@ import (
 const sessionCookieName = "runnarr_session"
 
 type Server struct {
-	cfg       Config
-	store     *Store
-	imports   *ImportService
-	garmin    *GarminService
-	media     *MediaService
-	logger    *slog.Logger
-	adminHash []byte
+	cfg           Config
+	store         *Store
+	imports       *ImportService
+	garmin        *GarminService
+	trainingSheet *TrainingSheetService
+	media         *MediaService
+	logger        *slog.Logger
+	adminHash     []byte
 }
 
 func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
@@ -44,13 +45,14 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		}
 	}
 	return &Server{
-		cfg:       cfg,
-		store:     store,
-		imports:   NewImportService(store),
-		garmin:    NewGarminService(cfg, store),
-		media:     NewMediaService(cfg, store),
-		logger:    logger,
-		adminHash: adminHash,
+		cfg:           cfg,
+		store:         store,
+		imports:       NewImportService(store),
+		garmin:        NewGarminService(cfg, store),
+		trainingSheet: NewTrainingSheetService(store, logger),
+		media:         NewMediaService(cfg, store),
+		logger:        logger,
+		adminHash:     adminHash,
 	}, nil
 }
 
@@ -70,6 +72,7 @@ func (s *Server) Routes() http.Handler {
 			r.Use(s.requireSession)
 			r.Get("/config", s.handleConfig)
 			r.Patch("/config/climb-detection", s.handleUpdateClimbDetection)
+			r.Patch("/config/training-sheet", s.handleUpdateTrainingSheetConfig)
 			r.Post("/tools/pace", s.handleToolsPace)
 			r.Post("/tools/vdot", s.handleToolsVDOT)
 			r.Post("/session/logout", s.handleLogout)
@@ -96,6 +99,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/providers/garmin/sync", s.handleGarminSync)
 			r.Post("/providers/garmin/health-sync", s.handleGarminHealthSync)
 			r.Post("/providers/garmin/gear-sync", s.handleGarminGearSync)
+			r.Post("/training-sheet/sync", s.handleTrainingSheetSync)
 			r.Get("/sync-jobs", s.handleSyncJobs)
 		})
 	})
@@ -110,10 +114,18 @@ type climbDetectionUpdateRequest struct {
 	Sensitivity *int                    `json:"sensitivity"`
 }
 
+type trainingSheetConfigUpdateRequest struct {
+	Enabled         *bool   `json:"enabled"`
+	SheetURL        *string `json:"sheetURL"`
+	CheckEveryHours *int    `json:"checkEveryHours"`
+	RestoreDefaults *bool   `json:"restoreDefaults"`
+}
+
 type climbDetectionPayload struct {
 	MapTileURL     string               `json:"mapTileURL"`
 	BaseURL        string               `json:"baseURL"`
 	ClimbDetection ClimbDetectionConfig `json:"climbDetection"`
+	TrainingSheet  TrainingSheetConfig  `json:"trainingSheet"`
 }
 
 type climbPreviewRequest struct {
@@ -257,6 +269,85 @@ func (s *Server) handleUpdateClimbDetection(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, payload)
 }
 
+func (s *Server) handleUpdateTrainingSheetConfig(w http.ResponseWriter, r *http.Request) {
+	var body trainingSheetConfigUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	current, err := s.store.GetTrainingSheetConfig(r.Context())
+	if err != nil {
+		s.logger.Error("load training sheet config", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load training sheet config")
+		return
+	}
+	next := current
+	if body.RestoreDefaults != nil && *body.RestoreDefaults {
+		next = TrainingSheetConfig{}
+	}
+	if body.Enabled != nil {
+		next.Enabled = *body.Enabled
+	}
+	if body.SheetURL != nil {
+		next.SheetURL = strings.TrimSpace(*body.SheetURL)
+	}
+	if body.CheckEveryHours != nil {
+		next.CheckEveryHours = *body.CheckEveryHours
+	}
+	if strings.TrimSpace(next.SheetURL) == "" && next.Enabled {
+		writeError(w, http.StatusBadRequest, "sheetURL must be set when training sheet sync is enabled")
+		return
+	}
+	if err := s.store.SetTrainingSheetConfig(r.Context(), next); err != nil {
+		s.logger.Error("update training sheet config", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not save training sheet config")
+		return
+	}
+	payload, err := s.climbDetectionPayload(r.Context())
+	if err != nil {
+		s.logger.Error("load config", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load config")
+		return
+	}
+	payload.TrainingSheet = next
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) handleTrainingSheetSync(w http.ResponseWriter, r *http.Request) {
+	config, err := s.store.GetTrainingSheetConfig(r.Context())
+	if err != nil {
+		s.logger.Error("load training sheet config", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load training sheet config")
+		return
+	}
+	if !config.Enabled {
+		writeError(w, http.StatusBadRequest, "training sheet sync is disabled")
+		return
+	}
+	if strings.TrimSpace(config.SheetURL) == "" {
+		writeError(w, http.StatusBadRequest, "sheet URL is not configured")
+		return
+	}
+	running, err := s.store.HasRunningSyncJob(r.Context(), trainingSheetProvider)
+	if err != nil {
+		s.logger.Error("check running training sheet sync", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not check sync state")
+		return
+	}
+	if running {
+		writeError(w, http.StatusConflict, "Training sheet sync is already running")
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(r.Context(), trainingSheetProvider, "manual")
+	if err != nil {
+		s.logger.Error("create training sheet sync job", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not create sync job")
+		return
+	}
+	go s.runTrainingSheetManualSyncJob(jobID, config)
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
+}
+
 func (s *Server) handleActivityClimbsPreview(w http.ResponseWriter, r *http.Request) {
 	var body climbPreviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -285,10 +376,15 @@ func (s *Server) climbDetectionPayload(ctx context.Context) (climbDetectionPaylo
 	if err != nil {
 		return climbDetectionPayload{}, err
 	}
+	trainingSheet, err := s.store.GetTrainingSheetConfig(ctx)
+	if err != nil {
+		return climbDetectionPayload{}, err
+	}
 	return climbDetectionPayload{
 		MapTileURL:     s.cfg.MapTileURL,
 		BaseURL:        s.cfg.BaseURL,
 		ClimbDetection: climbDetection,
+		TrainingSheet:  trainingSheet,
 	}, nil
 }
 
@@ -748,6 +844,7 @@ func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) StartBackgroundSync(ctx context.Context) {
 	go s.runGarminScheduledSync(ctx)
+	go s.runTrainingSheetScheduledSync(ctx)
 }
 
 func (s *Server) runGarminScheduledSync(ctx context.Context) {
@@ -761,6 +858,55 @@ func (s *Server) runGarminScheduledSync(ctx context.Context) {
 		case <-ticker.C:
 			s.runGarminScheduledSyncOnce(ctx)
 		}
+	}
+}
+
+func (s *Server) runTrainingSheetScheduledSync(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runTrainingSheetScheduledSyncOnce(ctx)
+		}
+	}
+}
+
+func (s *Server) runTrainingSheetScheduledSyncOnce(ctx context.Context) {
+	config, err := s.store.GetTrainingSheetConfig(ctx)
+	if err != nil {
+		s.logger.Error("load training sheet config for scheduled sync", "error", err)
+		return
+	}
+	if !config.Enabled || strings.TrimSpace(config.SheetURL) == "" {
+		return
+	}
+	due, err := s.trainingSheetScheduledSyncDue(ctx, config)
+	if err != nil {
+		s.logger.Error("check training sheet sync schedule", "error", err)
+		return
+	}
+	if !due {
+		return
+	}
+	if running, err := s.store.HasRunningSyncJob(ctx, trainingSheetProvider); err != nil || running {
+		if err != nil {
+			s.logger.Error("check running scheduled training sheet sync", "error", err)
+		}
+		return
+	}
+	jobID, err := s.store.CreateSyncJob(ctx, trainingSheetProvider, "scheduled")
+	if err != nil {
+		s.logger.Error("create scheduled training sheet sync job", "error", err)
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 90*time.Minute)
+	defer cancel()
+	if _, err := s.finishTrainingSheetSyncJob(syncCtx, jobID, config); err != nil {
+		s.logger.Error("scheduled training sheet sync", "error", err)
 	}
 }
 
@@ -794,6 +940,34 @@ func (s *Server) runGarminManualSyncJob(jobID string, opts GarminSyncOptions) {
 	if _, err := s.finishGarminSyncJob(ctx, jobID, opts); err != nil {
 		s.logger.Error("manual garmin sync", "job_id", jobID, "error", err)
 	}
+}
+
+func (s *Server) runTrainingSheetManualSyncJob(jobID string, config TrainingSheetConfig) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	defer cancel()
+	if _, err := s.finishTrainingSheetSyncJob(ctx, jobID, config); err != nil {
+		s.logger.Error("manual training sheet sync", "job_id", jobID, "error", err)
+	}
+}
+
+func (s *Server) finishTrainingSheetSyncJob(ctx context.Context, jobID string, config TrainingSheetConfig) (map[string]any, error) {
+	progress := func(payload map[string]any) {
+		if err := s.store.UpdateSyncJobProgress(ctx, jobID, payload); err != nil {
+			s.logger.Error("update training sheet sync progress", "job_id", jobID, "error", err)
+		}
+	}
+	payload, err := s.trainingSheet.Sync(ctx, config, progress)
+	if err != nil {
+		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), payload)
+		return nil, err
+	}
+	if err := s.store.TouchTrainingSheetConfigLastSyncedAt(ctx, time.Now().UTC()); err != nil {
+		s.logger.Error("touch training sheet last synced at", "error", err)
+	}
+	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts GarminSyncOptions) (map[string]any, error) {
@@ -856,6 +1030,22 @@ func (s *Server) garminScheduledHealthSyncDue(ctx context.Context) (bool, error)
 		return true, nil
 	}
 	return time.Since(createdAt) >= 4*time.Hour, nil
+}
+
+func (s *Server) trainingSheetScheduledSyncDue(ctx context.Context, config TrainingSheetConfig) (bool, error) {
+	createdAt, ok, err := s.store.LatestSyncJobCreatedAt(ctx, trainingSheetProvider, "scheduled")
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return true, nil
+	}
+	checkEveryHours := config.CheckEveryHours
+	if checkEveryHours <= 0 || checkEveryHours > 720 {
+		checkEveryHours = defaultTrainingSheetCheckEveryHours
+	}
+	nextSyncAt := createdAt.Add(time.Duration(checkEveryHours) * time.Hour)
+	return time.Now().UTC().After(nextSyncAt), nil
 }
 
 func (s *Server) runGarminManualHealthSyncJob(jobID string, opts GarminHealthSyncOptions) {

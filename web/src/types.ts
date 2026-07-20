@@ -68,6 +68,14 @@ export type AppConfig = {
   mapTileURL: string;
   baseURL: string;
   climbDetection: ClimbDetectionConfig;
+  trainingSheet: TrainingSheetConfig;
+};
+
+export type TrainingSheetConfig = {
+  enabled: boolean;
+  sheetURL: string;
+  checkEveryHours: number;
+  lastSyncedAt?: string;
 };
 
 export type ActivityClimbPreviewResponse = {
@@ -216,6 +224,8 @@ export type CalendarActivitySummary = {
   name: string;
   startTime: string;
   sportType: string;
+  source?: string;
+  notes?: string;
   distanceM: number;
   movingTimeS: number;
 };
