@@ -707,6 +707,9 @@ type tcxHeartRateBPM struct {
 var (
 	hrTagRegexp  = regexp.MustCompile(`(?i)<(?:[a-z0-9_]+:)?hr>\s*([0-9]+)\s*</(?:[a-z0-9_]+:)?hr>`)
 	cadTagRegexp = regexp.MustCompile(`(?i)<(?:[a-z0-9_]+:)?cad(?:ence)?>\s*([0-9]+)\s*</(?:[a-z0-9_]+:)?cad(?:ence)?>`)
+	// normalizeSport uses these regexes to turn provider type values into canonical UI labels.
+	alphaNumericRegexp  = regexp.MustCompile(`[^a-z0-9]+`)
+	versionSuffixRegexp = regexp.MustCompile(`(?i)^v[0-9]+$`)
 )
 
 func parseExtensions(value string) (*int, *int) {
@@ -747,24 +750,104 @@ func normalizeImported(activity *ImportedActivity) {
 
 func normalizeSport(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
-	switch value {
+	if value == "" {
+		return "Run"
+	}
+
+	tokens := strings.Fields(alphaNumericRegexp.ReplaceAllString(value, " "))
+	clean := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if token == "" || versionSuffixRegexp.MatchString(token) {
+			continue
+		}
+		clean = append(clean, token)
+	}
+	if len(clean) == 0 {
+		return "Run"
+	}
+
+	joined := strings.Join(clean, "")
+	switch joined {
 	case "run", "running":
 		return "Run"
 	case "ride", "virtualride", "cycling", "biking", "bike":
-		return "Ride"
-	case "swim", "swimming":
-		return "Swim"
+		return "Cycling"
 	case "walk", "walking":
 		return "Walk"
 	case "hike", "hiking":
 		return "Hike"
-	case "strength", "strengthtraining", "strength training", "weighttraining", "weight training", "weightlifting", "weight lifting", "workout":
-		return "Strength"
-	case "":
-		return "Run"
-	default:
-		return strings.ToUpper(value[:1]) + value[1:]
+	case "kayaking", "kayakingv2":
+		return "Kayaking"
+	case "swim", "swimming":
+		return "Swimming"
+	case "strength", "strengthtraining", "weighttraining", "weightlifting", "workout":
+		return "Strength Training"
+	case "treadmill", "treadmillrunning", "treadmillrun", "runningtreadmill":
+		return "Treadmill Run"
 	}
+
+	if containsAll(clean, "lap", "swimming") || containsAll(clean, "lap", "swim") {
+		return "Swimming"
+	}
+	if containsAny(clean, "treadmill") && containsAny(clean, "run", "running") {
+		return "Treadmill Run"
+	}
+	if containsAny(clean, "virtual", "ride") && !containsAny(clean, "run", "running") {
+		return "Cycling"
+	}
+	if containsAny(clean, "strength", "weight", "lifting", "workout") {
+		return "Strength Training"
+	}
+	if containsAny(clean, "ride", "cycling", "biking", "bike") {
+		return "Cycling"
+	}
+	if containsAny(clean, "swim", "swimming") {
+		return "Swimming"
+	}
+	if containsAny(clean, "hike", "hiking") {
+		return "Hike"
+	}
+	if containsAny(clean, "walk", "walking") {
+		return "Walk"
+	}
+	if containsAny(clean, "run", "running") {
+		return "Run"
+	}
+	if containsAny(clean, "kayak") {
+		return "Kayaking"
+	}
+
+	parts := make([]string, 0, len(clean))
+	for _, token := range clean {
+		parts = append(parts, strings.ToUpper(token[:1])+token[1:])
+	}
+	return strings.Join(parts, " ")
+}
+
+func containsAny(values []string, wanted ...string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, want := range wanted {
+		if _, ok := seen[want]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAll(values []string, wanted ...string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, want := range wanted {
+		if _, ok := seen[want]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func heartRateSummary(values []int) (*float64, *float64) {

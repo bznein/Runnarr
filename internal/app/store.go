@@ -627,10 +627,16 @@ func (s *Store) ReplaceGearAssignmentsForGear(ctx context.Context, gearID string
 
 func (s *Store) ListGears(ctx context.Context) ([]Gear, error) {
 	rows, err := s.db.Query(ctx, `
-		select id::text, provider, provider_gear_id, name, gear_type, brand, model, retired,
-			total_distance_m, max_distance_m, first_used_at, last_used_at, default_activity_types,
-			raw, stats_raw, created_at, updated_at
+		select gears.id::text, gears.provider, gears.provider_gear_id, gears.name, gears.gear_type, gears.brand, gears.model, gears.retired,
+			gears.total_distance_m, gears.max_distance_m, gears.first_used_at, gears.last_used_at,
+			coalesce(gear_activity_counts.activity_count, 0) as activity_count,
+			gears.default_activity_types, gears.raw, gears.stats_raw, gears.created_at, gears.updated_at
 		from gears
+		left join (
+			select gear_id, count(*)::int as activity_count
+			from activity_gears
+			group by gear_id
+		) gear_activity_counts on gear_activity_counts.gear_id = gears.id
 		order by retired, lower(name), provider_gear_id
 	`)
 	if err != nil {
@@ -652,8 +658,9 @@ func (s *Store) ListGears(ctx context.Context) ([]Gear, error) {
 func (s *Store) GetGear(ctx context.Context, id string) (Gear, error) {
 	return scanGear(s.db.QueryRow(ctx, `
 		select id::text, provider, provider_gear_id, name, gear_type, brand, model, retired,
-			total_distance_m, max_distance_m, first_used_at, last_used_at, default_activity_types,
-			raw, stats_raw, created_at, updated_at
+			total_distance_m, max_distance_m, first_used_at, last_used_at,
+			coalesce((select count(*)::int from activity_gears where gear_id = id), 0) as activity_count,
+			default_activity_types, raw, stats_raw, created_at, updated_at
 		from gears
 		where id = $1
 	`, id))
@@ -1275,6 +1282,7 @@ func scanGear(row rowScanner) (Gear, error) {
 		&maxDistance,
 		&firstUsed,
 		&lastUsed,
+		&gear.ActivityCount,
 		&gear.DefaultActivityTypes,
 		&rawBytes,
 		&statsBytes,

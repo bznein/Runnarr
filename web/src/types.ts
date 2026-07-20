@@ -78,6 +78,7 @@ export type GearSummary = {
 export type Gear = GearSummary & {
   provider: string;
   firstUsedAt?: string;
+  activityCount?: number;
   raw?: Record<string, unknown>;
   statsRaw?: Record<string, unknown>;
   createdAt?: string;
