@@ -5,6 +5,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-runnarr}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-runnarr}
       POSTGRES_DB: ${POSTGRES_DB:-runnarr}
+    ports:
+      - "${RUNNARR_DB_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
