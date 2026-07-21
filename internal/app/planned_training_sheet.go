@@ -49,12 +49,16 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 	}
 	processed, saved, skipped := 0, 0, 0
 	warnings := make([]string, 0)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
 	for _, tab := range tabs {
 		weekEnd, ok := parseWeeklyTabDate(tab.Title, planYear)
 		if !ok {
 			continue
 		}
 		for _, candidate := range plannedActivitiesFromTab(sheetID, tab, weekEnd) {
+			if candidate.PlannedDate.Before(today) {
+				continue
+			}
 			processed++
 			if err := s.store.UpsertPlannedActivity(ctx, candidate); err != nil {
 				skipped++

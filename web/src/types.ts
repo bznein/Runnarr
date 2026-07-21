@@ -250,6 +250,7 @@ export type ActivityListPage = {
 
 export type CalendarActivitySummary = {
   id: string;
+  source: string;
   name: string;
   startTime: string;
   sportType: string;

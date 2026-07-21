@@ -1764,7 +1764,7 @@ function ActivityCalendarPage() {
                 {hasActivities && (
                   <ul className="calendar-day-list">
                     {entry.dayData?.activities.map((activity) => (
-                      <li key={activity.id} className="calendar-day-activity">
+                      <li key={activity.id} className={`calendar-day-activity${activity.source === "training_sheet" ? " calendar-day-activity--planned" : ""}`}>
                         <Link to={`/activities/${activity.id}`}>
                           {activity.name}
                         </Link>
