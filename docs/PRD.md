@@ -163,7 +163,7 @@ The default deployment still works for one person, but local account management 
 - UI should be dense but readable, with restrained styling and clear navigation.
 - The app should include a recognizable favicon/app icon for browser tabs, bookmarks, and installable/PWA contexts.
 - UI must support light and dark themes, defaulting automatically to the user's system color-scheme preference.
-- The admin should be able to override the automatic theme preference and persist that choice locally.
+- Each user should be able to override the automatic theme preference and persist that choice per account.
 - Maps and charts should favor inspection and accuracy over decorative presentation.
 - Empty states should explain what action unlocks the page without over-explaining the product.
 

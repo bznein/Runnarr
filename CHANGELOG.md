@@ -42,6 +42,7 @@
 
 ### Fixes
 
+- Display preferences, activity-list columns, and gear sorting now persist per user instead of being shared through browser-local storage.
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
 - `scripts/dev.sh` now selects and reports the actual Vite port it starts on (with optional `RUNNARR_FRONTEND_PORT`), which prevents logging stale localhost:5173 URLs when ports are already taken and avoids loading the wrong frontend instance that causes `/api/...` 404s.

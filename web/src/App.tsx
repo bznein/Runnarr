@@ -27,7 +27,8 @@ import type {
   Session,
   SyncJob,
   ToolsPaceResponse,
-  ToolsVdotResponse
+  ToolsVdotResponse,
+  UserPreference
 } from "./types";
 
 type RoutePoint = [number, number];
@@ -98,9 +99,6 @@ const ACTIVITY_LIST_PAGE_SIZE = 100;
 const garminHealthDefaultDays = 7;
 const healthBarChartMaxDays = 30;
 const defaultClimbSensitivity = 50;
-const themePreferenceStorageKey = "runnarr-theme-preference";
-const activityColumnsStorageKey = "runnarr-activity-list-columns";
-const gearSortByStorageKey = "runnarr-gear-sort-by";
 const vdotDistancePresets: Array<{ id: string; label: string; distanceKm: string }> = [
   { id: "marathon", label: "Marathon", distanceKm: "42.195" },
   { id: "half-marathon", label: "HM", distanceKm: "21.0975" },
@@ -144,6 +142,7 @@ const gearSortByOptions: Array<{ value: GearSortBy; label: string }> = [
   { value: "first_used", label: "First used" },
   { value: "activity_count", label: "Activity count" }
 ];
+const preferencesQueryKey = (userID?: string) => ["preferences", userID] as const;
 const ELEVATION_SMOOTHING_RADIUS_M = 150;
 const ELEVATION_SMOOTHING_SAMPLE_RADIUS = 36;
 const chartTooltipContentStyle: CSSProperties = {
@@ -170,37 +169,6 @@ const activityChartSeries: ActivityChartSeries[] = [
   { key: "cadence", label: "Cadence", color: "#7a4eb2", defaultVisible: false, format: (value) => `${Math.round(value)} spm` }
 ];
 
-function useThemePreference(): [ThemePreference, (preference: ThemePreference) => void] {
-  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(readStoredThemePreference);
-
-  useEffect(() => {
-    applyThemePreference(themePreference);
-  }, [themePreference]);
-
-  const setThemePreference = (preference: ThemePreference) => {
-    setThemePreferenceState(preference);
-    try {
-      window.localStorage.setItem(themePreferenceStorageKey, preference);
-    } catch {
-      // Local storage can be unavailable in private or restricted browser contexts.
-    }
-  };
-
-  return [themePreference, setThemePreference];
-}
-
-function readStoredThemePreference(): ThemePreference {
-  try {
-    return parseThemePreference(window.localStorage.getItem(themePreferenceStorageKey));
-  } catch {
-    return "system";
-  }
-}
-
-function parseThemePreference(value: string | null): ThemePreference {
-  return value === "light" || value === "dark" || value === "system" ? value : "system";
-}
-
 function applyThemePreference(preference: ThemePreference) {
   const root = document.documentElement;
   if (preference === "system") {
@@ -210,64 +178,68 @@ function applyThemePreference(preference: ThemePreference) {
   root.dataset.theme = preference;
 }
 
-function readStoredActivityTableColumns(): ActivityTableColumnKey[] {
-  try {
-    const raw = window.localStorage.getItem(activityColumnsStorageKey);
-    if (!raw) {
-      return defaultActivityTableColumns;
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return defaultActivityTableColumns;
-    }
-    const allowed = new Set(defaultActivityTableColumns);
-    return parsed.filter((item): item is ActivityTableColumnKey => typeof item === "string" && allowed.has(item as ActivityTableColumnKey));
-  } catch {
+function normalizeActivityTableColumns(columns?: string[]): ActivityTableColumnKey[] {
+  if (!columns || columns.length === 0) {
     return defaultActivityTableColumns;
   }
+  const allowed = new Set(defaultActivityTableColumns);
+  const normalized = columns.filter((item): item is ActivityTableColumnKey => allowed.has(item as ActivityTableColumnKey));
+  return normalized.length > 0 ? normalized : defaultActivityTableColumns;
 }
 
-function storeActivityTableColumns(columns: ActivityTableColumnKey[]) {
-  try {
-    window.localStorage.setItem(activityColumnsStorageKey, JSON.stringify(columns));
-  } catch {
-    // Local storage can be unavailable in private or restricted browser contexts.
-  }
+function normalizeGearSortBy(value?: string): GearSortBy {
+  return isGearSortBy(value ?? null) ? value as GearSortBy : defaultGearSortBy;
 }
 
-function readStoredGearSortBy(): GearSortBy {
-  try {
-    const raw = window.localStorage.getItem(gearSortByStorageKey);
-    return isGearSortBy(raw) ? raw : defaultGearSortBy;
-  } catch {
-    return defaultGearSortBy;
-  }
+function mergeUserPreference(current: UserPreference | undefined, updates: Partial<UserPreference>): UserPreference {
+  return {
+    themePreference: current?.themePreference ?? "system",
+    activityTableColumns: current?.activityTableColumns ?? defaultActivityTableColumns,
+    gearSortBy: current?.gearSortBy || defaultGearSortBy,
+    ...updates
+  };
 }
 
-function storeGearSortBy(sortBy: GearSortBy) {
-  try {
-    window.localStorage.setItem(gearSortByStorageKey, sortBy);
-  } catch {
-    // Local storage can be unavailable in private or restricted browser contexts.
-  }
+function useSaveUserPreferences(userID?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (updates: Partial<UserPreference>) => {
+      if (!userID) {
+        throw new Error("User session is not available");
+      }
+      const current = await queryClient.fetchQuery<UserPreference>({
+        queryKey: preferencesQueryKey(userID),
+        queryFn: api.preferences
+      });
+      return api.updatePreferences(mergeUserPreference(current, updates));
+    },
+    onSuccess: (next) => {
+      if (userID) {
+        queryClient.setQueryData(preferencesQueryKey(userID), next);
+      }
+    }
+  });
 }
 
 export function App() {
-  const [themePreference, setThemePreference] = useThemePreference();
-  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
-  const preferences = useQuery({
-    queryKey: ["preferences", session.data?.user?.id],
-    queryFn: api.preferences,
-    enabled: Boolean(session.data?.authenticated && session.data.user?.id)
-  });
+  const [themePreference, setThemePreference] = useState<ThemePreference>("system");
   const queryClient = useQueryClient();
+  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const effectiveUserID = session.data?.user?.id;
+  const preferences = useQuery({
+    queryKey: preferencesQueryKey(effectiveUserID),
+    queryFn: api.preferences,
+    enabled: Boolean(session.data?.authenticated && effectiveUserID)
+  });
+  const savePreferences = useSaveUserPreferences(effectiveUserID);
 
   useEffect(() => {
-    if (preferences.data?.themePreference) {
-      setThemePreference(preferences.data.themePreference);
-    }
-  }, [preferences.data?.themePreference]);
+    applyThemePreference(themePreference);
+  }, [themePreference]);
+
+  useEffect(() => {
+    setThemePreference(preferences.data?.themePreference ?? "system");
+  }, [effectiveUserID, preferences.data?.themePreference]);
 
   useEffect(() => {
     if (!effectiveUserID) {
@@ -297,27 +269,26 @@ export function App() {
 
   const onThemePreferenceChange = (preference: ThemePreference) => {
     setThemePreference(preference);
-    if (session.data?.canWrite !== false && session.data?.user?.id) {
-      const current = preferences.data ?? { themePreference: "system" as ThemePreference, gearSortBy: defaultGearSortBy };
-      void api.updatePreferences({ ...current, themePreference }).then((next) => {
-        queryClient.setQueryData(["preferences", session.data?.user?.id], next);
-      }).catch(() => undefined);
+    if (session.data?.canWrite !== false && effectiveUserID) {
+      savePreferences.mutate({ themePreference: preference });
     }
   };
 
   return (
-    <AuthenticatedApp session={session.data} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} />
+    <AuthenticatedApp session={session.data} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={savePreferences.error} />
   );
 }
 
 function AuthenticatedApp({
   session,
   themePreference,
-  onThemePreferenceChange
+  onThemePreferenceChange,
+  themePreferenceError
 }: {
   session?: Session;
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
+  themePreferenceError?: Error | null;
 }) {
   const config = useQuery({ queryKey: ["config"], queryFn: api.config });
   const queryClient = useQueryClient();
@@ -377,7 +348,7 @@ function AuthenticatedApp({
           <Route path="/gear" element={<GearPage />} />
           <Route path="/gear/:id" element={<GearDetailPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
-          <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} />} />
+          <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={themePreferenceError} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -1374,6 +1345,14 @@ function HealthDayDetail({ metric }: { metric: DailyHealthMetric }) {
 
 function GearPage() {
   const queryClient = useQueryClient();
+  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
+  const userID = session.data?.user?.id;
+  const preferences = useQuery({
+    queryKey: preferencesQueryKey(userID),
+    queryFn: api.preferences,
+    enabled: Boolean(userID)
+  });
+  const savePreferences = useSaveUserPreferences(userID);
   const gears = useQuery({ queryKey: ["gears"], queryFn: api.gears });
   const garminStatus = useQuery({ queryKey: ["garmin-status"], queryFn: api.garminStatus });
   const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
@@ -1392,7 +1371,7 @@ function GearPage() {
       ]);
     }
   });
-  const [gearSortBy, setGearSortBy] = useState<GearSortBy>(readStoredGearSortBy);
+  const [gearSortBy, setGearSortBy] = useState<GearSortBy>(defaultGearSortBy);
   const activeGear = gears.data?.active ?? [];
   const retiredGear = gears.data?.retired ?? [];
   const allGear = gears.data?.gear ?? [];
@@ -1401,8 +1380,8 @@ function GearPage() {
   const syncDisabled = !garminStatus.data?.connected || gearSync.isPending || anyGarminSyncRunning;
 
   useEffect(() => {
-    storeGearSortBy(gearSortBy);
-  }, [gearSortBy]);
+    setGearSortBy(normalizeGearSortBy(preferences.data?.gearSortBy));
+  }, [preferences.data?.gearSortBy, userID]);
 
   useEffect(() => {
     if (!latestGearJob || latestGearJob.status === "running") {
@@ -1421,7 +1400,13 @@ function GearPage() {
             <select
               id="gear-sort-by"
               value={gearSortBy}
-              onChange={(event) => setGearSortBy(event.target.value as GearSortBy)}
+              onChange={(event) => {
+                const next = event.target.value as GearSortBy;
+                setGearSortBy(next);
+                if (userID) {
+                  savePreferences.mutate({ gearSortBy: next });
+                }
+              }}
             >
               {gearSortByOptions.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -1591,6 +1576,14 @@ function GearDetailPage() {
 }
 
 function ActivitiesPage() {
+  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
+  const userID = session.data?.user?.id;
+  const preferences = useQuery({
+    queryKey: preferencesQueryKey(userID),
+    queryFn: api.preferences,
+    enabled: Boolean(userID)
+  });
+  const savePreferences = useSaveUserPreferences(userID);
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = activityFiltersFromSearchParams(searchParams);
   const setFilters = (nextFilters: ActivityTypeFiltersValue) => {
@@ -1599,7 +1592,7 @@ function ActivitiesPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState<ActivityTableColumnKey[]>(readStoredActivityTableColumns);
+  const [visibleColumns, setVisibleColumns] = useState<ActivityTableColumnKey[]>(defaultActivityTableColumns);
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
   const activities = useInfiniteQuery({
     queryKey: ["activities", filters],
@@ -1630,9 +1623,15 @@ function ActivitiesPage() {
   const currentSort = normalizedActivitySort(filters);
   const sortActive = !activitySortsMatch(currentSort, defaultActivitySort);
   const hiddenColumnCount = defaultActivityTableColumns.length - visibleColumns.length;
+  useEffect(() => {
+    setVisibleColumns(normalizeActivityTableColumns(preferences.data?.activityTableColumns));
+  }, [preferences.data?.activityTableColumns, userID]);
+
   const applyColumns = (columns: ActivityTableColumnKey[]) => {
     setVisibleColumns(columns);
-    storeActivityTableColumns(columns);
+    if (userID) {
+      savePreferences.mutate({ activityTableColumns: columns });
+    }
   };
   return (
     <Page
@@ -3829,10 +3828,12 @@ function ClimbStat({ label, value }: { label: string; value: string }) {
 
 function SettingsPage({
   themePreference,
-  onThemePreferenceChange
+  onThemePreferenceChange,
+  themePreferenceError
 }: {
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
+  themePreferenceError?: Error | null;
 }) {
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -3971,7 +3972,7 @@ function SettingsPage({
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
       <TrainingSheetSettings />
-      <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} />
+      <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} error={themePreferenceError} />
       <UserManagement />
       <section id="import" className="panel upload-panel">
         <div>
@@ -4059,10 +4060,12 @@ function TrainingSheetSettings() {
 
 function DisplaySettingsSection({
   value,
-  onChange
+  onChange,
+  error
 }: {
   value: ThemePreference;
   onChange: (preference: ThemePreference) => void;
+  error?: Error | null;
 }) {
   return (
     <section className="panel display-panel">
@@ -4071,6 +4074,7 @@ function DisplaySettingsSection({
         <p className="muted">Choose how Runnarr follows your browser color settings.</p>
       </div>
       <ThemePreferenceControl value={value} onChange={onChange} />
+      {error && <div className="error">{error.message || "Could not save display preferences"}</div>}
     </section>
   );
 }

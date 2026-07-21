@@ -274,5 +274,10 @@ func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "could not save preferences")
 		return
 	}
-	writeJSON(w, http.StatusOK, preferences)
+	saved, err := s.store.GetUserPreferences(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load saved preferences")
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
 }
