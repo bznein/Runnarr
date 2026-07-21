@@ -362,6 +362,7 @@ func (s *Store) GetSessionRecord(ctx context.Context, id string) (SessionRecord,
 		set last_seen_at = now()
 		from users actor
 		where sessions.id = $1 and sessions.expires_at > now()
+			and sessions.last_seen_at > now() - interval '24 hours'
 			and sessions.user_id = actor.id and not actor.disabled
 		returning sessions.csrf_token, actor.id::text, actor.username, actor.display_name,
 			actor.role, actor.disabled, actor.last_login_at, actor.created_at, actor.updated_at,
@@ -378,6 +379,9 @@ func (s *Store) GetSessionRecord(ctx context.Context, id string) (SessionRecord,
 		if err != nil {
 			return record, err
 		}
+		if effective.Disabled {
+			return record, errors.New("support target is disabled")
+		}
 		record.Effective = effective
 		record.Support = true
 	}
@@ -390,13 +394,16 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 }
 
 func (s *Store) SetSessionSupport(ctx context.Context, sessionID, targetID string) error {
-	_, err := s.db.Exec(ctx, `
+	tag, err := s.db.Exec(ctx, `
 		update auth_sessions sessions
 		set support_user_id = $3
 		from users actor, users target
 		where sessions.id = $1 and sessions.user_id = actor.id and actor.role = 'admin'
-			and target.id = $2
+			and target.id = $2 and not target.disabled
 	`, sessionID, targetID, targetID)
+	if err == nil && tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
 	return err
 }
 

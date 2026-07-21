@@ -28,19 +28,28 @@ func (s *Server) handleStartSupport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cannot enter support mode for yourself")
 		return
 	}
-	if _, err := s.store.GetUser(r.Context(), body.UserID); errors.Is(err, pgx.ErrNoRows) {
+	target, err := s.store.GetUser(r.Context(), body.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load user")
 		return
 	}
-	cookie, err := r.Cookie(sessionCookieName)
+	if target.Disabled {
+		writeError(w, http.StatusBadRequest, "cannot enter support mode for a disabled user")
+		return
+	}
+	cookie, err := r.Cookie(s.authCookieName())
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "login session is missing")
 		return
 	}
 	if err := s.store.SetSessionSupport(r.Context(), cookie.Value, body.UserID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusBadRequest, "cannot enter support mode for that user")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "could not enter support mode")
 		return
 	}
@@ -53,7 +62,7 @@ func (s *Server) handleStartSupport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStopSupport(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookieName)
+	cookie, err := r.Cookie(s.authCookieName())
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "login session is missing")
 		return
@@ -100,6 +109,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.store.SetUserPassword(r.Context(), principal.ActorID, string(newHash)); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not update password")
+		return
+	}
+	if err := s.store.DisableUserSessions(r.Context(), principal.ActorID); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not revoke existing sessions")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"updated": true})

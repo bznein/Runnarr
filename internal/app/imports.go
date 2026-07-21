@@ -30,6 +30,10 @@ type ImportService struct {
 	parsers map[string]ActivityParser
 }
 
+const maxImportUploadBytes = 80 << 20
+
+var ErrImportFileTooLarge = errors.New("activity file must be 80 MiB or smaller")
+
 func NewImportService(store *Store) *ImportService {
 	parsers := []ActivityParser{
 		GPXParser{},
@@ -44,12 +48,15 @@ func NewImportService(store *Store) *ImportService {
 }
 
 func (s *ImportService) ImportFile(ctx context.Context, filename, contentType string, reader io.Reader) (Activity, ImportFile, error) {
-	data, err := io.ReadAll(io.LimitReader(reader, 80<<20))
+	data, err := io.ReadAll(io.LimitReader(reader, maxImportUploadBytes+1))
 	if err != nil {
 		return Activity{}, ImportFile{}, err
 	}
 	if len(data) == 0 {
 		return Activity{}, ImportFile{}, errors.New("empty file")
+	}
+	if len(data) > maxImportUploadBytes {
+		return Activity{}, ImportFile{}, ErrImportFileTooLarge
 	}
 
 	sum := sha256.Sum256(data)

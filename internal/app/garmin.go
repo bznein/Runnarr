@@ -21,6 +21,12 @@ import (
 const garminProvider = "garmin"
 const garminActivityPageLimit = 100
 const garminGearActivityPageLimit = 1000
+const maxGarminActivityBytes = 100 << 20
+const maxGarminBridgeOutputBytes = 140 << 20
+const maxGarminSyncActivities = 10_000
+const maxGarminGearActivities = 100_000
+
+var ErrGarminBridgeOutputTooLarge = errors.New("Garmin bridge response is too large")
 
 type GarminService struct {
 	store        *Store
@@ -403,6 +409,9 @@ func (s *GarminService) gearActivitySourceIDs(ctx context.Context, gearID string
 			break
 		}
 		fetched += len(page)
+		if fetched > maxGarminGearActivities {
+			return sourceIDs, fetched, fmt.Errorf("Garmin gear activity history is limited to %d records per gear", maxGarminGearActivities)
+		}
 		for _, activity := range page {
 			if strings.TrimSpace(activity.ID) != "" {
 				sourceIDs = append(sourceIDs, activity.ID)
@@ -451,6 +460,9 @@ func (s *GarminService) listActivitiesSince(ctx context.Context, oldest time.Tim
 				continue
 			}
 			out = append(out, activity)
+			if len(out) >= maxGarminSyncActivities {
+				return nil, fmt.Errorf("Garmin sync is limited to %d activities per run", maxGarminSyncActivities)
+			}
 		}
 		progress(map[string]any{"provider": garminProvider, "stage": "Listing Garmin activities", "activities": len(out), "processed": len(out), "fetchedPages": (start / garminActivityPageLimit) + 1})
 		if reachedOldest || len(page) < garminActivityPageLimit {
@@ -473,6 +485,9 @@ func appendGarminSyncError(firstErrors []string, source GarminBridgeActivity, er
 }
 
 func parseGarminActivityDownload(ctx context.Context, sourceID string, data []byte) (ImportedActivity, error) {
+	if len(data) > maxGarminActivityBytes {
+		return ImportedActivity{}, errors.New("Garmin activity download is too large")
+	}
 	filename := sourceID + ".fit"
 	if zipReader, err := zip.NewReader(bytes.NewReader(data), int64(len(data))); err == nil {
 		foundActivityFile := false
@@ -485,10 +500,13 @@ func parseGarminActivityDownload(ctx context.Context, sourceID string, data []by
 			if err != nil {
 				return ImportedActivity{}, err
 			}
-			fileData, readErr := io.ReadAll(io.LimitReader(reader, 100<<20))
+			fileData, readErr := io.ReadAll(io.LimitReader(reader, maxGarminActivityBytes+1))
 			closeErr := reader.Close()
 			if readErr != nil {
 				return ImportedActivity{}, readErr
+			}
+			if len(fileData) > maxGarminActivityBytes {
+				return ImportedActivity{}, errors.New("Garmin activity file in archive is too large")
 			}
 			if closeErr != nil {
 				return ImportedActivity{}, closeErr
@@ -639,6 +657,9 @@ func (b PythonGarminBridge) DownloadActivity(ctx context.Context, tokenStore, ac
 	if err != nil {
 		return nil, fmt.Errorf("invalid Garmin bridge download response: %w", err)
 	}
+	if len(data) > maxGarminActivityBytes {
+		return nil, errors.New("Garmin activity download is too large")
+	}
 	return data, nil
 }
 
@@ -691,11 +712,16 @@ func (b PythonGarminBridge) run(ctx context.Context, request map[string]any, res
 	}
 	cmd := exec.CommandContext(ctx, b.Python, b.Script)
 	cmd.Stdin = bytes.NewReader(body)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	var stdout boundedBuffer
+	stdout.max = maxGarminBridgeOutputBytes
+	var stderr boundedBuffer
+	stderr.max = 1 << 20
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if stdout.tooLarge || stderr.tooLarge {
+			return ErrGarminBridgeOutputTooLarge
+		}
 		var bridgeErr struct {
 			Error string `json:"error"`
 			Code  string `json:"code"`
@@ -713,4 +739,18 @@ func (b PythonGarminBridge) run(ctx context.Context, request map[string]any, res
 		return fmt.Errorf("invalid Garmin bridge response: %w", err)
 	}
 	return nil
+}
+
+type boundedBuffer struct {
+	bytes.Buffer
+	max      int
+	tooLarge bool
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > b.max {
+		b.tooLarge = true
+		return 0, ErrGarminBridgeOutputTooLarge
+	}
+	return b.Buffer.Write(p)
 }

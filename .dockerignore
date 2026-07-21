@@ -1,8 +1,8 @@
 .git
 .env
+.env.*
+data
 tmp
-coverage
 web/node_modules
 web/dist
 *.log
-

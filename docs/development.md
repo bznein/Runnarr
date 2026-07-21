@@ -13,7 +13,7 @@ You still need a PostgreSQL database for the app, but you can run the server and
 1. Configure environment variables in `.env` (copy from `.env.example` first).
    `scripts/dev.sh` now performs this bootstrap automatically when `.env` does not yet exist.
 2. Set `RUNNARR_STATIC_DIR=web/dist` (default) for the backend config.
-3. Set `RUNNARR_HTTP_ADDR` for the backend (if unset, `scripts/dev.sh` now auto-chooses a random high port).
+3. Set `RUNNARR_HTTP_ADDR` for the backend (if unset, `scripts/dev.sh` now auto-chooses a random high port and binds it to loopback).
 
 ## Start backend + frontend (with Vite hot-reload)
 
@@ -29,10 +29,10 @@ Then visit:
 - Backend API: uses `RUNNARR_HTTP_ADDR` (or the auto-selected random high port when unset).
 - Frontend (Vite): whatever is available, e.g. `http://localhost:5173`
   (set `RUNNARR_FRONTEND_PORT` in your environment to pin it).
-  If you still see `/api` calls sent to `5173`, stop the old frontend process on that port and rerun:
+The backend and Vite server bind to loopback by default. If you still see `/api` calls sent to `5173`, stop the old frontend process on that port and rerun:
 
 ```bash
-pkill -f "vite --host 0.0.0.0 --port 5173"
+pkill -f "vite --host 127.0.0.1 --port 5173"
 ```
 
 Set `RUNNARR_KEEP_LEGACY_FRONTEND=1` to keep manually managed legacy frontend instances running.

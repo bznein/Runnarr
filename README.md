@@ -20,6 +20,10 @@ The configured admin account is created automatically on first startup. Addition
 
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 
+For an HTTPS deployment behind Nginx Proxy Manager, see
+[docs/internet-deployment.md](docs/internet-deployment.md). Public mode is an
+explicit Compose override and does not change the local `localhost` path.
+
 ## Local Development
 
 Backend:
@@ -28,6 +32,10 @@ Backend:
 source .env
 go run ./cmd/runnarr
 ```
+
+The example environment binds a directly-run backend to loopback. Docker
+overrides the container listen address internally, while its host port remains
+loopback-only.
 
 Frontend:
 

@@ -24,14 +24,17 @@ import (
 )
 
 const (
-	maxMediaUploadBytes = 25 << 20
-	mediaThumbnailMaxPx = 480
+	maxMediaUploadBytes      = 25 << 20
+	mediaThumbnailMaxPx      = 480
+	maxDecodedImagePixels    = 25_000_000
+	maxDecodedImageDimension = 12_000
 )
 
 var (
 	ErrEmptyMediaFile       = errors.New("media file is empty")
 	ErrMediaFileTooLarge    = errors.New("media file must be 25 MiB or smaller")
 	ErrUnsupportedMediaType = errors.New("media must be a JPEG or PNG image")
+	ErrMediaImageTooLarge   = errors.New("image dimensions are too large")
 	ErrUnsafeMediaPath      = errors.New("invalid media storage path")
 )
 
@@ -82,6 +85,13 @@ func (s *MediaService) UploadActivityMedia(ctx context.Context, activityID, file
 		return ActivityMedia{}, err
 	}
 
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return ActivityMedia{}, ErrUnsupportedMediaType
+	}
+	if config.Width <= 0 || config.Height <= 0 || config.Width > maxDecodedImageDimension || config.Height > maxDecodedImageDimension || int64(config.Width)*int64(config.Height) > maxDecodedImagePixels {
+		return ActivityMedia{}, ErrMediaImageTooLarge
+	}
 	decoded, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return ActivityMedia{}, ErrUnsupportedMediaType

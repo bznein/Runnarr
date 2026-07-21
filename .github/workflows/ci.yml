@@ -87,7 +87,7 @@ jobs:
       - name: Wait for app
         run: |
           for attempt in {1..60}; do
-            if curl -fsS http://localhost:37617/api/session; then
+            if curl -fsS http://127.0.0.1:37617/api/session; then
               exit 0
             fi
             sleep 2

@@ -27,7 +27,11 @@ func (s *Server) handleGoogleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGoogleConnect(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookieName)
+	if principal, err := principalFromContext(r.Context()); err == nil && principal.SupportTarget {
+		writeError(w, http.StatusForbidden, "support mode cannot connect provider accounts")
+		return
+	}
+	cookie, err := r.Cookie(s.authCookieName())
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
 		writeError(w, http.StatusUnauthorized, "login is required")
 		return
@@ -50,7 +54,7 @@ func (s *Server) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Google OAuth callback is incomplete")
 		return
 	}
-	sessionCookie, err := r.Cookie(sessionCookieName)
+	sessionCookie, err := r.Cookie(s.authCookieName())
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "login session is missing")
 		return
@@ -58,6 +62,11 @@ func (s *Server) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	sessionID, userID, err := s.store.ConsumeGoogleOAuthState(r.Context(), state)
 	if err != nil || sessionID != sessionCookie.Value {
 		writeError(w, http.StatusBadRequest, "invalid Google OAuth state")
+		return
+	}
+	record, err := s.store.GetSessionRecord(r.Context(), sessionCookie.Value)
+	if err != nil || record.Support || record.Effective.ID != userID {
+		writeError(w, http.StatusUnauthorized, "login session is no longer valid")
 		return
 	}
 	if err := s.googleAuth().Exchange(withUserID(r.Context(), userID), code); err != nil {
@@ -94,6 +103,10 @@ func (s *Server) handlePlannedActivities(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		to = parsed.AddDate(0, 0, 1)
+	}
+	if to.Sub(from) > 2*365*24*time.Hour {
+		writeError(w, http.StatusBadRequest, "planned activity range cannot exceed two years")
+		return
 	}
 	items, err := s.store.ListPlannedActivities(r.Context(), from, to)
 	if err != nil {

@@ -1,0 +1,18 @@
+services:
+  db:
+    ports: !override []
+
+  app:
+    ports: !override []
+    environment:
+      RUNNARR_PUBLIC_MODE: "true"
+      RUNNARR_LOCAL_AUTH_ENABLED: ${RUNNARR_LOCAL_AUTH_ENABLED:-false}
+      RUNNARR_TRUST_PROXY: "true"
+    networks:
+      - runnarr
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: ${RUNNARR_PROXY_NETWORK:-proxy}

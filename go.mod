@@ -3,17 +3,20 @@ module github.com/bznein/Runnarr
 go 1.26
 
 require (
+	github.com/coreos/go-oidc/v3 v3.14.1
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/tormoder/fit v0.15.0
 	golang.org/x/crypto v0.41.0
 	golang.org/x/image v0.5.0
+	golang.org/x/oauth2 v0.30.0
 )
 
 require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/client9/misspell v0.3.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/gordonklaus/ineffassign v0.0.0-20210914165742-4cc7213b9bc8 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect

@@ -117,7 +117,7 @@ func parseTrainingSheetID(rawURL string) (string, string, error) {
 			break
 		}
 	}
-	if sheetID == "" || parsed.Host == "" {
+	if sheetID == "" || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Hostname(), "docs.google.com") || parsed.Port() != "" || parsed.User != nil {
 		return "", "", fmt.Errorf("sheet URL must be a Google Sheets URL")
 	}
 	gid := parsed.Query().Get("gid")

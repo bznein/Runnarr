@@ -23,6 +23,12 @@ RUN apt-get update \
 COPY --from=api-build /out/runnarr /app/runnarr
 COPY --from=web-build /src/web/dist /app/web/dist
 COPY internal/app/garmin_bridge.py /app/garmin_bridge.py
-RUN mkdir -p /app/data && chmod 700 /app/data
+RUN addgroup --system --gid 10001 runnarr \
+  && adduser --system --uid 10001 --gid 10001 --home /app runnarr \
+  && mkdir -p /app/data \
+  && chown -R 10001:10001 /app \
+  && chmod 700 /app/data
+ENV PYTHONDONTWRITEBYTECODE=1
+USER 10001:10001
 EXPOSE 8080
 ENTRYPOINT ["/app/runnarr"]

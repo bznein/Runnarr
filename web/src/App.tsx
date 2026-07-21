@@ -402,8 +402,10 @@ function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const login = useMutation({
     mutationFn: ({ username, password }: { username: string; password: string }) => api.login(username, password),
     onSuccess: async (session) => {
@@ -413,6 +415,10 @@ function LoginPage() {
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Login failed")
   });
+
+  const localLoginEnabled = session.data?.localLoginEnabled !== false;
+  const googleOIDCEnabled = session.data?.googleOIDCEnabled === true;
+  const callbackError = searchParams.get("error");
 
   return (
     <div className="login-page">
@@ -427,18 +433,23 @@ function LoginPage() {
           <ActivityIcon size={26} />
           <span>Runnarr</span>
         </div>
-        <label className="field">
-          <span>Username</span>
-          <input autoFocus type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} />
-        </label>
-        <label className="field">
-          <span>Password</span>
-          <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
-        </label>
-        {error && <div className="error">{error}</div>}
-        <button className="primary-button" type="submit" disabled={login.isPending || username.trim().length === 0 || password.length === 0}>
-          Log in
-        </button>
+        {localLoginEnabled && <>
+          <label className="field">
+            <span>Username</span>
+            <input autoFocus type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          </label>
+          {(error || callbackError) && <div className="error">{error || "Google login was not completed."}</div>}
+          <button className="primary-button" type="submit" disabled={login.isPending || username.trim().length === 0 || password.length === 0}>
+            Log in
+          </button>
+        </>}
+        {!localLoginEnabled && callbackError && <div className="error">Google login was not completed.</div>}
+        {googleOIDCEnabled && <a className="secondary-button" href="/api/auth/google/login">Continue with Google</a>}
+        {!localLoginEnabled && !googleOIDCEnabled && <div className="error">No login method is configured.</div>}
       </form>
     </div>
   );
@@ -4994,6 +5005,7 @@ function ActivityMap({
         />
       )}
       {paceSegments.length > 0 && <ActivityPaceRouteLegend source={routeColorSource ?? "pace"} />}
+      {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}
     </div>
   );
 }
