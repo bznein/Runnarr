@@ -459,6 +459,22 @@ textarea {
   gap: 3px;
 }
 
+.calendar-day-activity--planned {
+  padding: 5px 7px;
+  border-left: 3px solid var(--color-warning-strong);
+  border-radius: 4px;
+  background: var(--color-warning-soft);
+}
+
+.calendar-day-activity--planned a {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.calendar-day-activity--planned .calendar-day-activity-meta {
+  color: var(--color-warning-strong);
+}
+
 .calendar-day-activity a {
   font-size: 12px;
   color: var(--color-primary-text);
