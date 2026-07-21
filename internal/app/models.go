@@ -10,6 +10,8 @@ type Activity struct {
 	SourceName               string           `json:"sourceName"`
 	LocalName                string           `json:"localName,omitempty"`
 	Notes                    string           `json:"notes,omitempty"`
+	Feedback                 string           `json:"feedback,omitempty"`
+	RPE                      *int             `json:"rpe,omitempty"`
 	SportType                string           `json:"sportType"`
 	StartTime                time.Time        `json:"startTime"`
 	DistanceM                float64          `json:"distanceM"`
@@ -118,7 +120,9 @@ type ActivityLap struct {
 	Index                    int        `json:"index"`
 	StartTime                *time.Time `json:"startTime,omitempty"`
 	ElapsedTimeS             int        `json:"elapsedTimeS"`
+	MovingTimeS              int        `json:"movingTimeS"`
 	DistanceM                float64    `json:"distanceM"`
+	AvgPaceSPKM              *float64   `json:"avgPaceSPKM,omitempty"`
 	ElevationGainM           *float64   `json:"elevationGainM,omitempty"`
 	ElevationLossM           *float64   `json:"elevationLossM,omitempty"`
 	AvgGradeAdjustedPaceSPKM *float64   `json:"avgGradeAdjustedPaceSPKM,omitempty"`
@@ -166,6 +170,7 @@ type ImportedActivity struct {
 	ElevationGainM           float64          `json:"elevationGainM"`
 	AvgHeartRate             *float64         `json:"avgHeartRate,omitempty"`
 	MaxHeartRate             *float64         `json:"maxHeartRate,omitempty"`
+	AvgPaceSPKM              *float64         `json:"avgPaceSPKM,omitempty"`
 	AvgGradeAdjustedPaceSPKM *float64         `json:"avgGradeAdjustedPaceSPKM,omitempty"`
 	CaloriesKcal             *int             `json:"caloriesKcal,omitempty"`
 	OriginalProviderURL      string           `json:"originalProviderUrl,omitempty"`
@@ -207,6 +212,18 @@ type ProviderConnection struct {
 	ConnectedAt       time.Time `json:"connectedAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 	TokenExpiresAt    time.Time `json:"tokenExpiresAt"`
+}
+
+type TrainingSheetWritebackStatus struct {
+	PlannedActivityID string     `json:"plannedActivityId"`
+	ActivityID        string     `json:"activityId"`
+	SummaryStatus     string     `json:"summaryStatus"`
+	SummaryError      string     `json:"summaryError,omitempty"`
+	SummaryWrittenAt  *time.Time `json:"summaryWrittenAt,omitempty"`
+	FeedbackStatus    string     `json:"feedbackStatus"`
+	FeedbackError     string     `json:"feedbackError,omitempty"`
+	FeedbackWrittenAt *time.Time `json:"feedbackWrittenAt,omitempty"`
+	LastAttemptAt     *time.Time `json:"lastAttemptAt,omitempty"`
 }
 
 type StoredProviderConnection struct {

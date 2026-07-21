@@ -169,6 +169,21 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ notes })
     }),
+  updateActivityFeedback: (id: string, feedback: string) =>
+    request<{ activity: Activity }>(`/api/activities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ feedback })
+    }),
+  updateActivityRPE: (id: string, rpe: number | null) =>
+    request<{ activity: Activity }>(`/api/activities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ rpe })
+    }),
+  updateActivityReflection: (id: string, feedback: string, rpe: number | null) =>
+    request<{ activity: Activity }>(`/api/activities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ feedback, rpe })
+    }),
   deleteActivity: (id: string) => request<DeleteActivityResult>(`/api/activities/${id}`, { method: "DELETE" }),
   uploadActivityMedia: (id: string, file: File) => {
     const body = new FormData();
@@ -214,11 +229,12 @@ export const api = {
   }),
   trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
   plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
-  plannedMatchCandidates: (activityID: string) => request<PlannedActivityMatchResponse>(`/api/activities/${activityID}/planned-match-candidates`),
+  plannedMatchCandidates: (activityID: string, windowDays = 7) => request<PlannedActivityMatchResponse>(`/api/activities/${activityID}/planned-match-candidates?windowDays=${windowDays}`),
   matchPlannedActivity: (activityID: string, plannedActivityId: string) => request<{ planned: PlannedActivity }>(`/api/activities/${activityID}/planned-match`, {
     method: "POST",
     body: JSON.stringify({ plannedActivityId })
   }),
   unmatchPlannedActivity: (activityID: string) => request<{ matched: boolean }>(`/api/activities/${activityID}/planned-match`, { method: "DELETE" }),
+  retryPlannedWriteback: (activityID: string) => request<{ jobId: string; status: string }>(`/api/activities/${activityID}/planned-writeback`, { method: "POST" }),
   syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
 };

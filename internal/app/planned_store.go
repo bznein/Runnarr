@@ -87,6 +87,7 @@ type googleSheetsTokenRecord struct {
 	AccessTokenCiphertext  []byte
 	RefreshTokenCiphertext []byte
 	TokenExpiresAt         *time.Time
+	Scopes                 []string
 }
 
 func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivity) error {
@@ -100,16 +101,17 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 	}
 
 	_, err = s.db.Exec(ctx, `
-		insert into planned_activities(
+	insert into planned_activities(
 			source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
-			planned_date, name, sport_type, notes, status, source_url, raw,
+			feedback_cell, planned_date, name, sport_type, notes, status, source_url, raw,
 			last_seen_at, updated_at
-		) values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now(), now())
+		) values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
 		on conflict(source, source_id) do update set
 			workbook_id = excluded.workbook_id,
 			sheet_id = excluded.sheet_id,
 			sheet_title = excluded.sheet_title,
 			plan_cell = excluded.plan_cell,
+			feedback_cell = excluded.feedback_cell,
 			planned_date = excluded.planned_date,
 			name = excluded.name,
 			sport_type = excluded.sport_type,
@@ -119,7 +121,7 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 			last_seen_at = now(),
 			updated_at = now()
 	`, planned.Source, planned.SourceID, planned.WorkbookID, planned.SheetID, planned.SheetTitle,
-		planned.PlanCell, planned.PlannedDate, planned.Name, planned.SportType, planned.Notes,
+		planned.PlanCell, planned.FeedbackCell, planned.PlannedDate, planned.Name, planned.SportType, planned.Notes,
 		planned.Status, planned.SourceURL, rawBytes)
 	if err != nil {
 		return err
@@ -143,6 +145,16 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 		where source = $1 and source_id = $2
 	`, planned.Source, planned.SourceID, planned.Name, planned.SportType, planned.PlannedDate.UTC(), planned.Notes, planned.SourceURL)
 	return err
+}
+
+func (s *Store) PlannedActivityExists(ctx context.Context, source, sourceID string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRow(ctx, `
+		select exists(
+			select 1 from planned_activities where source = $1 and source_id = $2
+		)
+	`, source, sourceID).Scan(&exists)
+	return exists, err
 }
 
 func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) ([]PlannedActivity, error) {
@@ -170,11 +182,14 @@ func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) (
 	return planned, rows.Err()
 }
 
-func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID string) (PlannedActivityMatchResponse, error) {
+func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID string, windowDays int) (PlannedActivityMatchResponse, error) {
 	var activitySource string
 	var activityDate time.Time
 	if err := s.db.QueryRow(ctx, `select source, date(start_time) from activities where id = $1`, activityID).Scan(&activitySource, &activityDate); err != nil {
 		return PlannedActivityMatchResponse{}, err
+	}
+	if windowDays != 7 && windowDays != 30 {
+		windowDays = 7
 	}
 	response := PlannedActivityMatchResponse{Candidates: make([]PlannedActivity, 0)}
 	if activitySource == trainingSheetProvider {
@@ -183,9 +198,13 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	rows, err := s.db.Query(ctx, `
 		select `+plannedActivityColumns+`
 		from planned_activities
-		where planned_date = $1::date and status = 'pending'
-		order by plan_cell, name
-	`, activityDate)
+		where planned_date between ($1::date - $2::int) and ($1::date + $2::int)
+			and status = 'pending'
+		order by
+			case when planned_date = $1::date then 0 else 1 end,
+			abs(planned_date - $1::date),
+			plan_cell, name
+	`, activityDate, windowDays)
 	if err != nil {
 		return response, err
 	}
@@ -196,9 +215,24 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 			return response, err
 		}
 		response.Candidates = append(response.Candidates, item)
+		if response.SuggestedID == "" {
+			response.SuggestedID = item.ID
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return response, err
+	}
+	if windowDays == 7 {
+		if err := s.db.QueryRow(ctx, `
+			select exists(
+				select 1
+				from planned_activities
+				where status = 'pending'
+					and (planned_date < ($1::date - $2::int) or planned_date > ($1::date + $2::int))
+			)
+		`, activityDate, windowDays).Scan(&response.HasMore); err != nil {
+			return response, err
+		}
 	}
 
 	var matched PlannedActivity
@@ -210,6 +244,7 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 		return response, err
 	}
 	response.Matched = &matched
+	response.Writeback, _ = s.GetTrainingSheetWriteback(ctx, matched.ID)
 	return response, nil
 }
 
@@ -239,6 +274,13 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 	}
 	if planned.MatchedActivityID != "" {
 		if planned.MatchedActivityID == activityID {
+			if _, err = tx.Exec(ctx, `
+				insert into training_sheet_writebacks(planned_activity_id, activity_id)
+				values($1, $2)
+				on conflict(planned_activity_id) do update set activity_id = excluded.activity_id, updated_at = now()
+			`, planned.ID, activityID); err != nil {
+				return PlannedActivity{}, err
+			}
 			if err = tx.Commit(ctx); err != nil {
 				return PlannedActivity{}, err
 			}
@@ -249,10 +291,6 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 	if planned.Status != "pending" {
 		return PlannedActivity{}, errPlannedMatchConflict
 	}
-	if planned.PlannedDate.Format("2006-01-02") != activityDate.Format("2006-01-02") {
-		return PlannedActivity{}, errPlannedMatchDateMismatch
-	}
-
 	matchedAt := time.Now().UTC()
 	if _, err = tx.Exec(ctx, `
 		update planned_activities
@@ -264,6 +302,13 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 	planned.Status = "completed"
 	planned.MatchedActivityID = activityID
 	planned.MatchedAt = &matchedAt
+	if _, err = tx.Exec(ctx, `
+		insert into training_sheet_writebacks(planned_activity_id, activity_id)
+		values($1, $2)
+		on conflict(planned_activity_id) do update set activity_id = excluded.activity_id, updated_at = now()
+	`, planned.ID, activityID); err != nil {
+		return PlannedActivity{}, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return PlannedActivity{}, err
 	}
@@ -276,12 +321,16 @@ func (s *Store) UnmatchPlannedActivity(ctx context.Context, activityID string) e
 		set status = 'pending', matched_activity_id = null, matched_at = null, updated_at = now()
 		where matched_activity_id = $1
 	`, activityID)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `delete from training_sheet_writebacks where activity_id = $1`, activityID)
 	return err
 }
 
 const plannedActivityColumns = `
 	id::text, source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
-	planned_date, name, sport_type, notes, status, source_url, raw,
+	feedback_cell, planned_date, name, sport_type, notes, status, source_url, raw,
 	matched_activity_id::text, matched_at, created_at, updated_at`
 
 func scanPlannedActivity(row interface{ Scan(...any) error }, item *PlannedActivity) error {
@@ -290,7 +339,7 @@ func scanPlannedActivity(row interface{ Scan(...any) error }, item *PlannedActiv
 	var matchedAt sql.NullTime
 	if err := row.Scan(
 		&item.ID, &item.Source, &item.SourceID, &item.WorkbookID, &item.SheetID, &item.SheetTitle,
-		&item.PlanCell, &item.PlannedDate, &item.Name, &item.SportType, &item.Notes, &item.Status,
+		&item.PlanCell, &item.FeedbackCell, &item.PlannedDate, &item.Name, &item.SportType, &item.Notes, &item.Status,
 		&item.SourceURL, &rawBytes, &matchedActivityID, &matchedAt, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return err
@@ -327,16 +376,17 @@ func (s *Store) SetTrainingSheetPlanYear(ctx context.Context, year int) error {
 	return err
 }
 
-func (s *Store) SaveGoogleSheetsTokens(ctx context.Context, accessToken, refreshToken []byte, expiresAt *time.Time) error {
+func (s *Store) SaveGoogleSheetsTokens(ctx context.Context, accessToken, refreshToken []byte, expiresAt *time.Time, scopes []string) error {
 	_, err := s.db.Exec(ctx, `
-		insert into google_sheets_tokens(id, access_token_ciphertext, refresh_token_ciphertext, token_expires_at, updated_at)
-		values($1, $2, $3, $4, now())
+		insert into google_sheets_tokens(id, access_token_ciphertext, refresh_token_ciphertext, token_expires_at, scopes, updated_at)
+		values($1, $2, $3, $4, $5, now())
 		on conflict(id) do update set
 			access_token_ciphertext = excluded.access_token_ciphertext,
 			refresh_token_ciphertext = excluded.refresh_token_ciphertext,
 			token_expires_at = excluded.token_expires_at,
+			scopes = excluded.scopes,
 			updated_at = now()
-	`, googleSheetsTokenID, accessToken, refreshToken, expiresAt)
+	`, googleSheetsTokenID, accessToken, refreshToken, expiresAt, scopes)
 	return err
 }
 
@@ -344,9 +394,9 @@ func (s *Store) LoadGoogleSheetsTokens(ctx context.Context) (googleSheetsTokenRe
 	var record googleSheetsTokenRecord
 	var expires sql.NullTime
 	err := s.db.QueryRow(ctx, `
-		select access_token_ciphertext, refresh_token_ciphertext, token_expires_at
+		select access_token_ciphertext, refresh_token_ciphertext, token_expires_at, scopes
 		from google_sheets_tokens where id = $1
-	`, googleSheetsTokenID).Scan(&record.AccessTokenCiphertext, &record.RefreshTokenCiphertext, &expires)
+	`, googleSheetsTokenID).Scan(&record.AccessTokenCiphertext, &record.RefreshTokenCiphertext, &expires, &record.Scopes)
 	if err != nil {
 		return record, err
 	}

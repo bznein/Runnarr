@@ -108,7 +108,17 @@ func (s *Server) handlePlannedActivities(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handlePlannedMatchCandidates(w http.ResponseWriter, r *http.Request) {
-	response, err := s.store.PlannedActivityMatchCandidates(r.Context(), chi.URLParam(r, "id"))
+	windowDays := 7
+	switch r.URL.Query().Get("windowDays") {
+	case "", "7":
+		windowDays = 7
+	case "30":
+		windowDays = 30
+	default:
+		writeError(w, http.StatusBadRequest, "windowDays must be 7 or 30")
+		return
+	}
+	response, err := s.store.PlannedActivityMatchCandidates(r.Context(), chi.URLParam(r, "id"), windowDays)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity not found")
 		return
@@ -147,7 +157,40 @@ func (s *Server) handleMatchPlannedActivity(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "could not match planned activity")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"planned": planned})
+	jobID, enqueueErr := s.store.CreateTrainingSheetWritebackJob(r.Context(), planned.ID, chi.URLParam(r, "id"))
+	if enqueueErr != nil {
+		s.logger.Error("queue training sheet writeback", "activity_id", chi.URLParam(r, "id"), "planned_activity_id", planned.ID, "error", enqueueErr)
+	} else {
+		go s.runTrainingSheetWritebackJob(jobID, planned.ID, chi.URLParam(r, "id"))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"planned": planned, "writebackJobId": jobID})
+}
+
+func (s *Server) handleTrainingSheetWriteback(w http.ResponseWriter, r *http.Request) {
+	activityID := chi.URLParam(r, "id")
+	planned, err := s.store.GetMatchedPlannedActivity(r.Context(), activityID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusBadRequest, "activity is not matched to a planned activity")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load matched planned activity")
+		return
+	}
+	if running, err := s.store.HasRunningSyncJob(r.Context(), trainingSheetProvider); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not check write-back state")
+		return
+	} else if running {
+		writeError(w, http.StatusConflict, "a training sheet job is already running")
+		return
+	}
+	jobID, err := s.store.CreateTrainingSheetWritebackJob(r.Context(), planned.ID, activityID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not create write-back job")
+		return
+	}
+	go s.runTrainingSheetWritebackJob(jobID, planned.ID, activityID)
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
 }
 
 func (s *Server) handleUnmatchPlannedActivity(w http.ResponseWriter, r *http.Request) {
@@ -325,4 +368,18 @@ func (s *Server) finishTrainingSheetSyncJob(ctx context.Context, jobID string, c
 	}
 	_ = s.store.FinishSyncJob(ctx, jobID, "completed", "", payload)
 	return payload, nil
+}
+
+func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	payload, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).Write(ctx, plannedID, activityID)
+	if payload != nil {
+		_ = s.store.UpdateSyncJobProgress(ctx, jobID, payload)
+	}
+	if err != nil {
+		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), payload)
+		return
+	}
+	_ = s.store.FinishSyncJob(ctx, jobID, "completed", "", payload)
 }

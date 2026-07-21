@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -18,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const googleSheetsReadonlyScope = "https://www.googleapis.com/auth/spreadsheets.readonly"
+const googleSheetsScope = "https://www.googleapis.com/auth/spreadsheets"
 
 type GoogleSheetsAuthService struct {
 	store  *Store
@@ -39,7 +40,7 @@ func (s *GoogleSheetsAuthService) Status(ctx context.Context) (GoogleSheetsStatu
 	if !status.Configured {
 		return status, nil
 	}
-	_, err := s.store.LoadGoogleSheetsTokens(ctx)
+	record, err := s.store.LoadGoogleSheetsTokens(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return status, nil
 	}
@@ -47,6 +48,7 @@ func (s *GoogleSheetsAuthService) Status(ctx context.Context) (GoogleSheetsStatu
 		return status, err
 	}
 	status.Connected = true
+	status.WriteReady = hasGoogleSheetsWriteScope(record.Scopes)
 	return status, nil
 }
 
@@ -65,7 +67,7 @@ func (s *GoogleSheetsAuthService) AuthorizationURL(ctx context.Context, sessionI
 	query.Set("client_id", s.cfg.GoogleClientID)
 	query.Set("redirect_uri", s.cfg.GoogleRedirectURL)
 	query.Set("response_type", "code")
-	query.Set("scope", googleSheetsReadonlyScope)
+	query.Set("scope", googleSheetsScope)
 	query.Set("access_type", "offline")
 	query.Set("prompt", "consent")
 	query.Set("state", state)
@@ -91,7 +93,11 @@ func (s *GoogleSheetsAuthService) Exchange(ctx context.Context, code string) err
 	if token.RefreshToken == "" {
 		return errors.New("Google OAuth did not return a refresh token")
 	}
-	return s.saveTokenResponse(refreshTokenOrEmpty(token.RefreshToken), token)
+	scopes := splitGoogleScopes(token.Scope)
+	if len(scopes) == 0 {
+		scopes = []string{googleSheetsScope}
+	}
+	return s.saveTokenResponse(refreshTokenOrEmpty(token.RefreshToken), token, scopes)
 }
 
 func refreshTokenOrEmpty(value string) string { return value }
@@ -128,13 +134,13 @@ func (s *GoogleSheetsAuthService) AccessToken(ctx context.Context) (string, erro
 	if token.AccessToken == "" {
 		return "", errors.New("Google OAuth refresh returned no access token")
 	}
-	if err := s.saveTokenResponse(refreshToken, token); err != nil {
+	if err := s.saveTokenResponse(refreshToken, token, record.Scopes); err != nil {
 		return "", err
 	}
 	return token.AccessToken, nil
 }
 
-func (s *GoogleSheetsAuthService) saveTokenResponse(refreshToken string, token googleTokenResponse) error {
+func (s *GoogleSheetsAuthService) saveTokenResponse(refreshToken string, token googleTokenResponse, scopes []string) error {
 	accessCiphertext, err := encryptGoogleSecret(s.cfg, token.AccessToken)
 	if err != nil {
 		return err
@@ -144,7 +150,7 @@ func (s *GoogleSheetsAuthService) saveTokenResponse(refreshToken string, token g
 		return err
 	}
 	expiresAt := time.Now().UTC().Add(time.Duration(token.ExpiresIn) * time.Second)
-	return s.store.SaveGoogleSheetsTokens(context.Background(), accessCiphertext, refreshCiphertext, &expiresAt)
+	return s.store.SaveGoogleSheetsTokens(context.Background(), accessCiphertext, refreshCiphertext, &expiresAt, scopes)
 }
 
 type googleTokenResponse struct {
@@ -152,6 +158,7 @@ type googleTokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
 	TokenType    string `json:"token_type"`
+	Scope        string `json:"scope"`
 }
 
 type googleSheetTab struct {
@@ -177,8 +184,14 @@ type googleSpreadsheetResponse struct {
 
 type googleValuesResponse struct {
 	ValueRanges []struct {
+		Range  string     `json:"range"`
 		Values [][]string `json:"values"`
 	} `json:"valueRanges"`
+}
+
+type googleValueRangeUpdate struct {
+	Range  string  `json:"range"`
+	Values [][]any `json:"values"`
 }
 
 func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL string) (string, []googleSheetTab, error) {
@@ -229,6 +242,84 @@ func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL str
 		}
 	}
 	return sheetID, tabs, nil
+}
+
+func (s *GoogleSheetsAuthService) ReadRanges(ctx context.Context, sheetID string, ranges []string) ([][][]string, error) {
+	accessToken, err := s.AccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := url.Values{}
+	for _, rangeName := range ranges {
+		query.Add("ranges", rangeName)
+	}
+	query.Set("valueRenderOption", "FORMATTED_VALUE")
+	endpoint := fmt.Sprintf("https://sheets.googleapis.com/v4/spreadsheets/%s/values:batchGet?%s", url.PathEscape(sheetID), query.Encode())
+	values, err := googleGET[googleValuesResponse](ctx, s.client, endpoint, accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("read workbook ranges: %w", err)
+	}
+	result := make([][][]string, len(values.ValueRanges))
+	for index := range values.ValueRanges {
+		result[index] = values.ValueRanges[index].Values
+	}
+	return result, nil
+}
+
+func (s *GoogleSheetsAuthService) WriteRanges(ctx context.Context, sheetID string, updates []googleValueRangeUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	accessToken, err := s.AccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	body := struct {
+		ValueInputOption string                   `json:"valueInputOption"`
+		Data             []googleValueRangeUpdate `json:"data"`
+	}{ValueInputOption: "USER_ENTERED", Data: updates}
+	endpoint := fmt.Sprintf("https://sheets.googleapis.com/v4/spreadsheets/%s/values:batchUpdate", url.PathEscape(sheetID))
+	return googlePOSTJSON(ctx, s.client, endpoint, accessToken, body)
+}
+
+func googlePOSTJSON(ctx context.Context, client *http.Client, endpoint, accessToken string, payload any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+accessToken)
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("Google API returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func splitGoogleScopes(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	return strings.Fields(raw)
+}
+
+func hasGoogleSheetsWriteScope(scopes []string) bool {
+	for _, scope := range scopes {
+		if scope == googleSheetsScope {
+			return true
+		}
+	}
+	return false
 }
 
 func googleGET[T any](ctx context.Context, client *http.Client, endpoint, accessToken string) (T, error) {

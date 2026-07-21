@@ -4,6 +4,13 @@
 
 ### Features
 
+- Matched training-sheet activities now write summary metrics and separate athlete feedback/RPE back to Google Sheets with conflict-safe retries; interval write-back remains pending interval metadata support.
+- Planned activity matching now offers nearby pending plans, date-based suggestions, and feedback controls based on each plan's requested sheet section.
+- Activity and lap pace now prefer provider timer/average-speed data, exclude recorded pauses, and use moving-time fallbacks for write-back and display.
+- Training-sheet feedback sections now associate correctly with single-day workout notes during sync.
+- Training-sheet sync now refreshes metadata for existing past planned activities without importing new historical activities.
+- Local XLSX training-sheet reference files are ignored by Git.
+
 - Added a new `/tools` page and backend `/api/tools/pace` endpoint for pace calculations. Users can enter any two of distance, time, and pace to compute the missing value while calculation remains server-side.
 
 - Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.

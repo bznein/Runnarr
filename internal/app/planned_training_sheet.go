@@ -57,7 +57,14 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 		}
 		for _, candidate := range plannedActivitiesFromTab(sheetID, tab, weekEnd) {
 			if candidate.PlannedDate.Before(today) {
-				continue
+				exists, err := s.store.PlannedActivityExists(ctx, candidate.Source, candidate.SourceID)
+				if err != nil {
+					return nil, err
+				}
+				if !exists {
+					skipped++
+					continue
+				}
 			}
 			processed++
 			if err := s.store.UpsertPlannedActivity(ctx, candidate); err != nil {
@@ -122,6 +129,7 @@ func plannedActivitiesFromTab(workbookID string, tab googleSheetTab, weekEnd tim
 		return nil
 	}
 	details := scopedTabDetails(tab.Values)
+	feedbackCells := feedbackCellsFromTab(tab.Values)
 	planRow := tab.Values[1]
 	activities := make([]PlannedActivity, 0, 7)
 	for column := 1; column <= 7; column++ {
@@ -133,10 +141,42 @@ func plannedActivitiesFromTab(workbookID string, tab googleSheetTab, weekEnd tim
 		plannedDate := weekEnd.AddDate(0, 0, day-6)
 		cell := fmt.Sprintf("%s2", spreadsheetColumn(column+1))
 		notes := strings.TrimSpace(strings.Join(details[day], "\n\n"))
-		raw := map[string]any{"sheetTitle": tab.Title, "sheetId": tab.ID, "weekEnding": weekEnd.Format("2006-01-02"), "planCell": cell, "planName": name, "notes": notes, "values": tab.Values}
-		activities = append(activities, PlannedActivity{Source: trainingSheetProvider, SourceID: fmt.Sprintf("%s:%s:%s", workbookID, tab.ID, cell), WorkbookID: workbookID, SheetID: tab.ID, SheetTitle: tab.Title, PlanCell: cell, PlannedDate: plannedDate, Name: name, SportType: "Run", Notes: notes, Status: "pending", SourceURL: fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/edit#gid=%s", workbookID, tab.ID), Raw: raw})
+		feedbackCell := feedbackCells[day]
+		raw := map[string]any{"sheetTitle": tab.Title, "sheetId": tab.ID, "weekEnding": weekEnd.Format("2006-01-02"), "planCell": cell, "planName": name, "notes": notes, "feedbackCell": feedbackCell, "values": tab.Values}
+		activities = append(activities, PlannedActivity{Source: trainingSheetProvider, SourceID: fmt.Sprintf("%s:%s:%s", workbookID, tab.ID, cell), WorkbookID: workbookID, SheetID: tab.ID, SheetTitle: tab.Title, PlanCell: cell, FeedbackCell: feedbackCell, PlannedDate: plannedDate, Name: name, SportType: "Run", Notes: notes, Status: "pending", SourceURL: fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/edit#gid=%s", workbookID, tab.ID), Raw: raw})
 	}
 	return activities
+}
+
+func feedbackCellsFromTab(values [][]string) map[int]string {
+	result := make(map[int]string)
+	for rowIndex := 2; rowIndex < len(values); rowIndex++ {
+		text := strings.TrimSpace(cellValue(values[rowIndex], 0))
+		if !strings.EqualFold(text, "How did it feel/go?") {
+			continue
+		}
+		for _, day := range feedbackDaysForRow(values, rowIndex) {
+				result[day] = fmt.Sprintf("C%d", rowIndex+1)
+		}
+	}
+	return result
+}
+
+func feedbackDaysForRow(values [][]string, rowIndex int) []int {
+	for previousRow := rowIndex - 1; previousRow >= 2; previousRow-- {
+		text := strings.TrimSpace(cellValue(values[previousRow], 0))
+		if text == "" {
+			continue
+		}
+		colon := strings.Index(text, ":")
+		if colon <= 0 {
+			continue
+		}
+		if days := parseDayScope(strings.TrimSpace(text[:colon])); len(days) > 0 {
+			return days
+		}
+	}
+	return nil
 }
 
 var weekdayPattern = regexp.MustCompile(`(?i)\b(monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thu|friday|fri|saturday|sat|sunday|sun)\b`)
