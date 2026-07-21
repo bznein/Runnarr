@@ -33,10 +33,10 @@ type PlannedActivity struct {
 }
 
 type PlannedActivityMatchResponse struct {
-	Candidates  []PlannedActivity          `json:"candidates"`
-	SuggestedID string                     `json:"suggestedId,omitempty"`
-	HasMore     bool                       `json:"hasMore"`
-	Matched     *PlannedActivity            `json:"matched,omitempty"`
+	Candidates  []PlannedActivity             `json:"candidates"`
+	SuggestedID string                        `json:"suggestedId,omitempty"`
+	HasMore     bool                          `json:"hasMore"`
+	Matched     *PlannedActivity              `json:"matched,omitempty"`
 	Writeback   *TrainingSheetWritebackStatus `json:"writeback,omitempty"`
 }
 

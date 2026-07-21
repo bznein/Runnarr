@@ -2,6 +2,30 @@ package app
 
 import "time"
 
+type User struct {
+	ID          string     `json:"id"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"displayName"`
+	Role        string     `json:"role"`
+	Disabled    bool       `json:"disabled"`
+	LastLoginAt *time.Time `json:"lastLoginAt,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+type UserPreference struct {
+	ThemePreference      string   `json:"themePreference"`
+	ActivityTableColumns []string `json:"activityTableColumns,omitempty"`
+	GearSortBy           string   `json:"gearSortBy"`
+}
+
+type SessionUser struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Role        string `json:"role"`
+}
+
 type Activity struct {
 	ID                       string           `json:"id"`
 	Source                   string           `json:"source"`

@@ -26,8 +26,8 @@ func (s *Store) GetTrainingSheetConfig(ctx context.Context) (TrainingSheetConfig
 	err := s.db.QueryRow(ctx, `
 		select training_sheet_enabled, training_sheet_sheet_url,
 			training_sheet_check_every_hours, plan_year, training_sheet_last_synced_at
-		from app_settings where id = $1
-	`, appSettingsID).Scan(&config.Enabled, &config.SheetURL, &config.CheckEveryHours, &config.PlanYear, &lastSynced)
+		from user_settings where user_id = $1
+	`, scopedUserID(ctx)).Scan(&config.Enabled, &config.SheetURL, &config.CheckEveryHours, &config.PlanYear, &lastSynced)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return config, nil
 	}
@@ -57,16 +57,16 @@ func (s *Store) SetTrainingSheetConfig(ctx context.Context, config TrainingSheet
 		planYear = time.Now().UTC().Year()
 	}
 	_, err := s.db.Exec(ctx, `
-		update app_settings
+		update user_settings
 		set training_sheet_enabled = $2, training_sheet_sheet_url = $3,
 			training_sheet_check_every_hours = $4, plan_year = $5, updated_at = now()
-		where id = $1
-	`, appSettingsID, config.Enabled, strings.TrimSpace(config.SheetURL), checkEveryHours, planYear)
+		where user_id = $1
+	`, scopedUserID(ctx), config.Enabled, strings.TrimSpace(config.SheetURL), checkEveryHours, planYear)
 	return err
 }
 
 func (s *Store) TouchTrainingSheetConfigLastSyncedAt(ctx context.Context, syncedAt time.Time) error {
-	_, err := s.db.Exec(ctx, `update app_settings set training_sheet_last_synced_at = $2, updated_at = now() where id = $1`, appSettingsID, syncedAt)
+	_, err := s.db.Exec(ctx, `update user_settings set training_sheet_last_synced_at = $2, updated_at = now() where user_id = $1`, scopedUserID(ctx), syncedAt)
 	return err
 }
 
@@ -74,9 +74,9 @@ func (s *Store) LatestTrainingSheetScheduledSync(ctx context.Context) (time.Time
 	var createdAt time.Time
 	err := s.db.QueryRow(ctx, `
 		select created_at from sync_jobs
-		where provider = $1 and kind = 'scheduled'
+		where user_id = $1 and provider = $2 and kind = 'scheduled'
 		order by created_at desc limit 1
-	`, trainingSheetProvider).Scan(&createdAt)
+	`, scopedUserID(ctx), trainingSheetProvider).Scan(&createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, nil
 	}
@@ -102,11 +102,11 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 
 	_, err = s.db.Exec(ctx, `
 	insert into planned_activities(
-			source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
+			user_id, source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
 			feedback_cell, planned_date, name, sport_type, notes, status, source_url, raw,
 			last_seen_at, updated_at
-		) values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())
-		on conflict(source, source_id) do update set
+		) values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now(), now())
+		on conflict(user_id, source, source_id) do update set
 			workbook_id = excluded.workbook_id,
 			sheet_id = excluded.sheet_id,
 			sheet_title = excluded.sheet_title,
@@ -120,7 +120,7 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 			raw = excluded.raw,
 			last_seen_at = now(),
 			updated_at = now()
-	`, planned.Source, planned.SourceID, planned.WorkbookID, planned.SheetID, planned.SheetTitle,
+	`, scopedUserID(ctx), planned.Source, planned.SourceID, planned.WorkbookID, planned.SheetID, planned.SheetTitle,
 		planned.PlanCell, planned.FeedbackCell, planned.PlannedDate, planned.Name, planned.SportType, planned.Notes,
 		planned.Status, planned.SourceURL, rawBytes)
 	if err != nil {
@@ -140,10 +140,10 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 	}
 	_, err = s.db.Exec(ctx, `
 		update activities
-		set name = $3, sport_type = $4, start_time = $5, local_notes = $6,
-			original_provider_url = $7, updated_at = now()
-		where source = $1 and source_id = $2
-	`, planned.Source, planned.SourceID, planned.Name, planned.SportType, planned.PlannedDate.UTC(), planned.Notes, planned.SourceURL)
+		set name = $4, sport_type = $5, start_time = $6, local_notes = $7,
+			original_provider_url = $8, updated_at = now()
+		where user_id = $1 and source = $2 and source_id = $3
+	`, scopedUserID(ctx), planned.Source, planned.SourceID, planned.Name, planned.SportType, planned.PlannedDate.UTC(), planned.Notes, planned.SourceURL)
 	return err
 }
 
@@ -151,9 +151,9 @@ func (s *Store) PlannedActivityExists(ctx context.Context, source, sourceID stri
 	var exists bool
 	err := s.db.QueryRow(ctx, `
 		select exists(
-			select 1 from planned_activities where source = $1 and source_id = $2
+			select 1 from planned_activities where user_id = $1 and source = $2 and source_id = $3
 		)
-	`, source, sourceID).Scan(&exists)
+	`, scopedUserID(ctx), source, sourceID).Scan(&exists)
 	return exists, err
 }
 
@@ -161,11 +161,11 @@ func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) (
 	rows, err := s.db.Query(ctx, `
 		select `+plannedActivityColumns+`
 		from planned_activities
-		where planned_date >= $1::date and planned_date < $2::date
+		where user_id = $1 and planned_date >= $2::date and planned_date < $3::date
 			and planned_date >= current_date
 			and status <> 'completed'
 		order by planned_date, plan_cell
-	`, from, to)
+	`, scopedUserID(ctx), from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) (
 func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID string, windowDays int) (PlannedActivityMatchResponse, error) {
 	var activitySource string
 	var activityDate time.Time
-	if err := s.db.QueryRow(ctx, `select source, date(start_time) from activities where id = $1`, activityID).Scan(&activitySource, &activityDate); err != nil {
+	if err := s.db.QueryRow(ctx, `select source, date(start_time) from activities where id = $1 and user_id = $2`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate); err != nil {
 		return PlannedActivityMatchResponse{}, err
 	}
 	if windowDays != 7 && windowDays != 30 {
@@ -198,13 +198,13 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	rows, err := s.db.Query(ctx, `
 		select `+plannedActivityColumns+`
 		from planned_activities
-		where planned_date between ($1::date - $2::int) and ($1::date + $2::int)
+		where user_id = $3 and planned_date between ($1::date - $2::int) and ($1::date + $2::int)
 			and status = 'pending'
 		order by
 			case when planned_date = $1::date then 0 else 1 end,
 			abs(planned_date - $1::date),
 			plan_cell, name
-	`, activityDate, windowDays)
+	`, activityDate, windowDays, scopedUserID(ctx))
 	if err != nil {
 		return response, err
 	}
@@ -227,16 +227,16 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 			select exists(
 				select 1
 				from planned_activities
-				where status = 'pending'
+				where user_id = $3 and status = 'pending'
 					and (planned_date < ($1::date - $2::int) or planned_date > ($1::date + $2::int))
 			)
-		`, activityDate, windowDays).Scan(&response.HasMore); err != nil {
+		`, activityDate, windowDays, scopedUserID(ctx)).Scan(&response.HasMore); err != nil {
 			return response, err
 		}
 	}
 
 	var matched PlannedActivity
-	err = scanPlannedActivity(s.db.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where matched_activity_id = $1`, activityID), &matched)
+	err = scanPlannedActivity(s.db.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where user_id = $2 and matched_activity_id = $1`, activityID, scopedUserID(ctx)), &matched)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return response, nil
 	}
@@ -261,7 +261,7 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 
 	var activitySource string
 	var activityDate time.Time
-	if err = tx.QueryRow(ctx, `select source, date(start_time) from activities where id = $1 for update`, activityID).Scan(&activitySource, &activityDate); err != nil {
+	if err = tx.QueryRow(ctx, `select source, date(start_time) from activities where id = $1 and user_id = $2 for update`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate); err != nil {
 		return PlannedActivity{}, err
 	}
 	if activitySource == trainingSheetProvider {
@@ -269,7 +269,7 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 	}
 
 	var planned PlannedActivity
-	if err = scanPlannedActivity(tx.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where id = $1 for update`, plannedActivityID), &planned); err != nil {
+	if err = scanPlannedActivity(tx.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where id = $1 and user_id = $2 for update`, plannedActivityID, scopedUserID(ctx)), &planned); err != nil {
 		return PlannedActivity{}, err
 	}
 	if planned.MatchedActivityID != "" {
@@ -295,8 +295,8 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 	if _, err = tx.Exec(ctx, `
 		update planned_activities
 		set status = 'completed', matched_activity_id = $2, matched_at = $3, updated_at = now()
-		where id = $1
-	`, plannedActivityID, activityID, matchedAt); err != nil {
+		where id = $1 and user_id = $4
+	`, plannedActivityID, activityID, matchedAt, scopedUserID(ctx)); err != nil {
 		return PlannedActivity{}, err
 	}
 	planned.Status = "completed"
@@ -319,12 +319,12 @@ func (s *Store) UnmatchPlannedActivity(ctx context.Context, activityID string) e
 	_, err := s.db.Exec(ctx, `
 		update planned_activities
 		set status = 'pending', matched_activity_id = null, matched_at = null, updated_at = now()
-		where matched_activity_id = $1
-	`, activityID)
+		where matched_activity_id = $1 and user_id = $2
+	`, activityID, scopedUserID(ctx))
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `delete from training_sheet_writebacks where activity_id = $1`, activityID)
+	_, err = s.db.Exec(ctx, `delete from training_sheet_writebacks where activity_id = $1 and exists (select 1 from activities where activities.id = $1 and activities.user_id = $2)`, activityID, scopedUserID(ctx))
 	return err
 }
 
@@ -361,7 +361,7 @@ func scanPlannedActivity(row interface{ Scan(...any) error }, item *PlannedActiv
 
 func (s *Store) GetTrainingSheetPlanYear(ctx context.Context) (int, error) {
 	var year int
-	err := s.db.QueryRow(ctx, `select coalesce(plan_year, 0) from app_settings where id = $1`, appSettingsID).Scan(&year)
+	err := s.db.QueryRow(ctx, `select coalesce(plan_year, 0) from user_settings where user_id = $1`, scopedUserID(ctx)).Scan(&year)
 	if errors.Is(err, pgx.ErrNoRows) || year <= 0 {
 		return time.Now().UTC().Year(), nil
 	}
@@ -372,21 +372,21 @@ func (s *Store) SetTrainingSheetPlanYear(ctx context.Context, year int) error {
 	if year < 1900 || year > 9999 {
 		return fmt.Errorf("plan year must be between 1900 and 9999")
 	}
-	_, err := s.db.Exec(ctx, `update app_settings set plan_year = $2, updated_at = now() where id = $1`, appSettingsID, year)
+	_, err := s.db.Exec(ctx, `update user_settings set plan_year = $2, updated_at = now() where user_id = $1`, scopedUserID(ctx), year)
 	return err
 }
 
 func (s *Store) SaveGoogleSheetsTokens(ctx context.Context, accessToken, refreshToken []byte, expiresAt *time.Time, scopes []string) error {
 	_, err := s.db.Exec(ctx, `
-		insert into google_sheets_tokens(id, access_token_ciphertext, refresh_token_ciphertext, token_expires_at, scopes, updated_at)
-		values($1, $2, $3, $4, $5, now())
-		on conflict(id) do update set
+		insert into google_sheets_tokens(id, user_id, access_token_ciphertext, refresh_token_ciphertext, token_expires_at, scopes, updated_at)
+		values($1, $2, $3, $4, $5, $6, now())
+		on conflict(user_id) do update set
 			access_token_ciphertext = excluded.access_token_ciphertext,
 			refresh_token_ciphertext = excluded.refresh_token_ciphertext,
 			token_expires_at = excluded.token_expires_at,
 			scopes = excluded.scopes,
 			updated_at = now()
-	`, googleSheetsTokenID, accessToken, refreshToken, expiresAt, scopes)
+	`, googleSheetsTokenID+":"+scopedUserID(ctx), scopedUserID(ctx), accessToken, refreshToken, expiresAt, scopes)
 	return err
 }
 
@@ -395,8 +395,8 @@ func (s *Store) LoadGoogleSheetsTokens(ctx context.Context) (googleSheetsTokenRe
 	var expires sql.NullTime
 	err := s.db.QueryRow(ctx, `
 		select access_token_ciphertext, refresh_token_ciphertext, token_expires_at, scopes
-		from google_sheets_tokens where id = $1
-	`, googleSheetsTokenID).Scan(&record.AccessTokenCiphertext, &record.RefreshTokenCiphertext, &expires, &record.Scopes)
+		from google_sheets_tokens where user_id = $1
+	`, scopedUserID(ctx)).Scan(&record.AccessTokenCiphertext, &record.RefreshTokenCiphertext, &expires, &record.Scopes)
 	if err != nil {
 		return record, err
 	}
@@ -407,7 +407,7 @@ func (s *Store) LoadGoogleSheetsTokens(ctx context.Context) (googleSheetsTokenRe
 }
 
 func (s *Store) DeleteGoogleSheetsTokens(ctx context.Context) error {
-	_, err := s.db.Exec(ctx, `delete from google_sheets_tokens where id = $1`, googleSheetsTokenID)
+	_, err := s.db.Exec(ctx, `delete from google_sheets_tokens where user_id = $1`, scopedUserID(ctx))
 	return err
 }
 
@@ -415,16 +415,16 @@ func (s *Store) CreateGoogleOAuthState(ctx context.Context, state, sessionID str
 	if _, err := s.db.Exec(ctx, `delete from google_oauth_states where expires_at < now()`); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(ctx, `insert into google_oauth_states(state, session_id, expires_at) values($1, $2, $3)`, state, sessionID, expiresAt)
+	_, err := s.db.Exec(ctx, `insert into google_oauth_states(state, session_id, user_id, expires_at) values($1, $2, $3, $4)`, state, sessionID, scopedUserID(ctx), expiresAt)
 	return err
 }
 
-func (s *Store) ConsumeGoogleOAuthState(ctx context.Context, state string) (string, error) {
-	var sessionID string
+func (s *Store) ConsumeGoogleOAuthState(ctx context.Context, state string) (string, string, error) {
+	var sessionID, userID string
 	err := s.db.QueryRow(ctx, `
 		delete from google_oauth_states
 		where state = $1 and expires_at > now()
-		returning session_id
-	`, state).Scan(&sessionID)
-	return sessionID, err
+		returning session_id, user_id::text
+	`, state).Scan(&sessionID, &userID)
+	return sessionID, userID, err
 }

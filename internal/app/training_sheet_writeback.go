@@ -20,22 +20,24 @@ func NewTrainingSheetWritebackService(store *Store, auth *GoogleSheetsAuthServic
 
 func (s *Store) GetPlannedActivity(ctx context.Context, id string) (PlannedActivity, error) {
 	var planned PlannedActivity
-	err := scanPlannedActivity(s.db.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where id = $1`, id), &planned)
+	err := scanPlannedActivity(s.db.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where id = $1 and user_id = $2`, id, scopedUserID(ctx)), &planned)
 	return planned, err
 }
 
 func (s *Store) GetMatchedPlannedActivity(ctx context.Context, activityID string) (PlannedActivity, error) {
 	var planned PlannedActivity
-	err := scanPlannedActivity(s.db.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where matched_activity_id = $1`, activityID), &planned)
+	err := scanPlannedActivity(s.db.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where matched_activity_id = $1 and user_id = $2`, activityID, scopedUserID(ctx)), &planned)
 	return planned, err
 }
 
 func (s *Store) EnsureTrainingSheetWriteback(ctx context.Context, plannedID, activityID string) error {
 	_, err := s.db.Exec(ctx, `
 		insert into training_sheet_writebacks(planned_activity_id, activity_id)
-		values($1, $2)
+		select $1, $2
+		where exists (select 1 from planned_activities where id = $1 and user_id = $3)
+			and exists (select 1 from activities where id = $2 and user_id = $3)
 		on conflict(planned_activity_id) do update set activity_id = excluded.activity_id, updated_at = now()
-	`, plannedID, activityID)
+	`, plannedID, activityID, scopedUserID(ctx))
 	return err
 }
 
@@ -52,8 +54,9 @@ func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string)
 	err := s.db.QueryRow(ctx, `
 		select planned_activity_id::text, activity_id::text, summary_status, summary_error, summary_written_at,
 			feedback_status, feedback_error, feedback_written_at, last_attempt_at
-		from training_sheet_writebacks where planned_activity_id = $1
-	`, plannedID).Scan(&status.PlannedActivityID, &status.ActivityID, &status.SummaryStatus, &status.SummaryError, &summaryWritten,
+		from training_sheet_writebacks
+		where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $2)
+	`, plannedID, scopedUserID(ctx)).Scan(&status.PlannedActivityID, &status.ActivityID, &status.SummaryStatus, &status.SummaryError, &summaryWritten,
 		&status.FeedbackStatus, &status.FeedbackError, &feedbackWritten, &lastAttempt)
 	if err != nil {
 		return nil, err
@@ -72,15 +75,15 @@ func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string)
 
 func (s *Store) updateTrainingSheetWritebackSection(ctx context.Context, plannedID, section, status, message string) error {
 	if section == "summary" {
-		_, err := s.db.Exec(ctx, `update training_sheet_writebacks set summary_status = $2, summary_error = $3, summary_written_at = case when $2 = 'completed' then now() else summary_written_at end, updated_at = now() where planned_activity_id = $1`, plannedID, status, message)
+		_, err := s.db.Exec(ctx, `update training_sheet_writebacks set summary_status = $2, summary_error = $3, summary_written_at = case when $2 = 'completed' then now() else summary_written_at end, updated_at = now() where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $4)`, plannedID, status, message, scopedUserID(ctx))
 		return err
 	}
-	_, err := s.db.Exec(ctx, `update training_sheet_writebacks set feedback_status = $2, feedback_error = $3, feedback_written_at = case when $2 = 'completed' then now() else feedback_written_at end, updated_at = now() where planned_activity_id = $1`, plannedID, status, message)
+	_, err := s.db.Exec(ctx, `update training_sheet_writebacks set feedback_status = $2, feedback_error = $3, feedback_written_at = case when $2 = 'completed' then now() else feedback_written_at end, updated_at = now() where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $4)`, plannedID, status, message, scopedUserID(ctx))
 	return err
 }
 
 func (s *Store) markTrainingSheetWritebackAttempt(ctx context.Context, plannedID string) error {
-	_, err := s.db.Exec(ctx, `update training_sheet_writebacks set last_attempt_at = now(), updated_at = now() where planned_activity_id = $1`, plannedID)
+	_, err := s.db.Exec(ctx, `update training_sheet_writebacks set last_attempt_at = now(), updated_at = now() where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $2)`, plannedID, scopedUserID(ctx))
 	return err
 }
 

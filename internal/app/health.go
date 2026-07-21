@@ -29,7 +29,8 @@ func (s *GarminService) SyncHealth(ctx context.Context, opts GarminHealthSyncOpt
 	} else if !connected {
 		return nil, errors.New("Garmin is not connected")
 	}
-	if err := os.MkdirAll(s.tokenDir, 0o700); err != nil {
+	tokenStore := s.tokenStore(ctx)
+	if err := os.MkdirAll(tokenStore, 0o700); err != nil {
 		return nil, fmt.Errorf("could not prepare Garmin token storage: %w", err)
 	}
 
@@ -49,7 +50,7 @@ func (s *GarminService) SyncHealth(ctx context.Context, opts GarminHealthSyncOpt
 		currentDate := current.Format("2006-01-02")
 		progress(map[string]any{"provider": garminProvider, "kind": "health", "stage": "Fetching Garmin health", "days": days, "processed": processed, "saved": saved, "failed": failed, "currentDate": currentDate, "from": from.Format("2006-01-02"), "to": to.Format("2006-01-02")})
 
-		day, err := s.bridge.FetchHealthDay(ctx, s.tokenDir, currentDate)
+		day, err := s.bridge.FetchHealthDay(ctx, tokenStore, currentDate)
 		if err != nil {
 			failed++
 			firstErrors = appendGarminHealthSyncError(firstErrors, currentDate, err)

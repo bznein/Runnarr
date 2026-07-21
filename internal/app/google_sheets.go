@@ -97,7 +97,7 @@ func (s *GoogleSheetsAuthService) Exchange(ctx context.Context, code string) err
 	if len(scopes) == 0 {
 		scopes = []string{googleSheetsScope}
 	}
-	return s.saveTokenResponse(refreshTokenOrEmpty(token.RefreshToken), token, scopes)
+	return s.saveTokenResponse(ctx, refreshTokenOrEmpty(token.RefreshToken), token, scopes)
 }
 
 func refreshTokenOrEmpty(value string) string { return value }
@@ -134,13 +134,13 @@ func (s *GoogleSheetsAuthService) AccessToken(ctx context.Context) (string, erro
 	if token.AccessToken == "" {
 		return "", errors.New("Google OAuth refresh returned no access token")
 	}
-	if err := s.saveTokenResponse(refreshToken, token, record.Scopes); err != nil {
+	if err := s.saveTokenResponse(ctx, refreshToken, token, record.Scopes); err != nil {
 		return "", err
 	}
 	return token.AccessToken, nil
 }
 
-func (s *GoogleSheetsAuthService) saveTokenResponse(refreshToken string, token googleTokenResponse, scopes []string) error {
+func (s *GoogleSheetsAuthService) saveTokenResponse(ctx context.Context, refreshToken string, token googleTokenResponse, scopes []string) error {
 	accessCiphertext, err := encryptGoogleSecret(s.cfg, token.AccessToken)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (s *GoogleSheetsAuthService) saveTokenResponse(refreshToken string, token g
 		return err
 	}
 	expiresAt := time.Now().UTC().Add(time.Duration(token.ExpiresIn) * time.Second)
-	return s.store.SaveGoogleSheetsTokens(context.Background(), accessCiphertext, refreshCiphertext, &expiresAt, scopes)
+	return s.store.SaveGoogleSheetsTokens(ctx, accessCiphertext, refreshCiphertext, &expiresAt, scopes)
 }
 
 type googleTokenResponse struct {

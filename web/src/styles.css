@@ -57,6 +57,69 @@
   --color-backdrop: rgba(20, 28, 26, 0.36);
 }
 
+.account-chip {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.account-chip span {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.support-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, #b7791f 45%, var(--color-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #f6c432 14%, var(--color-surface));
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.user-management-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.user-create-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.user-create-form input,
+.user-create-form select {
+  min-width: 0;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.row-subtext {
+  display: block;
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .user-create-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --color-text: #e5ece8;

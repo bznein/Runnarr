@@ -24,7 +24,9 @@ import type {
   ToolsPaceRequest,
   ToolsPaceResponse,
   ToolsVdotRequest,
-  ToolsVdotResponse
+  ToolsVdotResponse,
+  User,
+  UserPreference
 } from "./types";
 
 export class ApiError extends Error {
@@ -122,12 +124,39 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   session: () => request<Session>("/api/session"),
-  login: (password: string) =>
+  login: (username: string, password: string) =>
     request<Session>("/api/session/login", {
       method: "POST",
-      body: JSON.stringify({ password })
+      body: JSON.stringify({ username, password })
     }),
   logout: () => request<Session>("/api/session/logout", { method: "POST" }),
+  startSupport: (userId: string) => request<Session>("/api/session/support", {
+    method: "POST",
+    body: JSON.stringify({ userId })
+  }),
+  stopSupport: () => request<Session>("/api/session/support", { method: "DELETE" }),
+  changePassword: (currentPassword: string, newPassword: string) => request<{ updated: boolean }>("/api/session/password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword })
+  }),
+  users: () => request<{ users: User[] }>("/api/users"),
+  createUser: (body: { username: string; displayName: string; role: "admin" | "user"; password: string }) => request<{ user: User }>("/api/users", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
+  updateUser: (id: string, body: { displayName?: string; role?: "admin" | "user"; disabled?: boolean }) => request<{ user: User }>(`/api/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  resetUserPassword: (id: string, password: string) => request<{ updated: boolean }>(`/api/users/${encodeURIComponent(id)}/password`, {
+    method: "POST",
+    body: JSON.stringify({ password })
+  }),
+  preferences: () => request<UserPreference>("/api/preferences"),
+  updatePreferences: (body: UserPreference) => request<UserPreference>("/api/preferences", {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
   config: () => request<AppConfig>("/api/config"),
   summary: (filters?: ActivityTypeFilters) => request<SummaryStats>(`/api/stats/summary?${activityFilterQuery(filters)}`),
   activityCalendar: (filters?: ActivityTypeFilters) => request<ActivityCalendar>(`/api/stats/calendar?${activityFilterQuery(filters)}`),

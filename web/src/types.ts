@@ -1,6 +1,30 @@
 export type Session = {
   authenticated: boolean;
   csrfToken?: string;
+  actor?: SessionUser;
+  user?: SessionUser;
+  supportMode?: boolean;
+  canWrite?: boolean;
+};
+
+export type SessionUser = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: "admin" | "user";
+};
+
+export type User = SessionUser & {
+  disabled: boolean;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UserPreference = {
+  themePreference: "system" | "light" | "dark";
+  activityTableColumns?: string[];
+  gearSortBy: string;
 };
 
 export type ToolsPaceRequest = {

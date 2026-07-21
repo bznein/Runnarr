@@ -13,22 +13,22 @@ The first release is intentionally not a full training science platform. It shou
 - Import local activity files with an extensible parser architecture.
 - Store activities in a canonical schema that is independent from Garmin or any one file format.
 - Render a useful activity dashboard, activity list, detail view, route map, and basic charts.
-- Establish a durable architecture for future providers, import formats, races, analytics, and multi-user support.
+- Establish a durable architecture for future providers, import formats, races, analytics, and trusted local multi-user support.
 
 ## 3. Non-Goals for V1
 
 - Public social feed, public sharing, comments, kudos, leaderboards, or third-party community features.
 - Writing activities back to Garmin or other providers.
 - Deep physiological analytics, training load modeling, interval detection, structured workouts, or coach workflows.
-- Full multi-user account management.
+- Public signup, email recovery, OIDC, and hosted multi-tenant administration.
 - Native mobile apps.
 - Self-hosted map tile server.
 
 ## 4. Target User
 
-The v1 user is a technically comfortable runner, cyclist, triathlete, or data-minded endurance athlete who wants private ownership and a consolidated view of their activity data.
+The users are technically comfortable runners, cyclists, triathletes, or data-minded endurance athletes who want private ownership and a consolidated view of their activity data. The deployment may serve a trusted household or small local team.
 
-The default deployment is single-user. The architecture should avoid blocking future multi-user support, but v1 should not add account-management complexity beyond one admin session.
+The default deployment still works for one person, but local account management is part of the supported product. Administrators create and disable username/password accounts, reset passwords, and can enter an explicit read-only support view. There is no public signup or email-based recovery.
 
 ## 5. V1 Requirements
 
@@ -41,11 +41,15 @@ The default deployment is single-user. The architecture should avoid blocking fu
 
 ### Authentication and Privacy
 
-- The UI must require a local admin login.
+- The UI must require a local account login.
+- The first configured admin account must be bootstrapped from `RUNNARR_ADMIN_USERNAME` and the existing password/password-hash environment variables.
+- Administrators must be able to create, disable, and reset local accounts.
+- Activities, health metrics, imports, provider connections, sync jobs, gear, planned activities, and user preferences must be private to their owning account.
+- Administrators must be able to enter an explicit read-only support view for another account and exit it without changing the target account's data.
 - Sessions must use HTTP-only cookies.
 - Mutating API calls must require CSRF protection.
 - Provider tokens or token files must be stored with restricted access.
-- Imported activity data must only be displayed to the local authenticated admin.
+- Imported activity data must only be displayed to the authenticated account that owns it, except while an administrator is in read-only support view.
 
 ### Activity Imports
 
@@ -176,9 +180,11 @@ The storage model should separate canonical activity fields from provider/raw de
 - `import_files`: uploaded file metadata and parser status.
 - `provider_connections`: external provider account metadata; provider token files or credentials must be protected with restricted storage access.
 - `sync_jobs`: provider sync/backfill job state.
-- `auth_sessions`: local admin sessions and CSRF token state.
+- `users`: local accounts, roles, password hashes, disabled state, and login timestamps.
+- `user_settings`: per-user display, activity table, climb-detection, training-sheet, and planning preferences.
+- `auth_sessions`: local sessions, CSRF token state, actor identity, and optional support-view target.
 
-V1 is single-user, but future multi-user support should be possible by adding ownership columns and access control checks.
+All top-level user-owned records carry a non-null owner reference after bootstrap. Child samples, laps, media, and gear assignments remain scoped through their owning activity or gear record. Existing legacy records are assigned to the first bootstrapped administrator during upgrade.
 
 ## 8. Future Roadmap
 
@@ -225,7 +231,7 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 ### Preferences and Localization
 
 - Metric and imperial unit switching.
-- Per-user display preferences once multi-user support exists.
+- Additional locale and unit preferences per user.
 - Locale-aware dates, times, number formatting, and week-start settings.
 
 ### Gear
@@ -258,17 +264,19 @@ V1 is single-user, but future multi-user support should be possible by adding ow
 
 ### Multi-User
 
-- Local accounts.
-- Per-user provider connections.
-- Household/team deployment mode.
-- User-scoped privacy controls.
 - Optional OIDC or reverse-proxy auth integration.
+- Household/team deployment improvements and user-facing audit history.
+- User-scoped export, backup, and retention controls.
+- Shared datasets or controlled collaboration, if a future use case requires them.
 
 ## 9. V1 Acceptance Criteria
 
 - A fresh clone can start with `docker compose up --build`.
 - The app applies migrations and serves the UI.
-- The admin can log in with configured credentials.
+- The configured administrator can log in with the bootstrap credentials.
+- An administrator can create a local user, and that user can log in with the assigned credentials.
+- Each account sees only its own activity, health, import, provider, gear, planning, and preference data.
+- An administrator can enter a read-only support view for another account and exit it.
 - The UI automatically follows the system light/dark preference and supports a persistent manual theme override.
 - The admin can reach a Settings page for provider connections, display preferences, data import tools, and diagnostics.
 - The admin can upload a sample GPX, TCX, or FIT file from the secondary manual import area.

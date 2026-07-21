@@ -156,7 +156,7 @@ func feedbackCellsFromTab(values [][]string) map[int]string {
 			continue
 		}
 		for _, day := range feedbackDaysForRow(values, rowIndex) {
-				result[day] = fmt.Sprintf("C%d", rowIndex+1)
+			result[day] = fmt.Sprintf("C%d", rowIndex+1)
 		}
 	}
 	return result

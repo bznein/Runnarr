@@ -24,13 +24,12 @@ import (
 const sessionCookieName = "runnarr_session"
 
 type Server struct {
-	cfg       Config
-	store     *Store
-	imports   *ImportService
-	garmin    *GarminService
-	media     *MediaService
-	logger    *slog.Logger
-	adminHash []byte
+	cfg     Config
+	store   *Store
+	imports *ImportService
+	garmin  *GarminService
+	media   *MediaService
+	logger  *slog.Logger
 }
 
 func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
@@ -43,14 +42,22 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 			return nil, err
 		}
 	}
+	if err := store.EnsureBootstrap(context.Background(), cfg.AdminUsername, string(adminHash)); err != nil {
+		return nil, fmt.Errorf("bootstrap users: %w", err)
+	}
+	adminUser, err := store.GetUserByUsername(context.Background(), cfg.AdminUsername)
+	if err != nil {
+		return nil, fmt.Errorf("load bootstrap admin: %w", err)
+	}
+	garmin := NewGarminService(cfg, store)
+	garmin.legacyUserID = adminUser.ID
 	return &Server{
-		cfg:       cfg,
-		store:     store,
-		imports:   NewImportService(store),
-		garmin:    NewGarminService(cfg, store),
-		media:     NewMediaService(cfg, store),
-		logger:    logger,
-		adminHash: adminHash,
+		cfg:     cfg,
+		store:   store,
+		imports: NewImportService(store),
+		garmin:  garmin,
+		media:   NewMediaService(cfg, store),
+		logger:  logger,
 	}, nil
 }
 
@@ -69,6 +76,15 @@ func (s *Server) Routes() http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
+			r.Post("/session/support", s.handleStartSupport)
+			r.Delete("/session/support", s.handleStopSupport)
+			r.Post("/session/password", s.handleChangePassword)
+			r.Get("/users", s.handleListUsers)
+			r.Post("/users", s.handleCreateUser)
+			r.Patch("/users/{id}", s.handleUpdateUser)
+			r.Post("/users/{id}/password", s.handleResetUserPassword)
+			r.Get("/preferences", s.handleGetPreferences)
+			r.Patch("/preferences", s.handleUpdatePreferences)
 			r.Get("/config", s.handleConfig)
 			r.Get("/config/training-sheet", s.handleTrainingSheetConfig)
 			r.Patch("/config/training-sheet", s.handleUpdateTrainingSheetConfig)
@@ -138,13 +154,20 @@ type climbPreviewPayload struct {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword(s.adminHash, []byte(body.Password)); err != nil {
+	user, err := s.store.GetUserByUsername(r.Context(), body.Username)
+	if err != nil || user.Disabled {
+		writeError(w, http.StatusUnauthorized, "invalid username or password")
+		return
+	}
+	hash, err := s.store.PasswordHash(r.Context(), user.ID)
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
 		writeError(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
@@ -153,17 +176,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not create session")
 		return
 	}
-	sessionID, err := s.store.CreateSession(r.Context(), csrf, 30*24*time.Hour)
+	sessionID, err := s.store.CreateSession(r.Context(), user.ID, csrf, 30*24*time.Hour)
 	if err != nil {
 		s.logger.Error("create session", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not create session")
 		return
 	}
 	http.SetCookie(w, s.sessionCookie(sessionID, 30*24*time.Hour))
-	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": true,
-		"csrfToken":     csrf,
-	})
+	_ = s.store.TouchUserLogin(r.Context(), user.ID)
+	writeJSON(w, http.StatusOK, sessionResponse(SessionRecord{CSRF: csrf, Actor: user, Effective: user}))
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -172,15 +193,12 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 		return
 	}
-	csrf, err := s.store.GetSession(r.Context(), cookie.Value)
+	record, err := s.store.GetSessionRecord(r.Context(), cookie.Value)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": true,
-		"csrfToken":     csrf,
-	})
+	writeJSON(w, http.StatusOK, sessionResponse(record))
 }
 
 func (s *Server) handleToolsPace(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +235,21 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, s.sessionCookie("", -1*time.Hour))
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+}
+
+func sessionResponse(record SessionRecord) map[string]any {
+	return map[string]any{
+		"authenticated": true,
+		"csrfToken":     record.CSRF,
+		"actor":         sessionUser(record.Actor),
+		"user":          sessionUser(record.Effective),
+		"supportMode":   record.Support,
+		"canWrite":      !record.Support,
+	}
+}
+
+func sessionUser(user User) SessionUser {
+	return SessionUser{ID: user.ID, Username: user.Username, DisplayName: user.DisplayName, Role: user.Role}
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -489,9 +522,9 @@ func (s *Server) handleServeActivityMedia(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name     *string          `json:"name"`
-		Notes    *string          `json:"notes"`
-		Feedback *string          `json:"feedback"`
+		Name     *string         `json:"name"`
+		Notes    *string         `json:"notes"`
+		Feedback *string         `json:"feedback"`
 		RPE      json.RawMessage `json:"rpe"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -810,32 +843,54 @@ func (s *Server) runGarminScheduledSync(ctx context.Context) {
 }
 
 func (s *Server) runGarminScheduledSyncOnce(ctx context.Context) {
-	if _, connected, err := s.garmin.Status(ctx); err != nil || !connected {
-		return
-	}
-	if running, err := s.store.HasRunningSyncJob(ctx, garminProvider); err != nil || running {
-		if err != nil {
-			s.logger.Error("check running scheduled garmin sync", "error", err)
-		}
-		return
-	}
-	jobID, err := s.store.CreateSyncJob(ctx, garminProvider, "scheduled")
+	users, err := s.store.ListUsers(ctx)
 	if err != nil {
-		s.logger.Error("create scheduled garmin sync job", "error", err)
+		s.logger.Error("list users for scheduled Garmin sync", "error", err)
 		return
 	}
-	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
-	oldest := time.Now().UTC().AddDate(0, 0, -30)
-	if _, err := s.finishGarminSyncJob(syncCtx, jobID, GarminSyncOptions{Oldest: oldest}); err != nil {
-		s.logger.Error("scheduled garmin sync", "error", err)
+	for _, user := range users {
+		if user.Disabled {
+			continue
+		}
+		userCtx := withUserID(ctx, user.ID)
+		if _, connected, err := s.garmin.Status(userCtx); err != nil || !connected {
+			continue
+		}
+		if running, err := s.store.HasRunningSyncJob(userCtx, garminProvider); err != nil || running {
+			if err != nil {
+				s.logger.Error("check running scheduled garmin sync", "user_id", user.ID, "error", err)
+			}
+			continue
+		}
+		jobID, err := s.store.CreateSyncJob(userCtx, garminProvider, "scheduled")
+		if err != nil {
+			s.logger.Error("create scheduled garmin sync job", "user_id", user.ID, "error", err)
+			continue
+		}
+		oldest := time.Now().UTC().AddDate(0, 0, -30)
+		go s.runGarminScheduledSyncJob(ctx, user.ID, jobID, oldest)
 	}
-	s.runGarminScheduledHealthSyncOnce(ctx)
+}
+
+func (s *Server) runGarminScheduledSyncJob(parent context.Context, userID, jobID string, oldest time.Time) {
+	userCtx := withUserID(parent, userID)
+	syncCtx, cancel := context.WithTimeout(userCtx, 30*time.Minute)
+	defer cancel()
+	if _, err := s.finishGarminSyncJob(syncCtx, jobID, GarminSyncOptions{Oldest: oldest}); err != nil {
+		s.logger.Error("scheduled garmin sync", "user_id", userID, "error", err)
+	}
+	s.runGarminScheduledHealthSyncOnce(userCtx)
 }
 
 func (s *Server) runGarminManualSyncJob(jobID string, opts GarminSyncOptions) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
+	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	if err != nil {
+		s.logger.Error("load Garmin sync owner", "job_id", jobID, "error", err)
+		return
+	}
+	ctx = withUserID(ctx, userID)
 	if _, err := s.finishGarminSyncJob(ctx, jobID, opts); err != nil {
 		s.logger.Error("manual garmin sync", "job_id", jobID, "error", err)
 	}
@@ -906,6 +961,12 @@ func (s *Server) garminScheduledHealthSyncDue(ctx context.Context) (bool, error)
 func (s *Server) runGarminManualHealthSyncJob(jobID string, opts GarminHealthSyncOptions) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
 	defer cancel()
+	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	if err != nil {
+		s.logger.Error("load Garmin health sync owner", "job_id", jobID, "error", err)
+		return
+	}
+	ctx = withUserID(ctx, userID)
 	if _, err := s.finishGarminHealthSyncJob(ctx, jobID, opts); err != nil {
 		s.logger.Error("manual garmin health sync", "job_id", jobID, "error", err)
 	}
@@ -914,6 +975,12 @@ func (s *Server) runGarminManualHealthSyncJob(jobID string, opts GarminHealthSyn
 func (s *Server) runGarminManualGearSyncJob(jobID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	if err != nil {
+		s.logger.Error("load Garmin gear sync owner", "job_id", jobID, "error", err)
+		return
+	}
+	ctx = withUserID(ctx, userID)
 	if _, err := s.finishGarminGearSyncJob(ctx, jobID); err != nil {
 		s.logger.Error("manual garmin gear sync", "job_id", jobID, "error", err)
 	}
@@ -1116,18 +1183,37 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		csrf, err := s.store.GetSession(r.Context(), cookie.Value)
+		record, err := s.store.GetSessionRecord(r.Context(), cookie.Value)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		if isMutating(r.Method) && r.Header.Get("X-CSRF-Token") != csrf {
+		if isMutating(r.Method) && r.Header.Get("X-CSRF-Token") != record.CSRF {
 			writeError(w, http.StatusForbidden, "invalid CSRF token")
 			return
 		}
-		ctx := context.WithValue(r.Context(), csrfContextKey{}, csrf)
+		if record.Support && isMutating(r.Method) && !supportMutationAllowed(r.URL.Path) {
+			writeError(w, http.StatusForbidden, "support mode is read-only")
+			return
+		}
+		ctx := context.WithValue(r.Context(), csrfContextKey{}, record.CSRF)
+		ctx = withPrincipal(ctx, UserPrincipal{
+			ID:            record.Effective.ID,
+			Username:      record.Effective.Username,
+			DisplayName:   record.Effective.DisplayName,
+			Role:          record.Actor.Role,
+			SupportTarget: record.Support,
+			ActorID:       record.Actor.ID,
+		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func supportMutationAllowed(path string) bool {
+	return path == "/api/session/logout" ||
+		path == "/api/session/support" ||
+		path == "/api/session/password" ||
+		strings.HasPrefix(path, "/api/users")
 }
 
 func (s *Server) recoverer(next http.Handler) http.Handler {

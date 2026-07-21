@@ -55,12 +55,12 @@ func (s *Server) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "login session is missing")
 		return
 	}
-	sessionID, err := s.store.ConsumeGoogleOAuthState(r.Context(), state)
+	sessionID, userID, err := s.store.ConsumeGoogleOAuthState(r.Context(), state)
 	if err != nil || sessionID != sessionCookie.Value {
 		writeError(w, http.StatusBadRequest, "invalid Google OAuth state")
 		return
 	}
-	if err := s.googleAuth().Exchange(r.Context(), code); err != nil {
+	if err := s.googleAuth().Exchange(withUserID(r.Context(), userID), code); err != nil {
 		s.logger.Error("Google OAuth exchange", "error", err)
 		http.Redirect(w, r, s.cfg.BaseURL+"/settings?google=error", http.StatusFound)
 		return
@@ -319,37 +319,59 @@ func (s *Server) runTrainingSheetScheduledSync(ctx context.Context) {
 }
 
 func (s *Server) runTrainingSheetScheduledSyncOnce(ctx context.Context) {
-	config, err := s.store.GetTrainingSheetConfig(ctx)
-	if err != nil || !config.Enabled || strings.TrimSpace(config.SheetURL) == "" {
-		return
-	}
-	status, err := s.googleAuth().Status(ctx)
-	if err != nil || !status.Connected {
-		return
-	}
-	lastCreated, err := s.store.LatestTrainingSheetScheduledSync(ctx)
-	if err != nil || (!lastCreated.IsZero() && time.Since(lastCreated) < time.Duration(config.CheckEveryHours)*time.Hour) {
-		return
-	}
-	running, err := s.store.HasRunningSyncJob(ctx, trainingSheetProvider)
-	if err != nil || running {
-		return
-	}
-	jobID, err := s.store.CreateSyncJob(ctx, trainingSheetProvider, "scheduled")
+	users, err := s.store.ListUsers(ctx)
 	if err != nil {
-		s.logger.Error("create scheduled training sheet sync job", "error", err)
+		s.logger.Error("list users for scheduled training sheet sync", "error", err)
 		return
 	}
-	syncCtx, cancel := context.WithTimeout(ctx, 90*time.Minute)
+	for _, user := range users {
+		if user.Disabled {
+			continue
+		}
+		userCtx := withUserID(ctx, user.ID)
+		config, err := s.store.GetTrainingSheetConfig(userCtx)
+		if err != nil || !config.Enabled || strings.TrimSpace(config.SheetURL) == "" {
+			continue
+		}
+		status, err := s.googleAuth().Status(userCtx)
+		if err != nil || !status.Connected {
+			continue
+		}
+		lastCreated, err := s.store.LatestTrainingSheetScheduledSync(userCtx)
+		if err != nil || (!lastCreated.IsZero() && time.Since(lastCreated) < time.Duration(config.CheckEveryHours)*time.Hour) {
+			continue
+		}
+		running, err := s.store.HasRunningSyncJob(userCtx, trainingSheetProvider)
+		if err != nil || running {
+			continue
+		}
+		jobID, err := s.store.CreateSyncJob(userCtx, trainingSheetProvider, "scheduled")
+		if err != nil {
+			s.logger.Error("create scheduled training sheet sync job", "user_id", user.ID, "error", err)
+			continue
+		}
+		go s.runTrainingSheetScheduledSyncJob(ctx, user.ID, jobID, config)
+	}
+}
+
+func (s *Server) runTrainingSheetScheduledSyncJob(parent context.Context, userID, jobID string, config TrainingSheetConfig) {
+	userCtx := withUserID(parent, userID)
+	syncCtx, cancel := context.WithTimeout(userCtx, 90*time.Minute)
 	defer cancel()
 	if _, err := s.finishTrainingSheetSyncJob(syncCtx, jobID, config); err != nil {
-		s.logger.Error("scheduled training sheet sync", "error", err)
+		s.logger.Error("scheduled training sheet sync", "user_id", userID, "error", err)
 	}
 }
 
 func (s *Server) runTrainingSheetManualSyncJob(jobID string, config TrainingSheetConfig) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
+	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	if err != nil {
+		s.logger.Error("load training sheet sync owner", "job_id", jobID, "error", err)
+		return
+	}
+	ctx = withUserID(ctx, userID)
 	if _, err := s.finishTrainingSheetSyncJob(ctx, jobID, config); err != nil {
 		s.logger.Error("manual training sheet sync", "job_id", jobID, "error", err)
 	}
@@ -373,6 +395,12 @@ func (s *Server) finishTrainingSheetSyncJob(ctx context.Context, jobID string, c
 func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	if err != nil {
+		s.logger.Error("load training sheet writeback owner", "job_id", jobID, "error", err)
+		return
+	}
+	ctx = withUserID(ctx, userID)
 	payload, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).Write(ctx, plannedID, activityID)
 	if payload != nil {
 		_ = s.store.UpdateSyncJobProgress(ctx, jobID, payload)

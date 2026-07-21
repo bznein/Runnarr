@@ -1,13 +1,13 @@
 # Runnarr
 
-Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Garmin Connect and local activity files, then presents a private dashboard with activity history, maps, and charts.
+Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Garmin Connect and local activity files, then presents a private dashboard with activity history, maps, and charts. Multiple local accounts can use one deployment while keeping activity, health, provider, gear, and planning data private to each account.
 
-The v1 scope is intentionally focused: import, normalize, browse, map, and chart. Deep training analysis, race planning, and multi-user deployments are documented as future roadmap in [docs/PRD.md](docs/PRD.md).
+The v1 scope is intentionally focused: import, normalize, browse, map, and chart. Deep training analysis and race planning remain future scope; local account management is included for trusted household deployments.
 
 ## Quick Start
 
 1. Copy `.env.example` to `.env`.
-2. Change `RUNNARR_ADMIN_PASSWORD` and `RUNNARR_SECRET_KEY`.
+2. Change `RUNNARR_ADMIN_USERNAME`, `RUNNARR_ADMIN_PASSWORD`, and `RUNNARR_SECRET_KEY`.
 3. Start the stack:
 
 ```sh
@@ -15,6 +15,8 @@ docker compose up --build
 ```
 
 The app listens on `http://localhost:37617` by default.
+
+The configured admin account is created automatically on first startup. Additional accounts are created from Settings by an administrator. Administrators can temporarily enter a read-only support view for another account; account data remains private and provider credentials are stored per user.
 
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 
