@@ -708,7 +708,7 @@ func (s *Store) UpsertGear(ctx context.Context, gear Gear) (Gear, error) {
 		strings.TrimSpace(gear.Brand), strings.TrimSpace(gear.Model), gear.Retired,
 		optionalFloat(gear.TotalDistanceM), optionalFloat(gear.MaxDistanceM), nullTimePtr(gear.FirstUsedAt),
 		nullTimePtr(gear.LastUsedAt), gear.DefaultActivityTypes, rawBytes, statsBytes)
-	return scanGear(row)
+	return scanGear(row, false)
 }
 
 func (s *Store) ReplaceGearAssignmentsForGear(ctx context.Context, gearID string, provider string, sourceIDs []string) (int, error) {
@@ -809,7 +809,7 @@ func (s *Store) ListGears(ctx context.Context) ([]Gear, error) {
 
 	gears := make([]Gear, 0)
 	for rows.Next() {
-		gear, err := scanGear(rows)
+		gear, err := scanGear(rows, true)
 		if err != nil {
 			return nil, err
 		}
@@ -826,7 +826,7 @@ func (s *Store) GetGear(ctx context.Context, id string) (Gear, error) {
 			default_activity_types, raw, stats_raw, created_at, updated_at
 		from gears
 		where id = $1
-	`, id))
+	`, id), true)
 }
 
 func (s *Store) ListGearActivities(ctx context.Context, gearID string) ([]Activity, error) {
@@ -1434,12 +1434,12 @@ func scanActivityMedia(row rowScanner, media *ActivityMedia) error {
 	return nil
 }
 
-func scanGear(row rowScanner) (Gear, error) {
+func scanGear(row rowScanner, includeActivityCount bool) (Gear, error) {
 	var gear Gear
 	var totalDistance, maxDistance sql.NullFloat64
 	var firstUsed, lastUsed pgtype.Timestamptz
 	var rawBytes, statsBytes []byte
-	if err := row.Scan(
+	dest := []any{
 		&gear.ID,
 		&gear.Provider,
 		&gear.ProviderGearID,
@@ -1452,13 +1452,18 @@ func scanGear(row rowScanner) (Gear, error) {
 		&maxDistance,
 		&firstUsed,
 		&lastUsed,
-		&gear.ActivityCount,
+	}
+	if includeActivityCount {
+		dest = append(dest, &gear.ActivityCount)
+	}
+	dest = append(dest,
 		&gear.DefaultActivityTypes,
 		&rawBytes,
 		&statsBytes,
 		&gear.CreatedAt,
 		&gear.UpdatedAt,
-	); err != nil {
+	)
+	if err := row.Scan(dest...); err != nil {
 		return Gear{}, err
 	}
 	gear.TotalDistanceM = floatPtrFromNull(totalDistance)
