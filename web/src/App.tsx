@@ -24,6 +24,7 @@ import type {
   GearSummary,
   ImportFile,
   PlannedActivityMatchResponse,
+  Session,
   SyncJob,
   ToolsPaceResponse,
   ToolsVdotResponse
@@ -254,6 +255,28 @@ function storeGearSortBy(sortBy: GearSortBy) {
 export function App() {
   const [themePreference, setThemePreference] = useThemePreference();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
+  const preferences = useQuery({
+    queryKey: ["preferences", session.data?.user?.id],
+    queryFn: api.preferences,
+    enabled: Boolean(session.data?.authenticated && session.data.user?.id)
+  });
+  const queryClient = useQueryClient();
+  const effectiveUserID = session.data?.user?.id;
+
+  useEffect(() => {
+    if (preferences.data?.themePreference) {
+      setThemePreference(preferences.data.themePreference);
+    }
+  }, [preferences.data?.themePreference]);
+
+  useEffect(() => {
+    if (!effectiveUserID) {
+      return;
+    }
+    queryClient.removeQueries({
+      predicate: (query) => query.queryKey[0] !== "session" && query.queryKey[0] !== "preferences"
+    });
+  }, [effectiveUserID, queryClient]);
 
   useEffect(() => {
     setCsrfToken(session.data?.csrfToken);
@@ -272,15 +295,27 @@ export function App() {
     );
   }
 
+  const onThemePreferenceChange = (preference: ThemePreference) => {
+    setThemePreference(preference);
+    if (session.data?.canWrite !== false && session.data?.user?.id) {
+      const current = preferences.data ?? { themePreference: "system" as ThemePreference, gearSortBy: defaultGearSortBy };
+      void api.updatePreferences({ ...current, themePreference }).then((next) => {
+        queryClient.setQueryData(["preferences", session.data?.user?.id], next);
+      }).catch(() => undefined);
+    }
+  };
+
   return (
-    <AuthenticatedApp themePreference={themePreference} onThemePreferenceChange={setThemePreference} />
+    <AuthenticatedApp session={session.data} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} />
   );
 }
 
 function AuthenticatedApp({
+  session,
   themePreference,
   onThemePreferenceChange
 }: {
+  session?: Session;
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
 }) {
@@ -312,6 +347,10 @@ function AuthenticatedApp({
           <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
         </nav>
         <div className="sidebar-bottom">
+          <div className="account-chip" title={session?.user?.username}>
+            <strong>{session?.user?.displayName || session?.user?.username}</strong>
+            <span>{session?.user?.role === "admin" ? "Administrator" : "User"}</span>
+          </div>
           <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
           <button className="nav-button" type="button" onClick={() => logout.mutate()}>
             <LogOut size={18} />
@@ -320,6 +359,14 @@ function AuthenticatedApp({
         </div>
       </aside>
       <main className="main">
+        {session?.supportMode && (
+          <div className="support-banner">
+            <span>Read-only support view: {session.user?.displayName || session.user?.username}</span>
+            <button className="secondary-button small-button" type="button" onClick={() => {
+              void api.stopSupport().then(() => window.location.reload());
+            }}>Exit support view</button>
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/activities" element={<ActivitiesPage />} />
@@ -381,12 +428,13 @@ function invalidateGearRelatedQueries(queryClient: QueryClient) {
 }
 
 function LoginPage() {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const login = useMutation({
-    mutationFn: api.login,
+    mutationFn: ({ username, password }: { username: string; password: string }) => api.login(username, password),
     onSuccess: async (session) => {
       setCsrfToken(session.csrfToken);
       await queryClient.invalidateQueries({ queryKey: ["session"] });
@@ -401,7 +449,7 @@ function LoginPage() {
         className="login-panel"
         onSubmit={(event) => {
           event.preventDefault();
-          login.mutate(password);
+            login.mutate({ username, password });
         }}
       >
         <div className="brand login-brand">
@@ -409,11 +457,15 @@ function LoginPage() {
           <span>Runnarr</span>
         </div>
         <label className="field">
+          <span>Username</span>
+          <input autoFocus type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} />
+        </label>
+        <label className="field">
           <span>Password</span>
-          <input autoFocus type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
         {error && <div className="error">{error}</div>}
-        <button className="primary-button" type="submit" disabled={login.isPending || password.length === 0}>
+        <button className="primary-button" type="submit" disabled={login.isPending || username.trim().length === 0 || password.length === 0}>
           Log in
         </button>
       </form>
@@ -3917,6 +3969,7 @@ function SettingsPage({
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
       <TrainingSheetSettings />
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} />
+      <UserManagement />
       <section id="import" className="panel upload-panel">
         <div>
           <div className="panel-heading">Data import</div>
@@ -4013,6 +4066,90 @@ function DisplaySettingsSection({
         <p className="muted">Choose how Runnarr follows your browser color settings.</p>
       </div>
       <ThemePreferenceControl value={value} onChange={onChange} />
+    </section>
+  );
+}
+
+function UserManagement() {
+  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
+  const queryClient = useQueryClient();
+  const users = useQuery({
+    queryKey: ["users"],
+    queryFn: api.users,
+    enabled: session.data?.actor?.role === "admin"
+  });
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"admin" | "user">("user");
+  const create = useMutation({
+    mutationFn: api.createUser,
+    onSuccess: async () => {
+      setUsername("");
+      setDisplayName("");
+      setPassword("");
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+    }
+  });
+  const update = useMutation({
+    mutationFn: ({ id, disabled }: { id: string; disabled: boolean }) => api.updateUser(id, { disabled }),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["users"] }); }
+  });
+  const support = useMutation({
+    mutationFn: api.startSupport,
+    onSuccess: () => window.location.reload()
+  });
+
+  if (session.data?.actor?.role !== "admin") {
+    return null;
+  }
+
+  return (
+    <section className="panel user-management-panel">
+      <div className="panel-heading">Accounts</div>
+      <p className="muted">Create and disable local accounts. Support view is read-only and never changes another user’s data.</p>
+      <form className="user-create-form" onSubmit={(event) => {
+        event.preventDefault();
+        create.mutate({ username: username.trim(), displayName: displayName.trim(), password, role });
+      }}>
+        <input type="text" placeholder="Username" autoComplete="off" value={username} onChange={(event) => setUsername(event.target.value)} />
+        <input type="text" placeholder="Display name" autoComplete="off" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        <input type="password" placeholder="Temporary password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+        <select value={role} onChange={(event) => setRole(event.target.value as "admin" | "user")}>
+          <option value="user">User</option>
+          <option value="admin">Administrator</option>
+        </select>
+        <button className="primary-button" type="submit" disabled={create.isPending || username.trim().length === 0 || password.length < 8}>Create</button>
+      </form>
+      {create.error && <div className="error">{create.error instanceof Error ? create.error.message : "Could not create account"}</div>}
+      {users.isLoading && <LoadingRow />}
+      {!users.isLoading && (users.data?.users ?? []).length > 0 && (
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {(users.data?.users ?? []).map((user) => (
+                <tr key={user.id}>
+                  <td><strong>{user.displayName || user.username}</strong><span className="muted row-subtext">{user.username}</span></td>
+                  <td>{user.role}</td>
+                  <td>{user.disabled ? "Disabled" : "Active"}</td>
+                  <td className="table-actions">
+                    {user.id !== session.data?.actor?.id && <button className="secondary-button small-button" type="button" disabled={support.isPending || user.disabled} onClick={() => support.mutate(user.id)}>Support view</button>}
+                    {user.id !== session.data?.actor?.id && <button className="secondary-button small-button" type="button" disabled={update.isPending} onClick={() => update.mutate({ id: user.id, disabled: !user.disabled })}>{user.disabled ? "Enable" : "Disable"}</button>}
+                    <button className="secondary-button small-button" type="button" onClick={() => {
+                      const nextPassword = window.prompt(`New password for ${user.username} (at least 8 characters)`);
+                      if (nextPassword && nextPassword.length >= 8) {
+                        void api.resetUserPassword(user.id, nextPassword).then(() => queryClient.invalidateQueries({ queryKey: ["users"] }));
+                      }
+                    }}>Reset password</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {support.error && <div className="error">{support.error instanceof Error ? support.error.message : "Could not enter support view"}</div>}
     </section>
   );
 }

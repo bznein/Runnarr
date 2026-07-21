@@ -12,6 +12,7 @@ type Config struct {
 	HTTPAddr           string
 	DatabaseURL        string
 	BaseURL            string
+	AdminUsername      string
 	AdminPassword      string
 	AdminPasswordHash  string
 	SecretKey          string
@@ -31,6 +32,7 @@ func LoadConfig() (Config, error) {
 		HTTPAddr:           env("RUNNARR_HTTP_ADDR", ":8080"),
 		DatabaseURL:        env("DATABASE_URL", ""),
 		BaseURL:            strings.TrimRight(env("RUNNARR_BASE_URL", "http://localhost:8080"), "/"),
+		AdminUsername:      env("RUNNARR_ADMIN_USERNAME", "admin"),
 		AdminPassword:      env("RUNNARR_ADMIN_PASSWORD", ""),
 		AdminPasswordHash:  env("RUNNARR_ADMIN_PASSWORD_HASH", ""),
 		SecretKey:          env("RUNNARR_SECRET_KEY", ""),

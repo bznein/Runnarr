@@ -19,6 +19,11 @@ type Store struct {
 	db *pgxpool.Pool
 }
 
+func scopedUserID(ctx context.Context) string {
+	id, _ := userIDFromContext(ctx)
+	return id
+}
+
 var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
 var ErrInvalidActivityName = errors.New("activity name must be between 1 and 160 characters")
 var ErrInvalidActivityNotes = errors.New("activity notes must be 5000 characters or fewer")
@@ -31,42 +36,17 @@ func NewStore(db *pgxpool.Pool) *Store {
 	return &Store{db: db}
 }
 
-func (s *Store) CreateSession(ctx context.Context, csrf string, ttl time.Duration) (string, error) {
-	var id string
-	err := s.db.QueryRow(ctx, `
-		insert into auth_sessions(csrf_token, expires_at)
-		values($1, now() + $2::interval)
-		returning id::text
-	`, csrf, fmt.Sprintf("%d seconds", int(ttl.Seconds()))).Scan(&id)
-	return id, err
-}
-
-func (s *Store) GetSession(ctx context.Context, id string) (csrf string, err error) {
-	err = s.db.QueryRow(ctx, `
-		update auth_sessions
-		set last_seen_at = now()
-		where id = $1 and expires_at > now()
-		returning csrf_token
-	`, id).Scan(&csrf)
-	return csrf, err
-}
-
-func (s *Store) DeleteSession(ctx context.Context, id string) error {
-	_, err := s.db.Exec(ctx, `delete from auth_sessions where id = $1`, id)
-	return err
-}
-
 func (s *Store) UpsertImportFile(ctx context.Context, file ImportFile) (ImportFile, error) {
 	var saved ImportFile
 	err := s.db.QueryRow(ctx, `
-		insert into import_files(filename, content_type, sha256, size_bytes, parser, status, error)
-		values($1, $2, $3, $4, $5, $6, $7)
-		on conflict (sha256) do update set
+		insert into import_files(user_id, filename, content_type, sha256, size_bytes, parser, status, error)
+		values($1, $2, $3, $4, $5, $6, $7, $8)
+		on conflict (user_id, sha256) do update set
 			filename = excluded.filename,
 			content_type = excluded.content_type,
 			parser = excluded.parser
 		returning id::text, filename, content_type, sha256, size_bytes, parser, status, error, created_at
-	`, file.Filename, file.ContentType, file.SHA256, file.SizeBytes, file.Parser, file.Status, file.Error).
+	`, scopedUserID(ctx), file.Filename, file.ContentType, file.SHA256, file.SizeBytes, file.Parser, file.Status, file.Error).
 		Scan(&saved.ID, &saved.Filename, &saved.ContentType, &saved.SHA256, &saved.SizeBytes, &saved.Parser, &saved.Status, &saved.Error, &saved.CreatedAt)
 	return saved, err
 }
@@ -75,8 +55,8 @@ func (s *Store) UpdateImportStatus(ctx context.Context, id, status, message stri
 	_, err := s.db.Exec(ctx, `
 		update import_files
 		set status = $2, error = $3
-		where id = $1
-	`, id, status, message)
+		where id = $1 and user_id = $4
+	`, id, status, message, scopedUserID(ctx))
 	return err
 }
 
@@ -84,9 +64,10 @@ func (s *Store) ListImports(ctx context.Context) ([]ImportFile, error) {
 	rows, err := s.db.Query(ctx, `
 		select id::text, filename, content_type, sha256, size_bytes, parser, status, error, created_at
 		from import_files
+		where user_id = $1
 		order by created_at desc
 		limit 100
-	`)
+	`, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +96,7 @@ func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthM
 
 	row := s.db.QueryRow(ctx, `
 		insert into daily_health_metrics(
+			user_id,
 			provider,
 			metric_date,
 			steps,
@@ -144,8 +126,8 @@ func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthM
 			body_fat_pct,
 			raw
 		)
-		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-		on conflict(provider, metric_date) do update set
+		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+		on conflict(user_id, provider, metric_date) do update set
 			steps = excluded.steps,
 			total_calories_kcal = excluded.total_calories_kcal,
 			active_calories_kcal = excluded.active_calories_kcal,
@@ -206,6 +188,7 @@ func (s *Store) UpsertDailyHealthMetric(ctx context.Context, metric DailyHealthM
 			created_at,
 			updated_at
 	`,
+		scopedUserID(ctx),
 		metric.Provider,
 		metric.Date,
 		optionalInt(metric.Steps),
@@ -273,9 +256,9 @@ func (s *Store) ListDailyHealthMetrics(ctx context.Context, provider string, fro
 			created_at,
 			updated_at
 		from daily_health_metrics
-		where provider = $1 and metric_date between $2 and $3
+		where user_id = $1 and provider = $2 and metric_date between $3 and $4
 		order by metric_date asc
-	`, provider, from.Format("2006-01-02"), to.Format("2006-01-02"))
+	`, scopedUserID(ctx), provider, from.Format("2006-01-02"), to.Format("2006-01-02"))
 	if err != nil {
 		return nil, err
 	}
@@ -323,9 +306,9 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 			select exists(
 				select 1
 				from sync_excluded_activities
-				where source = $1 and source_id = $2
-			)
-		`, source, sourceID).Scan(&excluded)
+				where user_id = $1 and source = $2 and source_id = $3
+				)
+		`, scopedUserID(ctx), source, sourceID).Scan(&excluded)
 		if err != nil {
 			return "", err
 		}
@@ -338,12 +321,12 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	var id string
 	err = tx.QueryRow(ctx, `
 		insert into activities(
-			source, source_id, source_file_id, name, sport_type, start_time, distance_m,
+			user_id, source, source_id, source_file_id, name, sport_type, start_time, distance_m,
 			moving_time_s, elapsed_time_s, elevation_gain_m, avg_heart_rate, max_heart_rate,
 			avg_pace_s_per_km, avg_grade_adjusted_pace_s_per_km, calories_kcal, original_provider_url, summary_polyline, raw
 		)
-		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-		on conflict (source, source_id) do update set
+		values($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+		on conflict (user_id, source, source_id) do update set
 			source_file_id = excluded.source_file_id,
 			name = excluded.name,
 			sport_type = excluded.sport_type,
@@ -365,7 +348,7 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 			raw = excluded.raw,
 			updated_at = now()
 		returning id::text
-	`, source, sourceID, sourceFileID, fallbackName(activity), activity.SportType, activity.StartTime,
+	`, scopedUserID(ctx), source, sourceID, sourceFileID, fallbackName(activity), activity.SportType, activity.StartTime,
 		activity.DistanceM, activity.MovingTimeS, activity.ElapsedTimeS, activity.ElevationGainM,
 		activity.AvgHeartRate, activity.MaxHeartRate, avgPace, activity.AvgGradeAdjustedPaceSPKM,
 		activity.CaloriesKcal, activity.OriginalProviderURL, activity.SummaryPolyline, rawBytes).Scan(&id)
@@ -420,7 +403,7 @@ func (s *Store) ListActivities(ctx context.Context, limit, offset int, filters A
 
 func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters ActivityFilters) (ActivityListPage, error) {
 	limit, offset = normalizeActivityPage(limit, offset)
-	where, args := activityFilterWhere(filters, 1)
+	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
 	orderBy := activityOrderBy(filters.SortBy, filters.SortOrder)
 	args = append(args, limit+1, offset)
 	limitParam := len(args) - 1
@@ -455,7 +438,7 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 
 func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (ActivityCalendar, error) {
 	filters.IncludeTrainingSheet = true
-	where, args := activityFilterWhere(filters, 1)
+	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
 	rows, err := s.db.Query(ctx, `
 		select
 			date(start_time) as day,
@@ -532,15 +515,15 @@ func (s *Store) IsActivitySyncExcluded(ctx context.Context, source, sourceID str
 		select exists(
 			select 1
 			from sync_excluded_activities
-			where source = $1 and source_id = $2
-		)
-	`, source, sourceID).Scan(&excluded)
+			where user_id = $1 and source = $2 and source_id = $3
+			)
+	`, scopedUserID(ctx), source, sourceID).Scan(&excluded)
 	return excluded, err
 }
 
 func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	var activity Activity
-	row := s.db.QueryRow(ctx, activitySelectSQL+` where id = $1`, id)
+	row := s.db.QueryRow(ctx, activitySelectSQL+` where activities.id = $1 and activities.user_id = $2`, id, scopedUserID(ctx))
 	if err := scanActivity(row, &activity); err != nil {
 		return activity, err
 	}
@@ -585,9 +568,9 @@ func (s *Store) GetClimbDetectionSettings(ctx context.Context) (ClimbDetectionCo
 			max_climb_merge_elevation_loss_m,
 			climb_start_gain_m,
 			climb_detection_preset
-		from app_settings
-		where id = $1
-	`, appSettingsID)
+		from user_settings
+		where user_id = $1
+	`, scopedUserID(ctx))
 
 	var smoothingRadius, minDistance, minElevationGain, minGradePct, maxDipDistance, maxDipLoss, startGain float64
 	var preset string
@@ -622,35 +605,19 @@ func (s *Store) SetClimbDetectionSettings(ctx context.Context, preset string, se
 		return err
 	}
 	_, err := s.db.Exec(ctx, `
-		insert into app_settings(
-			id,
-			climb_smoothing_radius_m,
-			min_climb_distance_m,
-			min_climb_elevation_gain_m,
-			min_climb_average_grade_pct,
-			max_climb_merge_dip_distance_m,
-			max_climb_merge_elevation_loss_m,
-			climb_start_gain_m,
-			climb_detection_preset,
-			created_at,
-			updated_at
-		)
-		values(
-			$1, $2, $3, $4, $5, $6, $7, $8, $9,
-			now(),
-			now()
-		)
-		on conflict(id) do update set
-			climb_smoothing_radius_m = excluded.climb_smoothing_radius_m,
-			min_climb_distance_m = excluded.min_climb_distance_m,
-			min_climb_elevation_gain_m = excluded.min_climb_elevation_gain_m,
-			min_climb_average_grade_pct = excluded.min_climb_average_grade_pct,
-			max_climb_merge_dip_distance_m = excluded.max_climb_merge_dip_distance_m,
-			max_climb_merge_elevation_loss_m = excluded.max_climb_merge_elevation_loss_m,
-			climb_start_gain_m = excluded.climb_start_gain_m,
-			climb_detection_preset = excluded.climb_detection_preset,
+		update user_settings
+		set
+			climb_smoothing_radius_m = $2,
+			min_climb_distance_m = $3,
+			min_climb_elevation_gain_m = $4,
+			min_climb_average_grade_pct = $5,
+			max_climb_merge_dip_distance_m = $6,
+			max_climb_merge_elevation_loss_m = $7,
+			climb_start_gain_m = $8,
+			climb_detection_preset = $9,
 			updated_at = now()
-	`, appSettingsID,
+		where user_id = $1
+	`, scopedUserID(ctx),
 		settings.ClimbSmoothingRadiusM,
 		settings.MinClimbDistanceM,
 		settings.MinClimbElevationGainM,
@@ -665,7 +632,7 @@ func (s *Store) SetClimbDetectionSettings(ctx context.Context, preset string, se
 
 func (s *Store) ActivityExists(ctx context.Context, id string) (bool, error) {
 	var exists bool
-	err := s.db.QueryRow(ctx, `select exists(select 1 from activities where id = $1)`, id).Scan(&exists)
+	err := s.db.QueryRow(ctx, `select exists(select 1 from activities where id = $1 and user_id = $2)`, id, scopedUserID(ctx)).Scan(&exists)
 	return exists, err
 }
 
@@ -688,12 +655,12 @@ func (s *Store) UpsertGear(ctx context.Context, gear Gear) (Gear, error) {
 	}
 	row := s.db.QueryRow(ctx, `
 		insert into gears(
-			provider, provider_gear_id, name, gear_type, brand, model, retired,
+			user_id, provider, provider_gear_id, name, gear_type, brand, model, retired,
 			total_distance_m, max_distance_m, first_used_at, last_used_at,
 			default_activity_types, raw, stats_raw
 		)
-		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-		on conflict(provider, provider_gear_id) do update set
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		on conflict(user_id, provider, provider_gear_id) do update set
 			name = excluded.name,
 			gear_type = excluded.gear_type,
 			brand = excluded.brand,
@@ -710,7 +677,7 @@ func (s *Store) UpsertGear(ctx context.Context, gear Gear) (Gear, error) {
 		returning id::text, provider, provider_gear_id, name, gear_type, brand, model, retired,
 			total_distance_m, max_distance_m, first_used_at, last_used_at, default_activity_types,
 			raw, stats_raw, created_at, updated_at
-	`, gear.Provider, gear.ProviderGearID, strings.TrimSpace(gear.Name), strings.TrimSpace(gear.GearType),
+	`, scopedUserID(ctx), gear.Provider, gear.ProviderGearID, strings.TrimSpace(gear.Name), strings.TrimSpace(gear.GearType),
 		strings.TrimSpace(gear.Brand), strings.TrimSpace(gear.Model), gear.Retired,
 		optionalFloat(gear.TotalDistanceM), optionalFloat(gear.MaxDistanceM), nullTimePtr(gear.FirstUsedAt),
 		nullTimePtr(gear.LastUsedAt), gear.DefaultActivityTypes, rawBytes, statsBytes)
@@ -729,7 +696,7 @@ func (s *Store) ReplaceGearAssignmentsForGear(ctx context.Context, gearID string
 		}
 	}()
 
-	if _, err = tx.Exec(ctx, `delete from activity_gears where gear_id = $1`, gearID); err != nil {
+	if _, err = tx.Exec(ctx, `delete from activity_gears where gear_id = $1 and exists (select 1 from gears where id = $1 and user_id = $2)`, gearID, scopedUserID(ctx)); err != nil {
 		return 0, err
 	}
 	if len(uniqueSourceIDs) == 0 {
@@ -742,8 +709,8 @@ func (s *Store) ReplaceGearAssignmentsForGear(ctx context.Context, gearID string
 	rows, err := tx.Query(ctx, `
 		select id::text
 		from activities
-		where source = $1 and source_id = any($2)
-	`, provider, uniqueSourceIDs)
+		where user_id = $3 and source = $1 and source_id = any($2)
+	`, provider, uniqueSourceIDs, scopedUserID(ctx))
 	if err != nil {
 		return 0, err
 	}
@@ -783,8 +750,8 @@ func (s *Store) ReplaceGearAssignmentsForGear(ctx context.Context, gearID string
 				join activities on activities.id = activity_gears.activity_id
 				where activity_gears.gear_id = $1
 			) gear_usage
-			where gears.id = $1
-		`, gearID); err != nil {
+			where gears.id = $1 and gears.user_id = $2
+		`, gearID, scopedUserID(ctx)); err != nil {
 			return 0, err
 		}
 	}
@@ -806,8 +773,9 @@ func (s *Store) ListGears(ctx context.Context) ([]Gear, error) {
 			from activity_gears
 			group by gear_id
 		) gear_activity_counts on gear_activity_counts.gear_id = gears.id
+		where gears.user_id = $1
 		order by retired, lower(name), provider_gear_id
-	`)
+	`, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -831,16 +799,16 @@ func (s *Store) GetGear(ctx context.Context, id string) (Gear, error) {
 			coalesce((select count(*)::int from activity_gears where gear_id = id), 0) as activity_count,
 			default_activity_types, raw, stats_raw, created_at, updated_at
 		from gears
-		where id = $1
-	`, id), true)
+		where id = $1 and user_id = $2
+	`, id, scopedUserID(ctx)), true)
 }
 
 func (s *Store) ListGearActivities(ctx context.Context, gearID string) ([]Activity, error) {
 	rows, err := s.db.Query(ctx, activitySelectSQL+`
 		join activity_gears on activity_gears.activity_id = activities.id
-		where activity_gears.gear_id = $1
+		where activity_gears.gear_id = $1 and activities.user_id = $2
 		order by activities.start_time desc, activities.id desc
-	`, gearID)
+	`, gearID, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -857,9 +825,9 @@ func (s *Store) ListGearActivities(ctx context.Context, gearID string) ([]Activi
 func (s *Store) ListActivityGear(ctx context.Context, activityID string) ([]GearSummary, error) {
 	rows, err := s.db.Query(ctx, gearSummarySelectSQL+`
 		join activity_gears on activity_gears.gear_id = gears.id
-		where activity_gears.activity_id = $1
+		where activity_gears.activity_id = $1 and gears.user_id = $2
 		order by gears.retired, lower(gears.name), gears.provider_gear_id
-	`, activityID)
+	`, activityID, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -892,9 +860,9 @@ func (s *Store) attachActivityGear(ctx context.Context, activities []Activity) e
 			gears.max_distance_m, gears.default_activity_types, gears.last_used_at
 		from activity_gears
 		join gears on gears.id = activity_gears.gear_id
-		where activity_gears.activity_id::text = any($1)
+		where activity_gears.activity_id::text = any($1) and gears.user_id = $2
 		order by gears.retired, lower(gears.name), gears.provider_gear_id
-	`, activityIDs)
+	`, activityIDs, scopedUserID(ctx))
 	if err != nil {
 		return err
 	}
@@ -932,9 +900,9 @@ func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityRe
 	err = tx.QueryRow(ctx, `
 		select source, source_id, source_file_id is not null, name, sport_type, start_time
 		from activities
-		where id = $1
+		where id = $1 and user_id = $2
 		for update
-	`, id).Scan(&source, &sourceID, &hasSourceFile, &name, &sportType, &startTime)
+	`, id, scopedUserID(ctx)).Scan(&source, &sourceID, &hasSourceFile, &name, &sportType, &startTime)
 	if err != nil {
 		return DeleteActivityResult{}, err
 	}
@@ -942,14 +910,14 @@ func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityRe
 	result := DeleteActivityResult{Deleted: true}
 	if isProviderSyncedSource(source, sourceID, !hasSourceFile) {
 		_, err = tx.Exec(ctx, `
-			insert into sync_excluded_activities(source, source_id, name, sport_type, start_time)
-			values($1, $2, $3, $4, $5)
-			on conflict(source, source_id) do update set
+			insert into sync_excluded_activities(user_id, source, source_id, name, sport_type, start_time)
+			values($1, $2, $3, $4, $5, $6)
+			on conflict(user_id, source, source_id) do update set
 				name = excluded.name,
 				sport_type = excluded.sport_type,
 				start_time = excluded.start_time,
 				reason = 'deleted_from_runnarr'
-		`, source, sourceID, name, sportType, startTime)
+		`, scopedUserID(ctx), source, sourceID, name, sportType, startTime)
 		if err != nil {
 			return DeleteActivityResult{}, err
 		}
@@ -959,12 +927,12 @@ func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityRe
 	if _, err = tx.Exec(ctx, `
 		update planned_activities
 		set status = 'pending', matched_activity_id = null, matched_at = null, updated_at = now()
-		where matched_activity_id = $1
-	`, id); err != nil {
+		where matched_activity_id = $1 and user_id = $2
+	`, id, scopedUserID(ctx)); err != nil {
 		return DeleteActivityResult{}, err
 	}
 
-	if _, err = tx.Exec(ctx, `delete from activities where id = $1`, id); err != nil {
+	if _, err = tx.Exec(ctx, `delete from activities where id = $1 and user_id = $2`, id, scopedUserID(ctx)); err != nil {
 		return DeleteActivityResult{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -995,9 +963,9 @@ func (s *Store) ListActivityMedia(ctx context.Context, activityID string) ([]Act
 		select id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
 			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
 		from activity_media
-		where activity_id = $1
+		where activity_id = $1 and exists (select 1 from activities where activities.id = activity_media.activity_id and activities.user_id = $2)
 		order by coalesce(capture_time, created_at) asc, created_at asc
-	`, activityID)
+	`, activityID, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1020,8 +988,8 @@ func (s *Store) GetActivityMedia(ctx context.Context, id string) (ActivityMedia,
 		select id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
 			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
 		from activity_media
-		where id = $1
-	`, id)
+		where id = $1 and exists (select 1 from activities where activities.id = activity_media.activity_id and activities.user_id = $2)
+	`, id, scopedUserID(ctx))
 	return media, scanActivityMedia(row, &media)
 }
 
@@ -1031,8 +999,8 @@ func (s *Store) GetActivityMediaByHash(ctx context.Context, activityID, hash str
 		select id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
 			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
 		from activity_media
-		where activity_id = $1 and sha256 = $2
-	`, activityID, hash)
+		where activity_id = $1 and sha256 = $2 and exists (select 1 from activities where activities.id = activity_media.activity_id and activities.user_id = $3)
+	`, activityID, hash, scopedUserID(ctx))
 	return media, scanActivityMedia(row, &media)
 }
 
@@ -1040,16 +1008,16 @@ func (s *Store) DeleteActivityMedia(ctx context.Context, activityID, mediaID str
 	var media ActivityMedia
 	row := s.db.QueryRow(ctx, `
 		delete from activity_media
-		where activity_id = $1 and id = $2
+		where activity_id = $1 and id = $2 and exists (select 1 from activities where activities.id = activity_media.activity_id and activities.user_id = $3)
 		returning id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
 			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
-	`, activityID, mediaID)
+	`, activityID, mediaID, scopedUserID(ctx))
 	return media, scanActivityMedia(row, &media)
 }
 
 func (s *Store) RenameActivity(ctx context.Context, id, requestedName string) (Activity, error) {
 	var sourceName string
-	if err := s.db.QueryRow(ctx, `select name from activities where id = $1`, id).Scan(&sourceName); err != nil {
+	if err := s.db.QueryRow(ctx, `select name from activities where id = $1 and user_id = $2`, id, scopedUserID(ctx)).Scan(&sourceName); err != nil {
 		return Activity{}, err
 	}
 	localName, err := localActivityNameOverride(requestedName, sourceName)
@@ -1059,8 +1027,8 @@ func (s *Store) RenameActivity(ctx context.Context, id, requestedName string) (A
 	if _, err := s.db.Exec(ctx, `
 		update activities
 		set local_name = $2, updated_at = now()
-		where id = $1
-	`, id, localName); err != nil {
+		where id = $1 and user_id = $3
+	`, id, localName, scopedUserID(ctx)); err != nil {
 		return Activity{}, err
 	}
 	return s.GetActivity(ctx, id)
@@ -1074,8 +1042,8 @@ func (s *Store) UpdateActivityNotes(ctx context.Context, id, requestedNotes stri
 	if _, err := s.db.Exec(ctx, `
 		update activities
 		set local_notes = $2, updated_at = now()
-		where id = $1
-	`, id, notes); err != nil {
+		where id = $1 and user_id = $3
+	`, id, notes, scopedUserID(ctx)); err != nil {
 		return Activity{}, err
 	}
 	return s.GetActivity(ctx, id)
@@ -1098,8 +1066,8 @@ func (s *Store) UpdateActivityFeedback(ctx context.Context, id string, requested
 		set local_feedback = case when $2 then $3 else local_feedback end,
 			rpe = case when $4 then $5 else rpe end,
 			updated_at = now()
-		where id = $1
-	`, id, requestedFeedback != nil, feedback, rpeSet, requestedRPE); err != nil {
+		where id = $1 and user_id = $6
+	`, id, requestedFeedback != nil, feedback, rpeSet, requestedRPE, scopedUserID(ctx)); err != nil {
 		return Activity{}, err
 	}
 	return s.GetActivity(ctx, id)
@@ -1109,7 +1077,7 @@ func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummarySt
 	var stats SummaryStats
 	stats.Recent = make([]Activity, 0)
 	stats.WeeklyDistance = make([]WeeklyBucket, 0)
-	where, args := activityFilterWhere(filters, 1)
+	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
 	if err := s.db.QueryRow(ctx, `
 		select count(*), coalesce(sum(distance_m), 0), coalesce(sum(moving_time_s), 0), coalesce(sum(elevation_gain_m), 0)
 		from activities
@@ -1127,7 +1095,7 @@ func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummarySt
 		return stats, err
 	}
 
-	weeklyConditions, weeklyArgs := activityFilterConditions(filters, 1)
+	weeklyConditions, weeklyArgs := activityFilterConditionsForUser(filters, 1, scopedUserID(ctx))
 	weeklyConditions = append([]string{`start_time >= now() - interval '12 weeks'`}, weeklyConditions...)
 	weeklyRows, err := s.db.Query(ctx, `
 		select date_trunc('week', start_time)::timestamptz as week_start, coalesce(sum(distance_m), 0)
@@ -1154,9 +1122,9 @@ func (s *Store) ListSportTypes(ctx context.Context) ([]string, error) {
 	rows, err := s.db.Query(ctx, `
 		select distinct sport_type
 		from activities
-		where sport_type <> ''
+		where user_id = $1 and sport_type <> ''
 		order by sport_type
-	`)
+	`, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1180,11 +1148,11 @@ func (s *Store) UpsertProviderConnection(ctx context.Context, conn StoredProvide
 	}
 	_, err = s.db.Exec(ctx, `
 		insert into provider_connections(
-			provider, provider_account_id, display_name, access_token_ciphertext,
+			user_id, provider, provider_account_id, display_name, access_token_ciphertext,
 			refresh_token_ciphertext, token_expires_at, scopes, metadata
 		)
-		values($1,$2,$3,$4,$5,$6,$7,$8)
-		on conflict(provider) do update set
+		values($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		on conflict(user_id, provider) do update set
 			provider_account_id = excluded.provider_account_id,
 			display_name = excluded.display_name,
 			access_token_ciphertext = excluded.access_token_ciphertext,
@@ -1193,7 +1161,7 @@ func (s *Store) UpsertProviderConnection(ctx context.Context, conn StoredProvide
 			scopes = excluded.scopes,
 			metadata = excluded.metadata,
 			updated_at = now()
-	`, conn.Provider, conn.ProviderAccountID, conn.DisplayName, conn.AccessTokenCiphertext,
+	`, scopedUserID(ctx), conn.Provider, conn.ProviderAccountID, conn.DisplayName, conn.AccessTokenCiphertext,
 		conn.RefreshTokenCiphertext, nullTime(conn.TokenExpiresAt), conn.Scopes, metadata)
 	return err
 }
@@ -1206,8 +1174,8 @@ func (s *Store) GetProviderConnection(ctx context.Context, provider string) (Sto
 		select id::text, provider, provider_account_id, display_name, access_token_ciphertext,
 			refresh_token_ciphertext, token_expires_at, scopes, connected_at, updated_at
 		from provider_connections
-		where provider = $1
-	`, provider).Scan(&conn.ID, &conn.Provider, &conn.ProviderAccountID, &conn.DisplayName,
+		where user_id = $1 and provider = $2
+	`, scopedUserID(ctx), provider).Scan(&conn.ID, &conn.Provider, &conn.ProviderAccountID, &conn.DisplayName,
 		&conn.AccessTokenCiphertext, &conn.RefreshTokenCiphertext, &expires, &scopes, &conn.ConnectedAt, &conn.UpdatedAt)
 	if err != nil {
 		return conn, err
@@ -1222,10 +1190,10 @@ func (s *Store) GetProviderConnection(ctx context.Context, provider string) (Sto
 func (s *Store) CreateSyncJob(ctx context.Context, provider, kind string) (string, error) {
 	var id string
 	err := s.db.QueryRow(ctx, `
-		insert into sync_jobs(provider, kind, status, started_at)
-		values($1, $2, 'running', now())
+		insert into sync_jobs(user_id, provider, kind, status, started_at)
+		values($1, $2, $3, 'running', now())
 		returning id::text
-	`, provider, kind).Scan(&id)
+	`, scopedUserID(ctx), provider, kind).Scan(&id)
 	return id, err
 }
 
@@ -1237,8 +1205,8 @@ func (s *Store) UpdateSyncJobProgress(ctx context.Context, id string, payload ma
 	_, err = s.db.Exec(ctx, `
 		update sync_jobs
 		set payload = $2
-		where id = $1 and status = 'running'
-	`, id, payloadBytes)
+		where id = $1 and user_id = $3 and status = 'running'
+	`, id, payloadBytes, scopedUserID(ctx))
 	return err
 }
 
@@ -1248,9 +1216,9 @@ func (s *Store) HasRunningSyncJob(ctx context.Context, provider string) (bool, e
 		select exists(
 			select 1
 			from sync_jobs
-			where provider = $1 and status = 'running'
+			where user_id = $1 and provider = $2 and status = 'running'
 		)
-	`, provider).Scan(&exists)
+	`, scopedUserID(ctx), provider).Scan(&exists)
 	return exists, err
 }
 
@@ -1259,10 +1227,10 @@ func (s *Store) LatestSyncJobCreatedAt(ctx context.Context, provider, kind strin
 	err := s.db.QueryRow(ctx, `
 		select created_at
 		from sync_jobs
-		where provider = $1 and kind = $2
+		where user_id = $1 and provider = $2 and kind = $3
 		order by created_at desc
 		limit 1
-	`, provider, kind).Scan(&createdAt)
+	`, scopedUserID(ctx), provider, kind).Scan(&createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, false, nil
 	}
@@ -1277,8 +1245,8 @@ func (s *Store) FinishSyncJob(ctx context.Context, id, status, message string, p
 		_, err := s.db.Exec(ctx, `
 			update sync_jobs
 			set status = $2, error = $3, finished_at = now()
-			where id = $1
-		`, id, status, message)
+			where id = $1 and user_id = $4
+		`, id, status, message, scopedUserID(ctx))
 		return err
 	}
 	payloadBytes, err := json.Marshal(payload)
@@ -1288,8 +1256,8 @@ func (s *Store) FinishSyncJob(ctx context.Context, id, status, message string, p
 	_, err = s.db.Exec(ctx, `
 		update sync_jobs
 		set status = $2, error = $3, payload = $4, finished_at = now()
-		where id = $1
-	`, id, status, message, payloadBytes)
+		where id = $1 and user_id = $5
+	`, id, status, message, payloadBytes, scopedUserID(ctx))
 	return err
 }
 
@@ -1297,9 +1265,10 @@ func (s *Store) ListSyncJobs(ctx context.Context) ([]SyncJob, error) {
 	rows, err := s.db.Query(ctx, `
 		select id::text, provider, kind, status, payload, error, created_at, started_at, finished_at
 		from sync_jobs
+		where user_id = $1
 		order by created_at desc
 		limit 50
-	`)
+	`, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1327,13 +1296,19 @@ func (s *Store) ListSyncJobs(ctx context.Context) ([]SyncJob, error) {
 	return jobs, rows.Err()
 }
 
+func (s *Store) SyncJobUserID(ctx context.Context, id string) (string, error) {
+	var userID string
+	err := s.db.QueryRow(ctx, `select user_id::text from sync_jobs where id = $1`, id).Scan(&userID)
+	return userID, err
+}
+
 func (s *Store) listSamples(ctx context.Context, activityID string) ([]ActivitySample, error) {
 	rows, err := s.db.Query(ctx, `
 		select sample_index, timestamp, elapsed_s, distance_m, latitude, longitude, elevation_m, heart_rate, cadence, power, speed_mps
 		from activity_samples
-		where activity_id = $1
+		where activity_id = $1 and exists (select 1 from activities where activities.id = activity_samples.activity_id and activities.user_id = $2)
 		order by sample_index
-	`, activityID)
+	`, activityID, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1371,9 +1346,9 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 		select lap_index, start_time, elapsed_time_s, moving_time_s, distance_m,
 			avg_pace_s_per_km, elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
 		from activity_laps
-		where activity_id = $1
+		where activity_id = $1 and exists (select 1 from activities where activities.id = activity_laps.activity_id and activities.user_id = $2)
 		order by lap_index
-	`, activityID)
+	`, activityID, scopedUserID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1664,9 +1639,27 @@ func activityFilterWhere(filters ActivityFilters, startArg int) (string, []any) 
 	return " where " + strings.Join(conditions, " and "), args
 }
 
+func activityFilterWhereForUser(filters ActivityFilters, startArg int, userID string) (string, []any) {
+	conditions, args := activityFilterConditionsForUser(filters, startArg, userID)
+	if len(conditions) == 0 {
+		return "", args
+	}
+	return " where " + strings.Join(conditions, " and "), args
+}
+
 func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, []any) {
+	return activityFilterConditionsForUser(filters, startArg, "")
+}
+
+func activityFilterConditionsForUser(filters ActivityFilters, startArg int, userID string) ([]string, []any) {
 	conditions := make([]string, 0, 5)
 	args := make([]any, 0, 5)
+	nextArg := startArg
+	if userID != "" {
+		conditions = append(conditions, fmt.Sprintf("activities.user_id = $%d", nextArg))
+		args = append(args, userID)
+		nextArg++
+	}
 	if !filters.IncludeTrainingSheet {
 		conditions = append(conditions, "source <> 'training_sheet'")
 	} else {
@@ -1674,10 +1667,10 @@ func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, 
 			select 1 from planned_activities
 			where planned_activities.source = 'training_sheet'
 				and planned_activities.source_id = activities.source_id
+				and planned_activities.user_id = activities.user_id
 				and planned_activities.status = 'completed'
 		)))`)
 	}
-	nextArg := startArg
 	if strings.TrimSpace(filters.Search) != "" {
 		conditions = append(conditions, fmt.Sprintf("coalesce(nullif(local_name, ''), name) ilike $%d", nextArg))
 		args = append(args, "%"+strings.TrimSpace(filters.Search)+"%")

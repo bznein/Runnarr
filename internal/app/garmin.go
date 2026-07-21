@@ -23,9 +23,10 @@ const garminActivityPageLimit = 100
 const garminGearActivityPageLimit = 1000
 
 type GarminService struct {
-	store    *Store
-	bridge   GarminBridge
-	tokenDir string
+	store        *Store
+	bridge       GarminBridge
+	tokenDir     string
+	legacyUserID string
 }
 
 type GarminBridge interface {
@@ -107,6 +108,22 @@ func NewGarminService(cfg Config, store *Store) *GarminService {
 	}
 }
 
+func (s *GarminService) tokenStore(ctx context.Context) string {
+	userID := scopedUserID(ctx)
+	if userID == "" {
+		return s.tokenDir
+	}
+	scoped := filepath.Join(s.tokenDir, userID)
+	if userID == s.legacyUserID {
+		if _, err := os.Stat(scoped); os.IsNotExist(err) {
+			if _, legacyErr := os.Stat(s.tokenDir); legacyErr == nil {
+				return s.tokenDir
+			}
+		}
+	}
+	return scoped
+}
+
 func (s *GarminService) Status(ctx context.Context) (ProviderConnection, bool, error) {
 	conn, err := s.store.GetProviderConnection(ctx, garminProvider)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -123,10 +140,11 @@ func (s *GarminService) Connect(ctx context.Context, email, password, mfaCode st
 	if email == "" || password == "" {
 		return ProviderConnection{}, errors.New("Garmin email and password are required")
 	}
-	if err := os.MkdirAll(s.tokenDir, 0o700); err != nil {
+	tokenStore := s.tokenStore(ctx)
+	if err := os.MkdirAll(tokenStore, 0o700); err != nil {
 		return ProviderConnection{}, fmt.Errorf("could not prepare Garmin token storage: %w", err)
 	}
-	profile, err := s.bridge.Connect(ctx, s.tokenDir, email, password, strings.TrimSpace(mfaCode))
+	profile, err := s.bridge.Connect(ctx, tokenStore, email, password, strings.TrimSpace(mfaCode))
 	if err != nil {
 		return ProviderConnection{}, err
 	}
@@ -164,7 +182,8 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 	} else if !connected {
 		return nil, errors.New("Garmin is not connected")
 	}
-	if err := os.MkdirAll(s.tokenDir, 0o700); err != nil {
+	tokenStore := s.tokenStore(ctx)
+	if err := os.MkdirAll(tokenStore, 0o700); err != nil {
 		return nil, fmt.Errorf("could not prepare Garmin token storage: %w", err)
 	}
 
@@ -208,7 +227,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			continue
 		}
 
-		data, err := s.bridge.DownloadActivity(ctx, s.tokenDir, source.ID)
+		data, err := s.bridge.DownloadActivity(ctx, tokenStore, source.ID)
 		if err != nil {
 			failed++
 			firstErrors = appendGarminSyncError(firstErrors, source, err)
@@ -224,7 +243,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		}
 		applyGarminMetadata(&importedActivity, source)
 		if len(importedActivity.Laps) > 0 && source.AvgGradeAdjustedSpeedMPS != nil {
-			if laps, err := s.bridge.ListActivitySplits(ctx, s.tokenDir, source.ID); err == nil {
+			if laps, err := s.bridge.ListActivitySplits(ctx, tokenStore, source.ID); err == nil {
 				applyGarminLapMetadata(&importedActivity, laps)
 			}
 		}
@@ -265,12 +284,13 @@ func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgres
 	} else if !connected {
 		return nil, errors.New("Garmin is not connected")
 	}
-	if err := os.MkdirAll(s.tokenDir, 0o700); err != nil {
+	tokenStore := s.tokenStore(ctx)
+	if err := os.MkdirAll(tokenStore, 0o700); err != nil {
 		return nil, fmt.Errorf("could not prepare Garmin token storage: %w", err)
 	}
 
 	progress(map[string]any{"provider": garminProvider, "stage": "Listing Garmin gear", "gear": 0, "processed": 0, "saved": 0, "assignments": 0, "localAssignments": 0})
-	response, err := s.bridge.ListGear(ctx, s.tokenDir)
+	response, err := s.bridge.ListGear(ctx, tokenStore)
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +363,7 @@ func (s *GarminService) gearActivitySourceIDs(ctx context.Context, gearID string
 	sourceIDs := make([]string, 0)
 	fetched := 0
 	for start := 0; ; {
-		page, err := s.bridge.ListGearActivities(ctx, s.tokenDir, gearID, start, garminGearActivityPageLimit)
+		page, err := s.bridge.ListGearActivities(ctx, s.tokenStore(ctx), gearID, start, garminGearActivityPageLimit)
 		if err != nil {
 			return sourceIDs, fetched, err
 		}
@@ -377,8 +397,9 @@ func appendGarminGearSyncWarning(warnings []string, gearName string, err error) 
 
 func (s *GarminService) listActivitiesSince(ctx context.Context, oldest time.Time, progress GarminSyncProgress) ([]GarminBridgeActivity, error) {
 	out := make([]GarminBridgeActivity, 0)
+	tokenStore := s.tokenStore(ctx)
 	for start := 0; ; {
-		page, err := s.bridge.ListActivities(ctx, s.tokenDir, start, garminActivityPageLimit)
+		page, err := s.bridge.ListActivities(ctx, tokenStore, start, garminActivityPageLimit)
 		if err != nil {
 			return nil, err
 		}

@@ -4,6 +4,7 @@
 
 ### Features
 
+- Added local multi-user accounts with administrator-managed username/password access, disabled accounts, password resets, per-user preferences, private datasets, per-user provider connections and scheduled syncs, and read-only administrator support views.
 - Matched training-sheet activities now write summary metrics and separate athlete feedback/RPE back to Google Sheets with conflict-safe retries; interval write-back remains pending interval metadata support.
 - Planned activity matching now offers nearby pending plans, date-based suggestions, and feedback controls based on each plan's requested sheet section.
 - Activity and lap pace now prefer provider timer/average-speed data, exclude recorded pauses, and use moving-time fallbacks for write-back and display.
