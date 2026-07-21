@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,7 +23,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const sessionCookieName = "runnarr_session"
+const (
+	sessionCookieName       = "runnarr_session"
+	publicSessionCookieName = "__Host-runnarr_session"
+	oidcStateCookieName     = "runnarr_oidc_state"
+	oidcNonceCookieName     = "runnarr_oidc_nonce"
+	sessionAbsoluteTTL      = 30 * 24 * time.Hour
+)
 
 type Server struct {
 	cfg           Config
@@ -33,6 +40,9 @@ type Server struct {
 	logger        *slog.Logger
 	syncCancelsMu sync.Mutex
 	syncCancels   map[string]context.CancelFunc
+	oidcMu        sync.Mutex
+	oidc          *oidcClient
+	loginLimiter  *loginRateLimiter
 }
 
 func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
@@ -55,19 +65,22 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 	garmin := NewGarminService(cfg, store)
 	garmin.legacyUserID = adminUser.ID
 	return &Server{
-		cfg:         cfg,
-		store:       store,
-		imports:     NewImportService(store),
-		garmin:      garmin,
-		media:       NewMediaService(cfg, store),
-		logger:      logger,
-		syncCancels: make(map[string]context.CancelFunc),
+		cfg:          cfg,
+		store:        store,
+		imports:      NewImportService(store),
+		garmin:       garmin,
+		media:        NewMediaService(cfg, store),
+		logger:       logger,
+		syncCancels:  make(map[string]context.CancelFunc),
+		loginLimiter: newLoginRateLimiter(),
 	}, nil
 }
 
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(s.recoverer)
+	r.Use(s.securityHeaders)
+	r.Use(s.limitRequestBody)
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -76,6 +89,8 @@ func (s *Server) Routes() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/session/login", s.handleLogin)
 		r.Get("/session", s.handleSession)
+		r.Get("/auth/google/login", s.handleOIDCLogin)
+		r.Get("/auth/google/callback", s.handleOIDCCallback)
 		r.Get("/providers/google/callback", s.handleGoogleCallback)
 
 		r.Group(func(r chi.Router) {
@@ -158,22 +173,31 @@ type climbPreviewPayload struct {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.LocalAuthEnabled {
+		writeError(w, http.StatusNotFound, "local password login is disabled")
+		return
+	}
+	if s.loginLimiter != nil && !s.loginLimiter.allow(requestClientKey(r, s.cfg.TrustProxy), time.Now()) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "too many login attempts")
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	user, err := s.store.GetUserByUsername(r.Context(), body.Username)
-	if err != nil || user.Disabled {
-		writeError(w, http.StatusUnauthorized, "invalid username or password")
-		return
+	hash := dummyPasswordHash
+	if err == nil {
+		hash, err = s.store.PasswordHash(r.Context(), user.ID)
 	}
-	hash, err := s.store.PasswordHash(r.Context(), user.ID)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
-		writeError(w, http.StatusUnauthorized, "invalid password")
+	if err != nil || user.Disabled || bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
+		writeError(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 	csrf, err := randomToken()
@@ -181,26 +205,26 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not create session")
 		return
 	}
-	sessionID, err := s.store.CreateSession(r.Context(), user.ID, csrf, 30*24*time.Hour)
+	sessionID, err := s.store.CreateSession(r.Context(), user.ID, csrf, sessionAbsoluteTTL)
 	if err != nil {
 		s.logger.Error("create session", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not create session")
 		return
 	}
-	http.SetCookie(w, s.sessionCookie(sessionID, 30*24*time.Hour))
+	http.SetCookie(w, s.sessionCookie(sessionID, sessionAbsoluteTTL))
 	_ = s.store.TouchUserLogin(r.Context(), user.ID)
 	writeJSON(w, http.StatusOK, sessionResponse(SessionRecord{CSRF: csrf, Actor: user, Effective: user}))
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookieName)
+	cookie, err := r.Cookie(s.authCookieName())
 	if err != nil || cookie.Value == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		writeJSON(w, http.StatusOK, s.unauthenticatedSessionResponse())
 		return
 	}
 	record, err := s.store.GetSessionRecord(r.Context(), cookie.Value)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		writeJSON(w, http.StatusOK, s.unauthenticatedSessionResponse())
 		return
 	}
 	writeJSON(w, http.StatusOK, sessionResponse(record))
@@ -235,11 +259,29 @@ func (s *Server) handleToolsVDOT(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+	if cookie, err := r.Cookie(s.authCookieName()); err == nil {
 		_ = s.store.DeleteSession(r.Context(), cookie.Value)
 	}
 	http.SetCookie(w, s.sessionCookie("", -1*time.Hour))
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+}
+
+const dummyPasswordHash = "$2a$10$7EqJtq98hPqEX7fNZaFWoOeO5s8M8eOe3N5m0f0lK9P3Z9P0h8YqG"
+
+func (s *Server) authCookieName() string {
+	if s.cfg.PublicMode {
+		return publicSessionCookieName
+	}
+	return sessionCookieName
+}
+
+func (s *Server) unauthenticatedSessionResponse() map[string]any {
+	return map[string]any{
+		"authenticated":     false,
+		"publicMode":        s.cfg.PublicMode,
+		"localLoginEnabled": s.cfg.LocalAuthEnabled,
+		"googleOIDCEnabled": s.cfg.OIDCClientID != "" && s.cfg.OIDCClientSecret != "" && len(s.cfg.OIDCAllowedEmails) > 0,
+	}
 }
 
 func sessionResponse(record SessionRecord) map[string]any {
@@ -692,7 +734,7 @@ func (s *Server) handleListImports(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(90 << 20); err != nil {
+	if err := r.ParseMultipartForm(maxImportUploadBytes + 1); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid multipart upload")
 		return
 	}
@@ -764,6 +806,10 @@ func (s *Server) handleGarminSync(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID, err := s.store.CreateSyncJob(r.Context(), garminProvider, "manual")
 	if err != nil {
+		if errors.Is(err, ErrSyncJobAlreadyRunning) {
+			writeError(w, http.StatusConflict, "Garmin sync is already running")
+			return
+		}
 		s.logger.Error("create garmin sync job", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not create sync job")
 		return
@@ -790,6 +836,10 @@ func (s *Server) handleGarminHealthSync(w http.ResponseWriter, r *http.Request) 
 	}
 	jobID, err := s.store.CreateSyncJob(r.Context(), garminProvider, "health_manual")
 	if err != nil {
+		if errors.Is(err, ErrSyncJobAlreadyRunning) {
+			writeError(w, http.StatusConflict, "Garmin sync is already running")
+			return
+		}
 		s.logger.Error("create garmin health sync job", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not create sync job")
 		return
@@ -811,6 +861,10 @@ func (s *Server) handleGarminGearSync(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID, err := s.store.CreateSyncJob(r.Context(), garminProvider, "gear_manual")
 	if err != nil {
+		if errors.Is(err, ErrSyncJobAlreadyRunning) {
+			writeError(w, http.StatusConflict, "Garmin sync is already running")
+			return
+		}
 		s.logger.Error("create garmin gear sync job", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not create sync job")
 		return
@@ -1132,6 +1186,9 @@ func decodeGarminSyncOptions(r *http.Request) (GarminSyncOptions, error) {
 	if err != nil {
 		return GarminSyncOptions{}, errors.New("oldest must use YYYY-MM-DD format")
 	}
+	if time.Now().UTC().Sub(oldest) > 10*365*24*time.Hour {
+		return GarminSyncOptions{}, errors.New("oldest cannot be more than ten years ago")
+	}
 	return GarminSyncOptions{Oldest: oldest}, nil
 }
 
@@ -1228,6 +1285,9 @@ func calendarDateRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
 	if dateFrom.After(dateTo) {
 		return time.Time{}, time.Time{}, errors.New("dateFrom must be before or equal to dateTo")
 	}
+	if dateTo.Sub(dateFrom) > 370*24*time.Hour {
+		return time.Time{}, time.Time{}, errors.New("calendar range cannot exceed 370 days")
+	}
 	return dateFrom, dateTo, nil
 }
 
@@ -1276,7 +1336,11 @@ func compactQueryValues(groups ...[]string) []string {
 
 func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessionCookieName)
+		if s.cfg.PublicMode && isMutating(r.Method) && !s.sameOriginRequest(r) {
+			writeError(w, http.StatusForbidden, "request origin is not allowed")
+			return
+		}
+		cookie, err := r.Cookie(s.authCookieName())
 		if err != nil || cookie.Value == "" {
 			writeError(w, http.StatusUnauthorized, "authentication required")
 			return
@@ -1326,6 +1390,57 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://accounts.google.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self' data:")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		if s.cfg.PublicMode && strings.HasPrefix(s.cfg.BaseURL, "https://") {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) limitRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.Body != nil {
+			limit := int64(1 << 20)
+			switch {
+			case r.URL.Path == "/api/imports":
+				limit = 80<<20 + 1<<20
+			case strings.HasSuffix(r.URL.Path, "/media"):
+				limit = maxMediaUploadBytes + 1<<20
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) sameOriginRequest(r *http.Request) bool {
+	base, err := url.Parse(s.cfg.BaseURL)
+	if err != nil {
+		return false
+	}
+	for _, value := range []string{r.Header.Get("Origin"), r.Header.Get("Referer")} {
+		if value == "" {
+			continue
+		}
+		candidate, err := url.Parse(value)
+		if err == nil && strings.EqualFold(candidate.Scheme, base.Scheme) && strings.EqualFold(candidate.Host, base.Host) {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
 func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		writeError(w, http.StatusNotFound, "not found")
@@ -1335,12 +1450,22 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 	if requested == "." {
 		requested = "index.html"
 	}
-	path := filepath.Join(s.cfg.StaticDir, requested)
+	root, err := filepath.Abs(s.cfg.StaticDir)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	path := filepath.Join(root, requested)
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 	if info, err := os.Stat(path); err == nil && !info.IsDir() {
 		http.ServeFile(w, r, path)
 		return
 	}
-	indexPath := filepath.Join(s.cfg.StaticDir, "index.html")
+	indexPath := filepath.Join(root, "index.html")
 	if _, err := os.Stat(indexPath); err == nil {
 		http.ServeFile(w, r, indexPath)
 		return
@@ -1353,13 +1478,13 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 func (s *Server) sessionCookie(value string, ttl time.Duration) *http.Cookie {
 	maxAge := int(ttl.Seconds())
 	return &http.Cookie{
-		Name:     sessionCookieName,
+		Name:     s.authCookieName(),
 		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   strings.HasPrefix(s.cfg.BaseURL, "https://"),
+		Secure:   s.cfg.PublicMode || strings.HasPrefix(s.cfg.BaseURL, "https://"),
 	}
 }
 
@@ -1377,7 +1502,8 @@ func isMutating(method string) bool {
 func isMediaClientError(err error) bool {
 	return errors.Is(err, ErrEmptyMediaFile) ||
 		errors.Is(err, ErrMediaFileTooLarge) ||
-		errors.Is(err, ErrUnsupportedMediaType)
+		errors.Is(err, ErrUnsupportedMediaType) ||
+		errors.Is(err, ErrMediaImageTooLarge)
 }
 
 func parseQueryBool(value string) bool {

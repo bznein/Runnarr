@@ -2325,6 +2325,11 @@ textarea {
   color: var(--color-heading);
 }
 
+.map-privacy-warning {
+  margin: 8px 0 0;
+  font-size: 0.78rem;
+}
+
 .field {
   display: grid;
   gap: 8px;

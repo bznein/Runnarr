@@ -80,7 +80,7 @@ terminate_stale_frontend_5173() {
   fi
 
   for pid in ${pids}; do
-    if ps -p "${pid}" -o command= | rg -q "${ROOT}/web\\|runnarr-web@0.1.0 dev\\|vite --host 0.0.0.0"; then
+    if ps -p "${pid}" -o command= | rg -q "${ROOT}/web\\|runnarr-web@0.1.0 dev\\|vite --host 127.0.0.1"; then
       to_kill="${to_kill} ${pid}"
     fi
   done
@@ -206,7 +206,7 @@ bootstrap_env() {
     updated=1
   fi
 
-  if [ -z "${RUNNARR_HTTP_ADDR:-}" ] || [ "${RUNNARR_HTTP_ADDR}" = ":8080" ]; then
+  if [ -z "${RUNNARR_HTTP_ADDR:-}" ] || [ "${RUNNARR_HTTP_ADDR}" = ":8080" ] || [ "${RUNNARR_HTTP_ADDR}" = "127.0.0.1:8080" ]; then
     for _ in $(seq 1 50); do
       backend_port="$(random_high_port)"
       if is_port_free "${backend_port}"; then
@@ -217,7 +217,7 @@ bootstrap_env() {
     if [ -z "${backend_port:-}" ]; then
       backend_port=59000
     fi
-    RUNNARR_HTTP_ADDR=":${backend_port}"
+    RUNNARR_HTTP_ADDR="127.0.0.1:${backend_port}"
     if [ "${persist_runtime_defaults}" = "1" ]; then
       write_env_line "RUNNARR_HTTP_ADDR" "${RUNNARR_HTTP_ADDR}"
       persisted=1
@@ -288,6 +288,14 @@ if [ "${#missing_vars[@]}" -gt 0 ]; then
   exit 1
 fi
 
+if [ "${RUNNARR_PUBLIC_MODE:-false}" != "true" ] && [ "${RUNNARR_PUBLIC_MODE:-0}" != "1" ]; then
+  case "${RUNNARR_HTTP_ADDR:-}" in
+    :*) RUNNARR_HTTP_ADDR="127.0.0.1${RUNNARR_HTTP_ADDR}"; export RUNNARR_HTTP_ADDR ;;
+    0.0.0.0:*) RUNNARR_HTTP_ADDR="127.0.0.1${RUNNARR_HTTP_ADDR#0.0.0.0}"; export RUNNARR_HTTP_ADDR ;;
+    \[::\]:*) RUNNARR_HTTP_ADDR="127.0.0.1:${RUNNARR_HTTP_ADDR##*:}"; export RUNNARR_HTTP_ADDR ;;
+  esac
+fi
+
 if [ ! -d "${ROOT}/web/node_modules" ]; then
   echo "Installing frontend dependencies..."
   (cd "${ROOT}/web" && npm install)
@@ -336,7 +344,7 @@ backend_pid=$!
 
 (
   cd "${ROOT}/web"
-  VITE_API_TARGET="${api_target}" npm run dev -- --host 0.0.0.0 --port "${frontend_port}"
+  VITE_API_TARGET="${api_target}" npm run dev -- --host 127.0.0.1 --port "${frontend_port}"
 ) >"${LOG_DIR}/runnarr-frontend.log" 2>&1 &
 frontend_pid=$!
 

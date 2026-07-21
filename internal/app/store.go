@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,6 +26,7 @@ func scopedUserID(ctx context.Context) string {
 }
 
 var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
+var ErrSyncJobAlreadyRunning = errors.New("a sync job is already running")
 var ErrInvalidActivityName = errors.New("activity name must be between 1 and 160 characters")
 var ErrInvalidActivityNotes = errors.New("activity notes must be 5000 characters or fewer")
 var ErrInvalidActivityFeedback = errors.New("activity feedback must be 5000 characters or fewer")
@@ -1206,6 +1208,10 @@ func (s *Store) CreateSyncJobWithPayload(ctx context.Context, provider, kind str
 		values($1, $2, $3, 'running', $4, now())
 		returning id::text
 	`, scopedUserID(ctx), provider, kind, payloadBytes).Scan(&id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "sync_jobs_active_user_provider_idx" {
+		return "", ErrSyncJobAlreadyRunning
+	}
 	return id, err
 }
 

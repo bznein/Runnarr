@@ -20,7 +20,7 @@ The first release is intentionally not a full training science platform. It shou
 - Public social feed, public sharing, comments, kudos, leaderboards, or third-party community features.
 - Writing activities back to Garmin or other providers.
 - Deep physiological analytics, training load modeling, interval detection, structured workouts, or coach workflows.
-- Public signup, email recovery, OIDC, and hosted multi-tenant administration.
+- Public signup, email recovery, and hosted multi-tenant administration.
 - Native mobile apps.
 - Self-hosted map tile server.
 
@@ -41,7 +41,10 @@ The default deployment still works for one person, but local account management 
 
 ### Authentication and Privacy
 
-- The UI must require a local account login.
+- The default local deployment must require a local account login.
+- An explicit public deployment mode must support Google OIDC login with a
+  verified-email allowlist mapped to existing local accounts, without public
+  signup; local password login must be disabled by default in that mode.
 - The first configured admin account must be bootstrapped from `RUNNARR_ADMIN_USERNAME` and the existing password/password-hash environment variables.
 - Administrators must be able to create, disable, and reset local accounts.
 - Activities, health metrics, imports, provider connections, sync jobs, gear, planned activities, and user preferences must be private to their owning account.
@@ -264,7 +267,7 @@ All top-level user-owned records carry a non-null owner reference after bootstra
 
 ### Multi-User
 
-- Optional OIDC or reverse-proxy auth integration.
+- Optional self-hosted OIDC and reverse-proxy deployment integration.
 - Household/team deployment improvements and user-facing audit history.
 - User-scoped export, backup, and retention controls.
 - Shared datasets or controlled collaboration, if a future use case requires them.

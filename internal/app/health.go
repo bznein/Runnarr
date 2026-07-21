@@ -14,6 +14,7 @@ import (
 
 const garminHealthDefaultBackfillDays = 90
 const garminHealthScheduledRefreshDays = 14
+const garminHealthMaxRangeDays = 730
 
 type GarminHealthSyncOptions struct {
 	From time.Time
@@ -105,6 +106,12 @@ func garminHealthSyncRange(opts GarminHealthSyncOptions, now time.Time) (time.Ti
 	}
 	if from.After(to) {
 		return time.Time{}, time.Time{}, errors.New("from must be before or equal to to")
+	}
+	if to.After(dateOnly(now)) {
+		return time.Time{}, time.Time{}, errors.New("to cannot be in the future")
+	}
+	if daysInclusive(from, to) > garminHealthMaxRangeDays {
+		return time.Time{}, time.Time{}, fmt.Errorf("health sync range cannot exceed %d days", garminHealthMaxRangeDays)
 	}
 	return from, to, nil
 }

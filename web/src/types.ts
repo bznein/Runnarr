@@ -1,5 +1,8 @@
 export type Session = {
   authenticated: boolean;
+  publicMode?: boolean;
+  localLoginEnabled?: boolean;
+  googleOIDCEnabled?: boolean;
   csrfToken?: string;
   actor?: SessionUser;
   user?: SessionUser;

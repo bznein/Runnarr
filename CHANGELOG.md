@@ -4,6 +4,13 @@
 
 ### Features
 
+- Added explicit local and internet-facing deployment modes: local Docker and
+  Vite startup stays loopback-only and password-based, while public mode uses
+  HTTPS-only Google OIDC with an email allowlist, host-only secure sessions,
+  hardened proxy networking, and deployment guidance.
+- Added security hardening across sessions, CSRF/origin checks, response
+  headers, request limits, image/resource bounds, static-file containment,
+  sync-job concurrency, and non-root container execution.
 - Sync jobs can now be canceled cooperatively from progress views, diagnostics, training-plan import, and training-sheet write-back controls, while retaining completed partial work.
 - Added local multi-user accounts with administrator-managed username/password access, disabled accounts, password resets, per-user preferences, private datasets, per-user provider connections and scheduled syncs, and read-only administrator support views.
 - Matched training-sheet activities now write summary metrics and separate athlete feedback/RPE back to Google Sheets with conflict-safe retries; interval write-back remains pending interval metadata support.
@@ -42,6 +49,7 @@
 
 ### Fixes
 
+- Removed the inline theme bootstrap script so strict Content Security Policy no longer reports script violations on SPA routes such as Calendar.
 - Display preferences, activity-list columns, and gear sorting now persist per user instead of being shared through browser-local storage.
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.

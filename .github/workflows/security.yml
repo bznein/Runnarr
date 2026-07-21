@@ -49,3 +49,30 @@ jobs:
 
       - name: Check Go vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  container:
+    name: Container scan and SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build --tag runnarr:security .
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: runnarr:security
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0.17.7
+        with:
+          image: runnarr:security
+          artifact-name: runnarr-sbom.spdx.json
+          output-file: runnarr-sbom.spdx.json

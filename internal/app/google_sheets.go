@@ -339,7 +339,7 @@ func googleGET[T any](ctx context.Context, client *http.Client, endpoint, access
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return result, fmt.Errorf("Google API returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, 16<<20+1)).Decode(&result); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -350,7 +350,7 @@ func decodeGoogleResponse(response *http.Response, target any) error {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return fmt.Errorf("Google OAuth returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return json.NewDecoder(response.Body).Decode(target)
+	return json.NewDecoder(io.LimitReader(response.Body, 1<<20+1)).Decode(target)
 }
 
 func postGoogleForm(ctx context.Context, client *http.Client, endpoint string, form url.Values) (*http.Response, error) {
