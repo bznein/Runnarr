@@ -7,6 +7,7 @@ import type {
   ActivityTypeFilters,
   GoogleSheetsStatus,
   PlannedActivity,
+  PlannedActivityMatchResponse,
   TrainingSheetConfig,
   AppConfig,
   ClimbDetectionSettingsUpdate,
@@ -213,5 +214,11 @@ export const api = {
   }),
   trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
   plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
+  plannedMatchCandidates: (activityID: string) => request<PlannedActivityMatchResponse>(`/api/activities/${activityID}/planned-match-candidates`),
+  matchPlannedActivity: (activityID: string, plannedActivityId: string) => request<{ planned: PlannedActivity }>(`/api/activities/${activityID}/planned-match`, {
+    method: "POST",
+    body: JSON.stringify({ plannedActivityId })
+  }),
+  unmatchPlannedActivity: (activityID: string) => request<{ matched: boolean }>(`/api/activities/${activityID}/planned-match`, { method: "DELETE" }),
   syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
 };

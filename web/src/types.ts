@@ -98,6 +98,13 @@ export type PlannedActivity = {
   notes?: string;
   status: string;
   sourceUrl?: string;
+  matchedActivityId?: string;
+  matchedAt?: string;
+};
+
+export type PlannedActivityMatchResponse = {
+  candidates: PlannedActivity[];
+  matched?: PlannedActivity;
 };
 
 export type ActivityClimbPreviewResponse = {

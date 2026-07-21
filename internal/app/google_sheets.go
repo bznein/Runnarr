@@ -200,8 +200,12 @@ func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL str
 	for _, sheet := range metadata.Sheets {
 		props := sheet.Properties
 		rows := props.GridProperties.RowCount
-		if rows <= 0 { rows = 1000 }
-		if rows > 10000 { rows = 10000 }
+		if rows <= 0 {
+			rows = 1000
+		}
+		if rows > 10000 {
+			rows = 10000
+		}
 		rangeName := fmt.Sprintf("'%s'!A1:AD%d", strings.ReplaceAll(props.Title, "'", "''"), rows)
 		ranges = append(ranges, rangeName)
 		tabs = append(tabs, googleSheetTab{ID: strconv.Itoa(props.SheetID), Title: props.Title, RowCount: rows, ColumnCount: props.GridProperties.ColumnCount})
@@ -210,13 +214,19 @@ func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL str
 		return sheetID, tabs, nil
 	}
 	query := url.Values{}
-	for _, rangeName := range ranges { query.Add("ranges", rangeName) }
+	for _, rangeName := range ranges {
+		query.Add("ranges", rangeName)
+	}
 	query.Set("valueRenderOption", "FORMATTED_VALUE")
 	valuesURL := fmt.Sprintf("https://sheets.googleapis.com/v4/spreadsheets/%s/values:batchGet?%s", url.PathEscape(sheetID), query.Encode())
 	values, err := googleGET[googleValuesResponse](ctx, s.client, valuesURL, accessToken)
-	if err != nil { return "", nil, fmt.Errorf("read workbook values: %w", err) }
+	if err != nil {
+		return "", nil, fmt.Errorf("read workbook values: %w", err)
+	}
 	for index := range tabs {
-		if index < len(values.ValueRanges) { tabs[index].Values = values.ValueRanges[index].Values }
+		if index < len(values.ValueRanges) {
+			tabs[index].Values = values.ValueRanges[index].Values
+		}
 	}
 	return sheetID, tabs, nil
 }
@@ -224,17 +234,23 @@ func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL str
 func googleGET[T any](ctx context.Context, client *http.Client, endpoint, accessToken string) (T, error) {
 	var result T
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil { return result, err }
+	if err != nil {
+		return result, err
+	}
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	request.Header.Set("Accept", "application/json")
 	response, err := client.Do(request)
-	if err != nil { return result, err }
+	if err != nil {
+		return result, err
+	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return result, fmt.Errorf("Google API returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil { return result, err }
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
@@ -257,26 +273,40 @@ func postGoogleForm(ctx context.Context, client *http.Client, endpoint string, f
 
 func randomGoogleState() (string, error) {
 	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil { return "", err }
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("%x", buf), nil
 }
 
 func encryptGoogleSecret(cfg Config, value string) ([]byte, error) {
 	block, err := aes.NewCipher(cfg.EncryptionKey())
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	gcm, err := cipher.NewGCM(block)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil { return nil, err }
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
 	return gcm.Seal(nonce, nonce, []byte(value), nil), nil
 }
 
 func decryptGoogleSecret(cfg Config, ciphertext []byte) (string, error) {
 	block, err := aes.NewCipher(cfg.EncryptionKey())
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	gcm, err := cipher.NewGCM(block)
-	if err != nil { return "", err }
-	if len(ciphertext) < gcm.NonceSize() { return "", errors.New("encrypted Google token is too short") }
+	if err != nil {
+		return "", err
+	}
+	if len(ciphertext) < gcm.NonceSize() {
+		return "", errors.New("encrypted Google token is too short")
+	}
 	nonce, payload := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
 	plaintext, err := gcm.Open(nil, nonce, payload, nil)
 	return string(plaintext), err

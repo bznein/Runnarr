@@ -950,6 +950,13 @@ func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityRe
 		result.ExcludedFromSync = true
 		result.SyncExclusionMessage = "This synced activity will be ignored in future imports."
 	}
+	if _, err = tx.Exec(ctx, `
+		update planned_activities
+		set status = 'pending', matched_activity_id = null, matched_at = null, updated_at = now()
+		where matched_activity_id = $1
+	`, id); err != nil {
+		return DeleteActivityResult{}, err
+	}
 
 	if _, err = tx.Exec(ctx, `delete from activities where id = $1`, id); err != nil {
 		return DeleteActivityResult{}, err
@@ -1625,6 +1632,13 @@ func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, 
 	args := make([]any, 0, 5)
 	if !filters.IncludeTrainingSheet {
 		conditions = append(conditions, "source <> 'training_sheet'")
+	} else {
+		conditions = append(conditions, `(source <> 'training_sheet' or not exists (
+			select 1 from planned_activities
+			where planned_activities.source = 'training_sheet'
+				and planned_activities.source_id = activities.source_id
+				and planned_activities.status = 'completed'
+		))`)
 	}
 	nextArg := startArg
 	if strings.TrimSpace(filters.Search) != "" {

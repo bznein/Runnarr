@@ -176,13 +176,13 @@ type ImportedActivity struct {
 }
 
 type ActivityFilters struct {
-	SportTypes         []string
-	ExcludedSportTypes []string
-	Search             string
-	DateFrom           time.Time
-	DateTo             time.Time
-	SortBy             string
-	SortOrder          string
+	SportTypes           []string
+	ExcludedSportTypes   []string
+	Search               string
+	DateFrom             time.Time
+	DateTo               time.Time
+	SortBy               string
+	SortOrder            string
 	IncludeTrainingSheet bool
 }
 

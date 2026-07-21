@@ -20,7 +20,7 @@ func TestActivityFiltersFromQuerySearch(t *testing.T) {
 func TestActivityFilterConditionsSearch(t *testing.T) {
 	conditions, args := activityFilterConditions(ActivityFilters{Search: " morning "}, 2)
 
-	wantConditions := []string{"coalesce(nullif(local_name, ''), name) ilike $2"}
+	wantConditions := []string{"source <> 'training_sheet'", "coalesce(nullif(local_name, ''), name) ilike $2"}
 	wantArgs := []any{"%morning%"}
 	if !reflect.DeepEqual(conditions, wantConditions) {
 		t.Fatalf("conditions = %#v, want %#v", conditions, wantConditions)
@@ -81,7 +81,7 @@ func TestActivityFilterConditionsDateRange(t *testing.T) {
 
 	conditions, args := activityFilterConditions(ActivityFilters{DateFrom: dateFrom, DateTo: dateTo}, 1)
 
-	wantConditions := []string{"start_time >= $1", "start_time < $2"}
+	wantConditions := []string{"source <> 'training_sheet'", "start_time >= $1", "start_time < $2"}
 	wantArgs := []any{dateFrom, dateTo.AddDate(0, 0, 1)}
 	if !reflect.DeepEqual(conditions, wantConditions) {
 		t.Fatalf("conditions = %#v, want %#v", conditions, wantConditions)

@@ -14,6 +14,12 @@ import (
 
 const googleSheetsTokenID = "default"
 
+var (
+	errPlannedMatchInvalid      = errors.New("activity cannot be matched to a planned activity")
+	errPlannedMatchConflict     = errors.New("planned activity is already matched")
+	errPlannedMatchDateMismatch = errors.New("planned activity date does not match activity date")
+)
+
 func (s *Store) GetTrainingSheetConfig(ctx context.Context) (TrainingSheetConfig, error) {
 	config := TrainingSheetConfig{CheckEveryHours: 24, PlanYear: time.Now().UTC().Year()}
 	var lastSynced sql.NullTime
@@ -29,17 +35,27 @@ func (s *Store) GetTrainingSheetConfig(ctx context.Context) (TrainingSheetConfig
 		return config, err
 	}
 	config.SheetURL = strings.TrimSpace(config.SheetURL)
-	if config.CheckEveryHours <= 0 || config.CheckEveryHours > 720 { config.CheckEveryHours = 24 }
-	if config.PlanYear <= 0 { config.PlanYear = time.Now().UTC().Year() }
-	if lastSynced.Valid { config.LastSyncedAt = lastSynced.Time.UTC().Format(time.RFC3339) }
+	if config.CheckEveryHours <= 0 || config.CheckEveryHours > 720 {
+		config.CheckEveryHours = 24
+	}
+	if config.PlanYear <= 0 {
+		config.PlanYear = time.Now().UTC().Year()
+	}
+	if lastSynced.Valid {
+		config.LastSyncedAt = lastSynced.Time.UTC().Format(time.RFC3339)
+	}
 	return config, nil
 }
 
 func (s *Store) SetTrainingSheetConfig(ctx context.Context, config TrainingSheetConfig) error {
 	checkEveryHours := config.CheckEveryHours
-	if checkEveryHours <= 0 || checkEveryHours > 720 { checkEveryHours = 24 }
+	if checkEveryHours <= 0 || checkEveryHours > 720 {
+		checkEveryHours = 24
+	}
 	planYear := config.PlanYear
-	if planYear <= 0 { planYear = time.Now().UTC().Year() }
+	if planYear <= 0 {
+		planYear = time.Now().UTC().Year()
+	}
 	_, err := s.db.Exec(ctx, `
 		update app_settings
 		set training_sheet_enabled = $2, training_sheet_sheet_url = $3,
@@ -61,7 +77,9 @@ func (s *Store) LatestTrainingSheetScheduledSync(ctx context.Context) (time.Time
 		where provider = $1 and kind = 'scheduled'
 		order by created_at desc limit 1
 	`, trainingSheetProvider).Scan(&createdAt)
-	if errors.Is(err, pgx.ErrNoRows) { return time.Time{}, nil }
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, nil
+	}
 	return createdAt, err
 }
 
@@ -129,10 +147,10 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 
 func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) ([]PlannedActivity, error) {
 	rows, err := s.db.Query(ctx, `
-		select id::text, source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
-			planned_date, name, sport_type, notes, status, source_url, raw, created_at, updated_at
+		select `+plannedActivityColumns+`
 		from planned_activities
 		where planned_date >= $1::date and planned_date < $2::date
+			and status <> 'completed'
 		order by planned_date, plan_cell
 	`, from, to)
 	if err != nil {
@@ -143,21 +161,152 @@ func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) (
 	planned := make([]PlannedActivity, 0)
 	for rows.Next() {
 		var item PlannedActivity
-		var rawBytes []byte
-		if err := rows.Scan(&item.ID, &item.Source, &item.SourceID, &item.WorkbookID, &item.SheetID,
-			&item.SheetTitle, &item.PlanCell, &item.PlannedDate, &item.Name, &item.SportType,
-			&item.Notes, &item.Status, &item.SourceURL, &rawBytes, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := scanPlannedActivity(rows, &item); err != nil {
 			return nil, err
-		}
-		if len(rawBytes) > 0 {
-			_ = json.Unmarshal(rawBytes, &item.Raw)
-		}
-		if item.Raw == nil {
-			item.Raw = map[string]any{}
 		}
 		planned = append(planned, item)
 	}
 	return planned, rows.Err()
+}
+
+func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID string) (PlannedActivityMatchResponse, error) {
+	var activitySource string
+	var activityDate time.Time
+	if err := s.db.QueryRow(ctx, `select source, date(start_time) from activities where id = $1`, activityID).Scan(&activitySource, &activityDate); err != nil {
+		return PlannedActivityMatchResponse{}, err
+	}
+	response := PlannedActivityMatchResponse{Candidates: make([]PlannedActivity, 0)}
+	if activitySource == trainingSheetProvider {
+		return response, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		select `+plannedActivityColumns+`
+		from planned_activities
+		where planned_date = $1::date and status = 'pending'
+		order by plan_cell, name
+	`, activityDate)
+	if err != nil {
+		return response, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item PlannedActivity
+		if err := scanPlannedActivity(rows, &item); err != nil {
+			return response, err
+		}
+		response.Candidates = append(response.Candidates, item)
+	}
+	if err := rows.Err(); err != nil {
+		return response, err
+	}
+
+	var matched PlannedActivity
+	err = scanPlannedActivity(s.db.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where matched_activity_id = $1`, activityID), &matched)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return response, nil
+	}
+	if err != nil {
+		return response, err
+	}
+	response.Matched = &matched
+	return response, nil
+}
+
+func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedActivityID string) (PlannedActivity, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return PlannedActivity{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var activitySource string
+	var activityDate time.Time
+	if err = tx.QueryRow(ctx, `select source, date(start_time) from activities where id = $1 for update`, activityID).Scan(&activitySource, &activityDate); err != nil {
+		return PlannedActivity{}, err
+	}
+	if activitySource == trainingSheetProvider {
+		return PlannedActivity{}, errPlannedMatchInvalid
+	}
+
+	var planned PlannedActivity
+	if err = scanPlannedActivity(tx.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where id = $1 for update`, plannedActivityID), &planned); err != nil {
+		return PlannedActivity{}, err
+	}
+	if planned.MatchedActivityID != "" {
+		if planned.MatchedActivityID == activityID {
+			if err = tx.Commit(ctx); err != nil {
+				return PlannedActivity{}, err
+			}
+			return planned, nil
+		}
+		return PlannedActivity{}, errPlannedMatchConflict
+	}
+	if planned.Status != "pending" {
+		return PlannedActivity{}, errPlannedMatchConflict
+	}
+	if planned.PlannedDate.Format("2006-01-02") != activityDate.Format("2006-01-02") {
+		return PlannedActivity{}, errPlannedMatchDateMismatch
+	}
+
+	matchedAt := time.Now().UTC()
+	if _, err = tx.Exec(ctx, `
+		update planned_activities
+		set status = 'completed', matched_activity_id = $2, matched_at = $3, updated_at = now()
+		where id = $1
+	`, plannedActivityID, activityID, matchedAt); err != nil {
+		return PlannedActivity{}, err
+	}
+	planned.Status = "completed"
+	planned.MatchedActivityID = activityID
+	planned.MatchedAt = &matchedAt
+	if err = tx.Commit(ctx); err != nil {
+		return PlannedActivity{}, err
+	}
+	return planned, nil
+}
+
+func (s *Store) UnmatchPlannedActivity(ctx context.Context, activityID string) error {
+	_, err := s.db.Exec(ctx, `
+		update planned_activities
+		set status = 'pending', matched_activity_id = null, matched_at = null, updated_at = now()
+		where matched_activity_id = $1
+	`, activityID)
+	return err
+}
+
+const plannedActivityColumns = `
+	id::text, source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
+	planned_date, name, sport_type, notes, status, source_url, raw,
+	matched_activity_id::text, matched_at, created_at, updated_at`
+
+func scanPlannedActivity(row interface{ Scan(...any) error }, item *PlannedActivity) error {
+	var rawBytes []byte
+	var matchedActivityID sql.NullString
+	var matchedAt sql.NullTime
+	if err := row.Scan(
+		&item.ID, &item.Source, &item.SourceID, &item.WorkbookID, &item.SheetID, &item.SheetTitle,
+		&item.PlanCell, &item.PlannedDate, &item.Name, &item.SportType, &item.Notes, &item.Status,
+		&item.SourceURL, &rawBytes, &matchedActivityID, &matchedAt, &item.CreatedAt, &item.UpdatedAt,
+	); err != nil {
+		return err
+	}
+	if matchedActivityID.Valid {
+		item.MatchedActivityID = matchedActivityID.String
+	}
+	if matchedAt.Valid {
+		item.MatchedAt = &matchedAt.Time
+	}
+	if len(rawBytes) > 0 {
+		_ = json.Unmarshal(rawBytes, &item.Raw)
+	}
+	if item.Raw == nil {
+		item.Raw = map[string]any{}
+	}
+	return nil
 }
 
 func (s *Store) GetTrainingSheetPlanYear(ctx context.Context) (int, error) {

@@ -11,22 +11,29 @@ type TrainingSheetConfig struct {
 }
 
 type PlannedActivity struct {
-	ID          string         `json:"id"`
-	Source      string         `json:"source"`
-	SourceID    string         `json:"sourceId"`
-	WorkbookID  string         `json:"workbookId"`
-	SheetID     string         `json:"sheetId"`
-	SheetTitle  string         `json:"sheetTitle"`
-	PlanCell    string         `json:"planCell"`
-	PlannedDate time.Time      `json:"plannedDate"`
-	Name        string         `json:"name"`
-	SportType   string         `json:"sportType"`
-	Notes       string         `json:"notes,omitempty"`
-	Status      string         `json:"status"`
-	SourceURL   string         `json:"sourceUrl,omitempty"`
-	Raw         map[string]any `json:"raw,omitempty"`
-	CreatedAt   time.Time      `json:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
+	ID                string         `json:"id"`
+	Source            string         `json:"source"`
+	SourceID          string         `json:"sourceId"`
+	WorkbookID        string         `json:"workbookId"`
+	SheetID           string         `json:"sheetId"`
+	SheetTitle        string         `json:"sheetTitle"`
+	PlanCell          string         `json:"planCell"`
+	PlannedDate       time.Time      `json:"plannedDate"`
+	Name              string         `json:"name"`
+	SportType         string         `json:"sportType"`
+	Notes             string         `json:"notes,omitempty"`
+	Status            string         `json:"status"`
+	SourceURL         string         `json:"sourceUrl,omitempty"`
+	MatchedActivityID string         `json:"matchedActivityId,omitempty"`
+	MatchedAt         *time.Time     `json:"matchedAt,omitempty"`
+	Raw               map[string]any `json:"raw,omitempty"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	UpdatedAt         time.Time      `json:"updatedAt"`
+}
+
+type PlannedActivityMatchResponse struct {
+	Candidates []PlannedActivity `json:"candidates"`
+	Matched    *PlannedActivity  `json:"matched,omitempty"`
 }
 
 type GoogleSheetsStatus struct {
