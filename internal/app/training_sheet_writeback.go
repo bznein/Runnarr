@@ -45,21 +45,43 @@ func (s *Store) CreateTrainingSheetWritebackJob(ctx context.Context, plannedID, 
 	if err := s.EnsureTrainingSheetWriteback(ctx, plannedID, activityID); err != nil {
 		return "", err
 	}
-	return s.CreateSyncJob(ctx, trainingSheetProvider, "writeback")
+	return s.CreateSyncJobWithPayload(ctx, trainingSheetProvider, "writeback", map[string]any{
+		"plannedActivityId": plannedID,
+		"activityId":        activityID,
+	})
 }
 
 func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string) (*TrainingSheetWritebackStatus, error) {
 	status := &TrainingSheetWritebackStatus{}
-	var summaryWritten, feedbackWritten, lastAttempt sql.NullTime
+	var summaryWritten, feedbackWritten, lastAttempt, cancelRequestedAt sql.NullTime
+	var jobID, jobStatus sql.NullString
 	err := s.db.QueryRow(ctx, `
 		select planned_activity_id::text, activity_id::text, summary_status, summary_error, summary_written_at,
-			feedback_status, feedback_error, feedback_written_at, last_attempt_at
+			feedback_status, feedback_error, feedback_written_at, last_attempt_at,
+			writeback_job.id, writeback_job.status, writeback_job.cancel_requested_at
 		from training_sheet_writebacks
+		left join lateral (
+			select id::text, status, cancel_requested_at
+			from sync_jobs
+			where user_id = $2 and provider = $3 and kind = 'writeback'
+				and payload->>'plannedActivityId' = $1::text
+			order by created_at desc
+			limit 1
+		) as writeback_job on true
 		where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $2)
-	`, plannedID, scopedUserID(ctx)).Scan(&status.PlannedActivityID, &status.ActivityID, &status.SummaryStatus, &status.SummaryError, &summaryWritten,
-		&status.FeedbackStatus, &status.FeedbackError, &feedbackWritten, &lastAttempt)
+	`, plannedID, scopedUserID(ctx), trainingSheetProvider).Scan(&status.PlannedActivityID, &status.ActivityID, &status.SummaryStatus, &status.SummaryError, &summaryWritten,
+		&status.FeedbackStatus, &status.FeedbackError, &feedbackWritten, &lastAttempt, &jobID, &jobStatus, &cancelRequestedAt)
 	if err != nil {
 		return nil, err
+	}
+	if jobID.Valid {
+		status.JobID = jobID.String
+	}
+	if jobStatus.Valid {
+		status.JobStatus = jobStatus.String
+	}
+	if cancelRequestedAt.Valid {
+		status.CancelRequestedAt = &cancelRequestedAt.Time
 	}
 	if summaryWritten.Valid {
 		status.SummaryWrittenAt = &summaryWritten.Time
@@ -107,8 +129,14 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 	}
 
 	result := map[string]any{"plannedActivityId": plannedID, "activityId": activityID, "intervals": "not_implemented"}
+	if ctx.Err() != nil {
+		return s.canceledWritebackResult(ctx, planned, result)
+	}
 	var failures []string
 	googleStatus, err := s.auth.Status(ctx)
+	if ctx.Err() != nil {
+		return s.canceledWritebackResult(ctx, planned, result)
+	}
 	if err != nil {
 		failures = append(failures, err.Error())
 	} else if !googleStatus.WriteReady {
@@ -116,10 +144,16 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 	}
 
 	if len(failures) == 0 {
+		if ctx.Err() != nil {
+			return s.canceledWritebackResult(ctx, planned, result)
+		}
 		if err := s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "summary", "running", ""); err != nil {
 			return nil, err
 		}
 		summaryStatus, summaryError := s.writeSummary(ctx, planned, activity)
+		if ctx.Err() != nil {
+			return s.canceledWritebackResult(ctx, planned, result)
+		}
 		if summaryError != nil && summaryStatus == "failed" {
 			failures = append(failures, summaryError.Error())
 		}
@@ -131,6 +165,9 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 	}
 
 	feedbackCell := feedbackCellForPlanned(planned)
+	if ctx.Err() != nil {
+		return s.canceledWritebackResult(ctx, planned, result)
+	}
 	if feedbackCell == "" {
 		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "feedback", "not_applicable", "")
 		result["feedbackStatus"] = "not_applicable"
@@ -140,6 +177,9 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 	} else if len(failures) == 0 {
 		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "feedback", "running", "")
 		feedbackStatus, feedbackError := s.writeFeedback(ctx, planned, activity)
+		if ctx.Err() != nil {
+			return s.canceledWritebackResult(ctx, planned, result)
+		}
 		if feedbackError != nil && feedbackStatus == "failed" {
 			failures = append(failures, feedbackError.Error())
 		}
@@ -154,6 +194,25 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 		return result, fmt.Errorf("%s", strings.Join(failures, "; "))
 	}
 	return result, nil
+}
+
+func (s *TrainingSheetWritebackService) canceledWritebackResult(ctx context.Context, planned PlannedActivity, result map[string]any) (map[string]any, error) {
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+
+	if status, _ := result["summaryStatus"].(string); status == "" || status == "running" {
+		_ = s.store.updateTrainingSheetWritebackSection(persistCtx, planned.ID, "summary", "canceled", "Canceled by user")
+		result["summaryStatus"] = "canceled"
+	}
+	feedbackCell := feedbackCellForPlanned(planned)
+	if feedbackCell == "" {
+		_ = s.store.updateTrainingSheetWritebackSection(persistCtx, planned.ID, "feedback", "not_applicable", "")
+		result["feedbackStatus"] = "not_applicable"
+	} else if status, _ := result["feedbackStatus"].(string); status == "" || status == "running" {
+		_ = s.store.updateTrainingSheetWritebackSection(persistCtx, planned.ID, "feedback", "canceled", "Canceled by user")
+		result["feedbackStatus"] = "canceled"
+	}
+	return result, context.Canceled
 }
 
 func (s *TrainingSheetWritebackService) writeSummary(ctx context.Context, planned PlannedActivity, activity Activity) (string, error) {

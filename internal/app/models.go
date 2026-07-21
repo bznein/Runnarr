@@ -241,6 +241,9 @@ type ProviderConnection struct {
 type TrainingSheetWritebackStatus struct {
 	PlannedActivityID string     `json:"plannedActivityId"`
 	ActivityID        string     `json:"activityId"`
+	JobID             string     `json:"jobId,omitempty"`
+	JobStatus         string     `json:"jobStatus,omitempty"`
+	CancelRequestedAt *time.Time `json:"cancelRequestedAt,omitempty"`
 	SummaryStatus     string     `json:"summaryStatus"`
 	SummaryError      string     `json:"summaryError,omitempty"`
 	SummaryWrittenAt  *time.Time `json:"summaryWrittenAt,omitempty"`
@@ -257,15 +260,16 @@ type StoredProviderConnection struct {
 }
 
 type SyncJob struct {
-	ID         string         `json:"id"`
-	Provider   string         `json:"provider"`
-	Kind       string         `json:"kind"`
-	Status     string         `json:"status"`
-	Payload    map[string]any `json:"payload,omitempty"`
-	Error      string         `json:"error,omitempty"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	StartedAt  *time.Time     `json:"startedAt,omitempty"`
-	FinishedAt *time.Time     `json:"finishedAt,omitempty"`
+	ID                string         `json:"id"`
+	Provider          string         `json:"provider"`
+	Kind              string         `json:"kind"`
+	Status            string         `json:"status"`
+	Payload           map[string]any `json:"payload,omitempty"`
+	Error             string         `json:"error,omitempty"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	StartedAt         *time.Time     `json:"startedAt,omitempty"`
+	FinishedAt        *time.Time     `json:"finishedAt,omitempty"`
+	CancelRequestedAt *time.Time     `json:"cancelRequestedAt,omitempty"`
 }
 
 type DailyHealthMetric struct {

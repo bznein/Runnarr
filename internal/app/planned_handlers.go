@@ -355,23 +355,23 @@ func (s *Server) runTrainingSheetScheduledSyncOnce(ctx context.Context) {
 }
 
 func (s *Server) runTrainingSheetScheduledSyncJob(parent context.Context, userID, jobID string, config TrainingSheetConfig) {
-	userCtx := withUserID(parent, userID)
-	syncCtx, cancel := context.WithTimeout(userCtx, 90*time.Minute)
-	defer cancel()
+	syncCtx, cleanup := s.cancellableSyncJobContext(parent, userID, jobID, 90*time.Minute)
+	defer cleanup()
 	if _, err := s.finishTrainingSheetSyncJob(syncCtx, jobID, config); err != nil {
 		s.logger.Error("scheduled training sheet sync", "user_id", userID, "error", err)
 	}
 }
 
 func (s *Server) runTrainingSheetManualSyncJob(jobID string, config TrainingSheetConfig) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-	defer cancel()
-	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	userID, err := s.store.SyncJobUserID(lookupCtx, jobID)
+	lookupCancel()
 	if err != nil {
 		s.logger.Error("load training sheet sync owner", "job_id", jobID, "error", err)
 		return
 	}
-	ctx = withUserID(ctx, userID)
+	ctx, cleanup := s.cancellableSyncJobContext(context.Background(), userID, jobID, 2*time.Hour)
+	defer cleanup()
 	if _, err := s.finishTrainingSheetSyncJob(ctx, jobID, config); err != nil {
 		s.logger.Error("manual training sheet sync", "job_id", jobID, "error", err)
 	}
@@ -381,33 +381,34 @@ func (s *Server) finishTrainingSheetSyncJob(ctx context.Context, jobID string, c
 	progress := func(payload map[string]any) { _ = s.store.UpdateSyncJobProgress(ctx, jobID, payload) }
 	payload, err := NewPlannedTrainingSheetService(s.store, s.logger).Sync(ctx, config, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), payload)
+		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), payload)
 		return payload, err
 	}
 	if err := s.store.TouchTrainingSheetConfigLastSyncedAt(ctx, time.Now().UTC()); err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), payload)
+		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), payload)
 		return payload, err
 	}
-	_ = s.store.FinishSyncJob(ctx, jobID, "completed", "", payload)
+	_ = s.finishSyncJob(ctx, jobID, "completed", "", payload)
 	return payload, nil
 }
 
 func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	userID, err := s.store.SyncJobUserID(lookupCtx, jobID)
+	lookupCancel()
 	if err != nil {
 		s.logger.Error("load training sheet writeback owner", "job_id", jobID, "error", err)
 		return
 	}
-	ctx = withUserID(ctx, userID)
+	ctx, cleanup := s.cancellableSyncJobContext(context.Background(), userID, jobID, 30*time.Minute)
+	defer cleanup()
 	payload, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).Write(ctx, plannedID, activityID)
 	if payload != nil {
 		_ = s.store.UpdateSyncJobProgress(ctx, jobID, payload)
 	}
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), payload)
+		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), payload)
 		return
 	}
-	_ = s.store.FinishSyncJob(ctx, jobID, "completed", "", payload)
+	_ = s.finishSyncJob(ctx, jobID, "completed", "", payload)
 }

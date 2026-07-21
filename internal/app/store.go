@@ -1188,12 +1188,24 @@ func (s *Store) GetProviderConnection(ctx context.Context, provider string) (Sto
 }
 
 func (s *Store) CreateSyncJob(ctx context.Context, provider, kind string) (string, error) {
+	return s.CreateSyncJobWithPayload(ctx, provider, kind, nil)
+}
+
+func (s *Store) CreateSyncJobWithPayload(ctx context.Context, provider, kind string, payload map[string]any) (string, error) {
+	payloadBytes := []byte(`{}`)
+	if payload != nil {
+		var err error
+		payloadBytes, err = json.Marshal(payload)
+		if err != nil {
+			return "", err
+		}
+	}
 	var id string
 	err := s.db.QueryRow(ctx, `
-		insert into sync_jobs(user_id, provider, kind, status, started_at)
-		values($1, $2, $3, 'running', now())
+		insert into sync_jobs(user_id, provider, kind, status, payload, started_at)
+		values($1, $2, $3, 'running', $4, now())
 		returning id::text
-	`, scopedUserID(ctx), provider, kind).Scan(&id)
+	`, scopedUserID(ctx), provider, kind, payloadBytes).Scan(&id)
 	return id, err
 }
 
@@ -1244,7 +1256,9 @@ func (s *Store) FinishSyncJob(ctx context.Context, id, status, message string, p
 	if payload == nil {
 		_, err := s.db.Exec(ctx, `
 			update sync_jobs
-			set status = $2, error = $3, finished_at = now()
+			set status = case when cancel_requested_at is not null then 'canceled' else $2 end,
+				error = case when cancel_requested_at is not null then 'Canceled by user' else $3 end,
+				finished_at = now()
 			where id = $1 and user_id = $4
 		`, id, status, message, scopedUserID(ctx))
 		return err
@@ -1255,15 +1269,68 @@ func (s *Store) FinishSyncJob(ctx context.Context, id, status, message string, p
 	}
 	_, err = s.db.Exec(ctx, `
 		update sync_jobs
-		set status = $2, error = $3, payload = $4, finished_at = now()
+		set status = case when cancel_requested_at is not null then 'canceled' else $2 end,
+			error = case when cancel_requested_at is not null then 'Canceled by user' else $3 end,
+			payload = $4, finished_at = now()
 		where id = $1 and user_id = $5
 	`, id, status, message, payloadBytes, scopedUserID(ctx))
 	return err
 }
 
+func (s *Store) RequestSyncJobCancellation(ctx context.Context, id string) (string, bool, error) {
+	var status string
+	var cancelRequestedAt pgtype.Timestamptz
+	err := s.db.QueryRow(ctx, `
+		update sync_jobs
+		set cancel_requested_at = coalesce(cancel_requested_at, now())
+		where id = $1 and user_id = $2 and status = 'running'
+		returning status, cancel_requested_at
+	`, id, scopedUserID(ctx)).Scan(&status, &cancelRequestedAt)
+	if err == nil {
+		return status, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", false, err
+	}
+
+	err = s.db.QueryRow(ctx, `
+		select status, cancel_requested_at
+		from sync_jobs
+		where id = $1 and user_id = $2
+	`, id, scopedUserID(ctx)).Scan(&status, &cancelRequestedAt)
+	if err != nil {
+		return "", false, err
+	}
+	return status, false, nil
+}
+
+func (s *Store) SyncJobCancellationRequested(ctx context.Context, id string) (bool, error) {
+	var requested bool
+	err := s.db.QueryRow(ctx, `
+		select cancel_requested_at is not null
+		from sync_jobs
+		where id = $1 and user_id = $2
+	`, id, scopedUserID(ctx)).Scan(&requested)
+	return requested, err
+}
+
+func (s *Store) ReconcileRunningSyncJobs(ctx context.Context) error {
+	_, err := s.db.Exec(ctx, `
+		update sync_jobs
+		set status = case when cancel_requested_at is not null then 'canceled' else 'failed' end,
+			error = case when cancel_requested_at is not null
+				then 'Canceled by user'
+				else 'Sync stopped because the server restarted'
+			end,
+			finished_at = now()
+		where status = 'running'
+	`)
+	return err
+}
+
 func (s *Store) ListSyncJobs(ctx context.Context) ([]SyncJob, error) {
 	rows, err := s.db.Query(ctx, `
-		select id::text, provider, kind, status, payload, error, created_at, started_at, finished_at
+		select id::text, provider, kind, status, payload, error, created_at, started_at, finished_at, cancel_requested_at
 		from sync_jobs
 		where user_id = $1
 		order by created_at desc
@@ -1278,8 +1345,8 @@ func (s *Store) ListSyncJobs(ctx context.Context) ([]SyncJob, error) {
 	for rows.Next() {
 		var job SyncJob
 		var payloadBytes []byte
-		var startedAt, finishedAt pgtype.Timestamptz
-		if err := rows.Scan(&job.ID, &job.Provider, &job.Kind, &job.Status, &payloadBytes, &job.Error, &job.CreatedAt, &startedAt, &finishedAt); err != nil {
+		var startedAt, finishedAt, cancelRequestedAt pgtype.Timestamptz
+		if err := rows.Scan(&job.ID, &job.Provider, &job.Kind, &job.Status, &payloadBytes, &job.Error, &job.CreatedAt, &startedAt, &finishedAt, &cancelRequestedAt); err != nil {
 			return nil, err
 		}
 		if len(payloadBytes) > 0 {
@@ -1290,6 +1357,9 @@ func (s *Store) ListSyncJobs(ctx context.Context) ([]SyncJob, error) {
 		}
 		if finishedAt.Valid {
 			job.FinishedAt = &finishedAt.Time
+		}
+		if cancelRequestedAt.Valid {
+			job.CancelRequestedAt = &cancelRequestedAt.Time
 		}
 		jobs = append(jobs, job)
 	}
