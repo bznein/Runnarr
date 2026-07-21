@@ -2236,11 +2236,19 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
+  const [plannedMatchWindowDays, setPlannedMatchWindowDays] = useState(7);
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
   const plannedMatchCandidates = useQuery({
-    queryKey: ["planned-match-candidates", id],
-    queryFn: () => api.plannedMatchCandidates(id!),
-    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
+    queryKey: ["planned-match-candidates", id, plannedMatchWindowDays],
+    queryFn: () => api.plannedMatchCandidates(id!, plannedMatchWindowDays),
+    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet",
+    refetchInterval: (query) => {
+      const writeback = query.state.data?.writeback;
+      if (!writeback) {
+        return false;
+      }
+      return writeback.summaryStatus === "running" || writeback.feedbackStatus === "running" ? 1500 : false;
+    }
   });
   const matchPlannedActivity = useMutation({
     mutationFn: (plannedActivityId: string) => api.matchPlannedActivity(id!, plannedActivityId),
@@ -2250,6 +2258,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
         queryClient.invalidateQueries({ queryKey: ["activity-calendar"] })
       ]);
+      setMatchOpen(false);
     }
   });
   const unmatchPlannedActivity = useMutation({
@@ -2292,6 +2301,24 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setNotesOpen(false);
     }
   });
+  const updateActivityReflection = useMutation({
+    mutationFn: ({ feedback, rpe }: { feedback: string; rpe: number | null }) => api.updateActivityReflection(id!, feedback, rpe),
+    onSuccess: async (result) => {
+      queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, result);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activity", id] }),
+        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] })
+      ]);
+      setCheckInOpen(false);
+    }
+  });
+  const retryWriteback = useMutation({
+    mutationFn: () => api.retryPlannedWriteback(id!),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["sync-jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] });
+    }
+  });
   const uploadMedia = useMutation({
     mutationFn: async (files: File[]) => {
       const uploaded: Array<{ media: ActivityMedia }> = [];
@@ -2321,6 +2348,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [matchOpen, setMatchOpen] = useState(false);
+  const [matchCandidateId, setMatchCandidateId] = useState<string>();
+  const [checkInOpen, setCheckInOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
@@ -2364,6 +2394,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setActionsOpen(false);
     setRenameOpen(false);
     setNotesOpen(false);
+    setMatchOpen(false);
+    setMatchCandidateId(undefined);
+    setCheckInOpen(false);
+    setPlannedMatchWindowDays(7);
     setExportOpen(false);
     setSelectedMediaId(undefined);
     updateActivityNotes.reset();
@@ -2432,6 +2466,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
   const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
   const canSaveClimbSensitivity = !isClimbSensitivitySaved;
+  const feedbackAvailable = Boolean(plannedMatchCandidates.data?.matched?.feedbackCell?.trim());
 
   const handleSelectClimb = (climb: ActivityClimb) => {
     setSelectedClimbIndex((current) => current === climb.index ? undefined : climb.index);
@@ -2452,6 +2487,35 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     if (window.confirm("Delete this note?")) {
       updateActivityNotes.mutate("");
     }
+  };
+  const handleSaveReflection = (feedback: string, rpe: number | null) => {
+    updateActivityReflection.mutate({ feedback, rpe });
+  };
+  const openMatchDialog = (candidateId?: string) => {
+    const nextCandidateId = candidateId ?? plannedMatchCandidates.data?.suggestedId ?? plannedMatchCandidates.data?.candidates[0]?.id;
+    if (!nextCandidateId) {
+      return;
+    }
+    matchPlannedActivity.reset();
+    setMatchCandidateId(nextCandidateId);
+    setMatchOpen(true);
+  };
+  const handleConfirmMatch = ({
+    plannedActivityId,
+    feedback,
+    rpe
+  }: {
+    plannedActivityId: string;
+    feedback: string;
+    rpe: number | null;
+  }) => {
+    matchPlannedActivity.mutate(plannedActivityId, {
+      onSuccess: () => {
+        if (rpe !== null || feedback.trim()) {
+          updateActivityReflection.mutate({ feedback, rpe });
+        }
+      }
+    });
   };
   const handleMediaFilesSelected = (files: File[]) => {
     if (files.length === 0 || uploadMedia.isPending) {
@@ -2586,6 +2650,29 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onClose={() => setNotesOpen(false)}
         />
       )}
+      {matchOpen && plannedMatchCandidates.data && (
+        <PlannedActivityMatchDialog
+          data={plannedMatchCandidates.data}
+          selectedCandidateId={matchCandidateId}
+          canLoadMore={plannedMatchWindowDays === 7 && plannedMatchCandidates.data.hasMore}
+          matching={matchPlannedActivity.isPending || updateActivityReflection.isPending}
+          error={matchPlannedActivity.error ?? updateActivityReflection.error}
+          onSelectCandidate={setMatchCandidateId}
+          onMatch={handleConfirmMatch}
+          onLoadMore={() => setPlannedMatchWindowDays(30)}
+          onClose={() => setMatchOpen(false)}
+        />
+      )}
+      {checkInOpen && (
+        <ActivityReflectionDialog
+          activity={item}
+          feedbackAvailable={feedbackAvailable}
+          saving={updateActivityReflection.isPending}
+          error={updateActivityReflection.error}
+          onSave={handleSaveReflection}
+          onClose={() => setCheckInOpen(false)}
+        />
+      )}
       {exportOpen && (
         <ActivityExportGPXDialog
           activity={item}
@@ -2595,9 +2682,20 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       <PlannedActivityMatchPanel
         data={plannedMatchCandidates.data}
         loading={plannedMatchCandidates.isLoading}
-        error={plannedMatchCandidates.error ?? matchPlannedActivity.error ?? unmatchPlannedActivity.error}
-        matching={matchPlannedActivity.isPending}
-        onMatch={(plannedActivityId) => matchPlannedActivity.mutate(plannedActivityId)}
+        error={plannedMatchCandidates.error ?? matchPlannedActivity.error ?? updateActivityReflection.error ?? unmatchPlannedActivity.error ?? retryWriteback.error}
+        matching={matchPlannedActivity.isPending || updateActivityReflection.isPending}
+        retrying={retryWriteback.isPending}
+        feedbackAvailable={feedbackAvailable}
+        canLoadMore={plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)}
+        windowDays={plannedMatchWindowDays}
+        onMatchHint={openMatchDialog}
+        onOpenMatch={() => openMatchDialog()}
+        onLoadMore={() => setPlannedMatchWindowDays(30)}
+        onOpenCheckIn={() => {
+          updateActivityReflection.reset();
+          setCheckInOpen(true);
+        }}
+        onRetry={() => retryWriteback.mutate()}
       />
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
@@ -2619,6 +2717,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         }}
         onDelete={handleDeleteNotes}
       />
+
 
       {(item.gear ?? []).length > 0 && (
         <section className="panel gear-activity-panel">
@@ -2692,8 +2791,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
                 <tr key={lap.index}>
                   <td>{lap.index + 1}</td>
                   <td>{formatDistance(lap.distanceM)}</td>
-                  <td>{formatDuration(lap.elapsedTimeS)}</td>
-                  <td>{formatPace(lapPaceSPKM(lap))}</td>
+                  <td>{formatDuration(lapMovingTimeS(lap, item.samples ?? []))}</td>
+                  <td>{formatPace(lapPaceSPKM(lap, item.samples ?? []))}</td>
                   {showLapGap && <td>{lap.avgGradeAdjustedPaceSPKM !== undefined ? formatPace(lap.avgGradeAdjustedPaceSPKM) : ""}</td>}
                   {showLapElevation && <td>{lap.elevationGainM !== undefined ? `${Math.round(lap.elevationGainM).toLocaleString()} m` : "-"}</td>}
                   {showLapElevation && <td>{lap.elevationLossM !== undefined ? `${Math.round(lap.elevationLossM).toLocaleString()} m` : "-"}</td>}
@@ -2712,46 +2811,273 @@ function PlannedActivityMatchPanel({
   loading,
   error,
   matching,
-  onMatch
+  retrying,
+  feedbackAvailable,
+  canLoadMore,
+  windowDays,
+  onMatchHint,
+  onOpenMatch,
+  onOpenCheckIn,
+  onLoadMore,
+  onRetry
 }: {
   data?: PlannedActivityMatchResponse;
   loading: boolean;
   error: unknown;
   matching: boolean;
-  onMatch: (plannedActivityId: string) => void;
+  retrying: boolean;
+  feedbackAvailable: boolean;
+  canLoadMore: boolean;
+  windowDays: number;
+  onMatchHint: (plannedActivityId: string) => void;
+  onOpenMatch: () => void;
+  onOpenCheckIn: () => void;
+  onLoadMore: () => void;
+  onRetry: () => void;
 }) {
+  const [expanded, setExpanded] = useState(!Boolean(data?.matched));
+  const matched = Boolean(data?.matched);
+
+  useEffect(() => {
+    setExpanded(!matched);
+  }, [matched]);
+
   if (loading) return null;
   if (error) return <div className="error">{error instanceof Error ? error.message : "Could not load planned activity matches"}</div>;
   if (!data) return null;
-  if (!data.matched && data.candidates.length === 0) return null;
+  if (!data.matched && data.candidates.length === 0 && !canLoadMore && windowDays === 7) return null;
   if (data.matched) {
     return (
       <section className="panel planned-match-panel">
-        <div className="panel-heading">Matched planned run</div>
-        <strong>{data.matched.name}</strong>
-        {data.matched.notes && <p className="muted">{data.matched.notes}</p>}
+        <div className="notes-panel-header">
+          <button
+            className="panel-collapse-toggle"
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <ChevronDown size={17} aria-hidden="true" />
+            <div>
+            <div className="panel-heading">Matched planned run</div>
+            <strong>{data.matched.name}</strong>
+            </div>
+          </button>
+          <button className="secondary-button small-button" type="button" onClick={onOpenCheckIn}>
+            {feedbackAvailable ? "RPE & feedback" : "RPE"}
+          </button>
+        </div>
+        {expanded && (
+          <div className="planned-match-panel-content">
+            {data.matched.notes && <p className="muted">{data.matched.notes}</p>}
+            {data.writeback && (
+              <div className="writeback-status">
+                <p className="muted">Sheet write-back</p>
+                <div>Summary: {writebackStatusLabel(data.writeback.summaryStatus)}</div>
+                {data.writeback.summaryError && <div className="muted">{data.writeback.summaryError}</div>}
+                <div>How it felt/go: {writebackStatusLabel(data.writeback.feedbackStatus)}</div>
+                {data.writeback.feedbackError && <div className="muted">{data.writeback.feedbackError}</div>}
+                {(data.writeback.summaryStatus === "failed" || data.writeback.summaryStatus === "completed_with_conflicts" || data.writeback.feedbackStatus === "failed" || data.writeback.feedbackStatus === "completed_with_conflicts") && (
+                  <button className="secondary-button small-button" type="button" disabled={retrying} onClick={onRetry}>
+                    {retrying ? "Retrying..." : "Retry write-back"}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </section>
     );
   }
+  const hintedCandidate = data.candidates[0];
   return (
     <section className="panel planned-match-panel">
-      <div className="panel-heading">Match planned run</div>
-      <p className="muted">Same-day planned runs:</p>
-      <div className="planned-match-candidates">
-        {(data.candidates ?? []).map((candidate) => (
-          <div className="planned-match-candidate" key={candidate.id}>
-            <div>
-              <strong>{candidate.name}</strong>
-              {candidate.notes && <p className="muted">{candidate.notes}</p>}
-            </div>
-            <button className="secondary-button small-button" type="button" disabled={matching} onClick={() => onMatch(candidate.id)}>
+      <div className="notes-panel-header">
+        <button
+          className="panel-collapse-toggle"
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+        >
+          <ChevronDown size={17} aria-hidden="true" />
+          <div>
+            <div className="panel-heading">{hintedCandidate ? "Suggested planned run" : "Find planned run"}</div>
+            {hintedCandidate ? <strong>{hintedCandidate.name}</strong> : <span className="muted">No planned run was found within {windowDays} days.</span>}
+          </div>
+        </button>
+        {hintedCandidate && (
+          <div className="notes-actions">
+            <button className="primary-button small-button" type="button" disabled={matching} onClick={() => onMatchHint(hintedCandidate.id)}>
               {matching ? "Matching..." : "Match"}
             </button>
+            {(data.candidates.length > 1 || canLoadMore) && (
+              <button className="secondary-button small-button" type="button" disabled={matching} onClick={onOpenMatch}>
+                Other options
+              </button>
+            )}
           </div>
-        ))}
+        )}
+        {!hintedCandidate && canLoadMore && (
+          <button className="secondary-button small-button" type="button" onClick={onLoadMore}>
+            Load more plans
+          </button>
+        )}
       </div>
+      {expanded && hintedCandidate?.notes && <p className="muted">{hintedCandidate.notes}</p>}
     </section>
   );
+}
+
+function PlannedActivityMatchDialog({
+  data,
+  selectedCandidateId,
+  canLoadMore,
+  matching,
+  error,
+  onSelectCandidate,
+  onMatch,
+  onLoadMore,
+  onClose
+}: {
+  data: PlannedActivityMatchResponse;
+  selectedCandidateId?: string;
+  canLoadMore: boolean;
+  matching: boolean;
+  error: unknown;
+  onSelectCandidate: (plannedActivityId: string) => void;
+  onMatch: (input: { plannedActivityId: string; feedback: string; rpe: number | null }) => void;
+  onLoadMore: () => void;
+  onClose: () => void;
+}) {
+  const [feedback, setFeedback] = useState("");
+  const [rpe, setRPE] = useState(5);
+  const [rpeTouched, setRPETouched] = useState(false);
+  const trimmedFeedback = feedback.trim();
+  const valid = Array.from(trimmedFeedback).length <= 5000;
+  const selectedCandidate = data.candidates.find((candidate) => candidate.id === selectedCandidateId);
+  const feedbackAvailable = Boolean(selectedCandidate?.feedbackCell?.trim());
+
+  useEffect(() => {
+    if (!feedbackAvailable) {
+      setFeedback("");
+    }
+  }, [feedbackAvailable]);
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form
+        className="filter-dialog notes-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="planned-match-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (selectedCandidateId && valid) {
+            onMatch({
+              plannedActivityId: selectedCandidateId,
+              feedback: feedbackAvailable ? trimmedFeedback : "",
+              rpe: rpeTouched ? rpe : null
+            });
+          }
+        }}
+      >
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Activity</div>
+            <h2 id="planned-match-title">Match planned run</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close planned run matching" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <p className="muted">The first option is the date-based hint. Select another planned run if needed.</p>
+        <div className="planned-match-candidates">
+          {(data.candidates ?? []).map((candidate) => (
+            <label className="planned-match-candidate" key={candidate.id}>
+              <input
+                type="radio"
+                name="planned-activity"
+                checked={candidate.id === selectedCandidateId}
+                disabled={matching}
+                onChange={() => onSelectCandidate(candidate.id)}
+              />
+              <div>
+                <div className="planned-match-candidate-title">
+                  <strong>{candidate.name}</strong>
+                  {candidate.id === data.suggestedId && <span className="planned-match-badge">Suggested</span>}
+                </div>
+                <div className="planned-match-candidate-meta">{formatDate(candidate.plannedDate)}</div>
+                {candidate.notes && <p className="muted">{candidate.notes}</p>}
+              </div>
+            </label>
+          ))}
+        </div>
+        {data.candidates.length === 0 && <p className="muted">No planned runs were found for this date.</p>}
+        {selectedCandidate && (
+          <>
+            <label className="field">
+              <span>RPE <strong>{rpe}/10</strong></span>
+              <input
+                className="rpe-slider"
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={rpe}
+                aria-label="Rate of perceived exertion"
+                onChange={(event) => {
+                  setRPE(Number(event.target.value));
+                  setRPETouched(true);
+                }}
+              />
+            </label>
+            {feedbackAvailable && (
+              <label className="field">
+                <span>How did it feel/go?</span>
+                <textarea className="notes-textarea" maxLength={5000} rows={6} value={feedback} onChange={(event) => setFeedback(event.target.value)} />
+              </label>
+            )}
+            {!feedbackAvailable && selectedCandidate && (
+              <label className="field">
+                <span>How did it feel/go?</span>
+                <textarea className="notes-textarea" maxLength={5000} rows={6} value="" disabled aria-describedby="planned-match-feedback-disabled" />
+                <span id="planned-match-feedback-disabled" className="muted">Feedback was not requested for this planned activity.</span>
+              </label>
+            )}
+          </>
+        )}
+        {!valid && <div className="row-error">Feedback must be 5000 characters or fewer.</div>}
+        {error instanceof Error && <div className="error">{error.message}</div>}
+        <div className="dialog-actions">
+          {canLoadMore && (
+            <button className="secondary-button" type="button" disabled={matching} onClick={onLoadMore}>Load more plans</button>
+          )}
+          <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>
+          <button className="primary-button" type="submit" disabled={matching || !selectedCandidateId || !valid}>
+            {matching ? "Matching..." : "Match planned run"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function writebackStatusLabel(status: string) {
+  switch (status) {
+    case "completed":
+      return "written";
+    case "completed_with_conflicts":
+      return "existing values preserved";
+    case "waiting_for_feedback":
+      return "waiting for feedback";
+    case "not_applicable":
+      return "not applicable";
+    case "running":
+      return "writing...";
+    case "failed":
+      return "failed";
+    default:
+      return status;
+  }
 }
 
 function ActivityNotesPanel({
@@ -2786,6 +3112,83 @@ function ActivityNotesPanel({
       </div>
       <div className="notes-body">{notes}</div>
     </section>
+  );
+}
+
+function ActivityReflectionDialog({
+  activity,
+  feedbackAvailable,
+  saving,
+  error,
+  onSave,
+  onClose
+}: {
+  activity: Activity;
+  feedbackAvailable: boolean;
+  saving: boolean;
+  error: unknown;
+  onSave: (feedback: string, rpe: number | null) => void;
+  onClose: () => void;
+}) {
+  const [feedback, setFeedback] = useState(activity.feedback ?? "");
+  const [rpe, setRPE] = useState(activity.rpe ?? 5);
+  const trimmedFeedback = feedback.trim();
+  const currentFeedback = (activity.feedback ?? "").trim();
+  const currentRPE = activity.rpe ?? null;
+  const valid = Array.from(trimmedFeedback).length <= 5000;
+  const changed = trimmedFeedback !== currentFeedback || rpe !== currentRPE;
+  const message = error instanceof Error ? error.message : "";
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form
+        className="filter-dialog notes-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="activity-reflection-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid && changed) {
+            onSave(feedbackAvailable ? trimmedFeedback : currentFeedback, rpe);
+          }
+        }}
+      >
+        <div className="dialog-header">
+          <div>
+            <div className="eyebrow">Activity</div>
+            <h2 id="activity-reflection-title">{feedbackAvailable ? "RPE & feedback" : "RPE"}</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close RPE and feedback" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <label className="field">
+          <span>RPE <strong>{rpe}/10</strong></span>
+          <input
+            className="rpe-slider"
+            type="range"
+            min={1}
+            max={10}
+            step={1}
+            value={rpe}
+            aria-label="Rate of perceived exertion"
+            onChange={(event) => setRPE(Number(event.target.value))}
+          />
+        </label>
+        {feedbackAvailable && (
+          <label className="field">
+            <span>How did it feel/go?</span>
+            <textarea className="notes-textarea" maxLength={5000} rows={8} value={feedback} onChange={(event) => setFeedback(event.target.value)} />
+          </label>
+        )}
+        {!valid && <div className="row-error">Feedback must be 5000 characters or fewer.</div>}
+        {message && <div className="error">{message}</div>}
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button>
+          <button className="primary-button" type="submit" disabled={saving || !valid || !changed}>{saving ? "Saving..." : "Save"}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -3579,7 +3982,7 @@ function TrainingSheetSettings() {
         <label className="field"><span>Google Sheet URL</span><input type="url" value={sheetURL} onChange={(event) => setSheetURL(event.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." /></label>
         <label className="field"><span>Plan year</span><input type="number" min={1900} max={9999} value={planYear} onChange={(event) => setPlanYear(Number(event.target.value))} /></label>
         <label className="field"><span>Check every (hours)</span><input type="number" min={1} max={720} value={checkEveryHours} onChange={(event) => setCheckEveryHours(Number(event.target.value))} /></label>
-        <p className="muted">Google account: {google.data?.connected ? "connected" : google.data?.configured ? "not connected" : "OAuth not configured on the server"}</p>
+        <p className="muted">Google account: {google.data?.connected ? (google.data.writeReady ? "connected with write access" : "reconnect required for write access") : google.data?.configured ? "not connected" : "OAuth not configured on the server"}</p>
         <div className="training-sheet-actions">
           <a className="secondary-button small-button" href="/api/providers/google/connect">Connect Google account</a>
           <button className="primary-button small-button" type="button" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? "Saving..." : "Save settings"}</button>
@@ -5337,11 +5740,57 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function lapPaceSPKM(lap: NonNullable<Activity["laps"]>[number]) {
-  if (lap.distanceM <= 0 || lap.elapsedTimeS <= 0) {
+function lapPaceSPKM(lap: NonNullable<Activity["laps"]>[number], samples: ActivitySample[]) {
+  if (lap.avgPaceSPKM !== undefined && Number.isFinite(lap.avgPaceSPKM) && lap.avgPaceSPKM > 0) {
+    return lap.avgPaceSPKM;
+  }
+  if (lap.distanceM <= 0) {
     return undefined;
   }
-  return lap.elapsedTimeS / (lap.distanceM / 1000);
+  const movingTimeS = lapMovingTimeS(lap, samples);
+  if (movingTimeS <= 0) {
+    return undefined;
+  }
+  return movingTimeS / (lap.distanceM / 1000);
+}
+
+function lapMovingTimeS(lap: NonNullable<Activity["laps"]>[number], samples: ActivitySample[]) {
+  if (lap.movingTimeS > 0) {
+    return lap.movingTimeS;
+  }
+  return movingLapTimeFromSamples(lap, samples);
+}
+
+function movingLapTimeFromSamples(lap: NonNullable<Activity["laps"]>[number], samples: ActivitySample[]) {
+  if (!lap.startTime || lap.elapsedTimeS <= 0 || samples.length < 2) {
+    return lap.elapsedTimeS;
+  }
+  const startMs = Date.parse(lap.startTime);
+  if (!Number.isFinite(startMs)) {
+    return lap.elapsedTimeS;
+  }
+  const endMs = startMs + lap.elapsedTimeS * 1000;
+  let movingMs = 0;
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    if (!previous.timestamp || !current.timestamp) {
+      continue;
+    }
+    const previousMs = Date.parse(previous.timestamp);
+    const currentMs = Date.parse(current.timestamp);
+    const segmentStart = Math.max(startMs, previousMs);
+    const segmentEnd = Math.min(endMs, currentMs);
+    if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs) || segmentEnd <= segmentStart) {
+      continue;
+    }
+    const distanceDelta = (current.distanceM ?? 0) - (previous.distanceM ?? 0);
+    const moving = (previous.speedMPS ?? 0) > 0.5 || (current.speedMPS ?? 0) > 0.5 || distanceDelta > 0.5;
+    if (moving) {
+      movingMs += segmentEnd - segmentStart;
+    }
+  }
+  return movingMs > 0 ? Math.round(movingMs / 1000) : lap.elapsedTimeS;
 }
 
 function formatPace(secondsPerKm?: number) {

@@ -82,6 +82,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activities/{id}", s.handleGetActivity)
 			r.Get("/activities/{id}/planned-match-candidates", s.handlePlannedMatchCandidates)
 			r.Post("/activities/{id}/planned-match", s.handleMatchPlannedActivity)
+			r.Post("/activities/{id}/planned-writeback", s.handleTrainingSheetWriteback)
 			r.Delete("/activities/{id}/planned-match", s.handleUnmatchPlannedActivity)
 			r.Patch("/activities/{id}", s.handleRenameActivity)
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
@@ -488,14 +489,16 @@ func (s *Server) handleServeActivityMedia(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name  *string `json:"name"`
-		Notes *string `json:"notes"`
+		Name     *string          `json:"name"`
+		Notes    *string          `json:"notes"`
+		Feedback *string          `json:"feedback"`
+		RPE      json.RawMessage `json:"rpe"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.Name == nil && body.Notes == nil {
+	if body.Name == nil && body.Notes == nil && body.Feedback == nil && len(body.RPE) == 0 {
 		writeError(w, http.StatusBadRequest, "missing activity update")
 		return
 	}
@@ -507,6 +510,22 @@ func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil && body.Notes != nil {
 		activity, err = s.store.UpdateActivityNotes(r.Context(), id, *body.Notes)
+	}
+	var rpeSet bool
+	var rpe *int
+	if len(body.RPE) > 0 {
+		rpeSet = true
+		if string(body.RPE) != "null" {
+			var value int
+			if json.Unmarshal(body.RPE, &value) != nil {
+				writeError(w, http.StatusBadRequest, "rpe must be an integer or null")
+				return
+			}
+			rpe = &value
+		}
+	}
+	if err == nil && (body.Feedback != nil || rpeSet) {
+		activity, err = s.store.UpdateActivityFeedback(r.Context(), id, body.Feedback, rpeSet, rpe)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity not found")
@@ -520,10 +539,24 @@ func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if errors.Is(err, ErrInvalidActivityFeedback) || errors.Is(err, ErrInvalidActivityRPE) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.logger.Error("update activity", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not update activity")
 		return
+	}
+	if body.Feedback != nil || rpeSet {
+		if planned, matchErr := s.store.GetMatchedPlannedActivity(r.Context(), id); matchErr == nil {
+			jobID, queueErr := s.store.CreateTrainingSheetWritebackJob(r.Context(), planned.ID, id)
+			if queueErr != nil {
+				s.logger.Error("queue training sheet feedback writeback", "activity_id", id, "error", queueErr)
+			} else {
+				go s.runTrainingSheetWritebackJob(jobID, planned.ID, id)
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})
 }

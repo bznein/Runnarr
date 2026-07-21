@@ -282,6 +282,7 @@ func (TCXParser) Parse(_ context.Context, filename string, data []byte) (Importe
 			Index:        lapIndex,
 			StartTime:    lapStart,
 			ElapsedTimeS: int(lap.TotalTimeSeconds),
+			MovingTimeS:  int(lap.TotalTimeSeconds),
 			DistanceM:    lap.DistanceMeters,
 		})
 
@@ -441,6 +442,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 	var distance float64
 	var moving int
 	var elapsed int
+	var avgPace *float64
 	var sessionElevationGain *float64
 	var calories *int
 	if len(activityFile.Sessions) > 0 {
@@ -449,11 +451,18 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		if value := session.GetTotalDistanceScaled(); !math.IsNaN(value) {
 			distance = value
 		}
-		if value := session.GetTotalMovingTimeScaled(); !math.IsNaN(value) {
+		if value := session.GetTotalTimerTimeScaled(); !math.IsNaN(value) && value > 0 {
+			moving = int(value)
+		} else if value := session.GetTotalMovingTimeScaled(); !math.IsNaN(value) && value > 0 {
 			moving = int(value)
 		}
 		if value := session.GetTotalElapsedTimeScaled(); !math.IsNaN(value) {
 			elapsed = int(value)
+		}
+		if value := session.GetEnhancedAvgSpeedScaled(); !math.IsNaN(value) && value > 0 {
+			avgPace = paceFromSpeedMPS(value)
+		} else if value := session.GetAvgSpeedScaled(); !math.IsNaN(value) && value > 0 {
+			avgPace = paceFromSpeedMPS(value)
 		}
 		if session.TotalAscent != 0xFFFF {
 			value := float64(session.TotalAscent)
@@ -590,9 +599,24 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		if value := sourceLap.GetTotalElapsedTimeScaled(); !math.IsNaN(value) {
 			lapElapsed = int(value)
 		}
+		lapMoving := 0
+		if value := sourceLap.GetTotalTimerTimeScaled(); !math.IsNaN(value) && value > 0 {
+			lapMoving = int(value)
+		} else if value := sourceLap.GetTotalMovingTimeScaled(); !math.IsNaN(value) && value > 0 {
+			lapMoving = int(value)
+		}
+		if lapMoving <= 0 {
+			lapMoving = lapElapsed
+		}
 		lapDistance := 0.0
 		if value := sourceLap.GetTotalDistanceScaled(); !math.IsNaN(value) {
 			lapDistance = value
+		}
+		var lapPace *float64
+		if value := sourceLap.GetEnhancedAvgSpeedScaled(); !math.IsNaN(value) && value > 0 {
+			lapPace = paceFromSpeedMPS(value)
+		} else if value := sourceLap.GetAvgSpeedScaled(); !math.IsNaN(value) && value > 0 {
+			lapPace = paceFromSpeedMPS(value)
 		}
 		var lapGain *float64
 		if sourceLap.TotalAscent != 0xFFFF {
@@ -608,7 +632,9 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 			Index:          lapIndex,
 			StartTime:      lapStart,
 			ElapsedTimeS:   lapElapsed,
+			MovingTimeS:    lapMoving,
 			DistanceM:      lapDistance,
+			AvgPaceSPKM:    lapPace,
 			ElevationGainM: lapGain,
 			ElevationLossM: lapLoss,
 		})
@@ -624,6 +650,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		ElevationGainM: elevationGain,
 		AvgHeartRate:   avgHR,
 		MaxHeartRate:   maxHR,
+		AvgPaceSPKM:    avgPace,
 		CaloriesKcal:   calories,
 		Samples:        samples,
 		Laps:           laps,
@@ -766,6 +793,19 @@ func normalizeImported(activity *ImportedActivity) {
 	if activity.MovingTimeS == 0 {
 		activity.MovingTimeS = activity.ElapsedTimeS
 	}
+	for index := range activity.Laps {
+		if activity.Laps[index].MovingTimeS <= 0 {
+			activity.Laps[index].MovingTimeS = activity.Laps[index].ElapsedTimeS
+		}
+	}
+}
+
+func paceFromSpeedMPS(speed float64) *float64 {
+	if math.IsNaN(speed) || math.IsInf(speed, 0) || speed <= 0 {
+		return nil
+	}
+	pace := 1000 / speed
+	return &pace
 }
 
 func normalizeSport(value string) string {

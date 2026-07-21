@@ -81,6 +81,7 @@ export type TrainingSheetConfig = {
 export type GoogleSheetsStatus = {
   configured: boolean;
   connected: boolean;
+  writeReady: boolean;
   provider: string;
 };
 
@@ -92,6 +93,7 @@ export type PlannedActivity = {
   sheetId: string;
   sheetTitle: string;
   planCell: string;
+  feedbackCell?: string;
   plannedDate: string;
   name: string;
   sportType: string;
@@ -102,9 +104,24 @@ export type PlannedActivity = {
   matchedAt?: string;
 };
 
+export type TrainingSheetWritebackStatus = {
+  plannedActivityId: string;
+  activityId: string;
+  summaryStatus: string;
+  summaryError?: string;
+  summaryWrittenAt?: string;
+  feedbackStatus: string;
+  feedbackError?: string;
+  feedbackWrittenAt?: string;
+  lastAttemptAt?: string;
+};
+
 export type PlannedActivityMatchResponse = {
   candidates: PlannedActivity[];
+  suggestedId?: string;
+  hasMore: boolean;
   matched?: PlannedActivity;
+  writeback?: TrainingSheetWritebackStatus;
 };
 
 export type ActivityClimbPreviewResponse = {
@@ -129,7 +146,9 @@ export type ActivityLap = {
   index: number;
   startTime?: string;
   elapsedTimeS: number;
+  movingTimeS: number;
   distanceM: number;
+  avgPaceSPKM?: number;
   elevationGainM?: number;
   elevationLossM?: number;
   avgGradeAdjustedPaceSPKM?: number;
@@ -196,6 +215,8 @@ export type Activity = {
   sourceName: string;
   localName?: string;
   notes?: string;
+  feedback?: string;
+  rpe?: number;
   sportType: string;
   startTime: string;
   distanceM: number;

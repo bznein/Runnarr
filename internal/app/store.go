@@ -22,6 +22,8 @@ type Store struct {
 var ErrActivitySyncExcluded = errors.New("activity is excluded from provider sync")
 var ErrInvalidActivityName = errors.New("activity name must be between 1 and 160 characters")
 var ErrInvalidActivityNotes = errors.New("activity notes must be 5000 characters or fewer")
+var ErrInvalidActivityFeedback = errors.New("activity feedback must be 5000 characters or fewer")
+var ErrInvalidActivityRPE = errors.New("activity RPE must be between 1 and 10")
 
 const appSettingsID = "default"
 
@@ -300,7 +302,10 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		return "", err
 	}
 
-	avgPace := averagePace(activity.DistanceM, activity.MovingTimeS)
+	avgPace := activity.AvgPaceSPKM
+	if avgPace == nil {
+		avgPace = averagePace(activity.DistanceM, activity.MovingTimeS)
+	}
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -391,12 +396,12 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	for _, lap := range activity.Laps {
 		_, err = tx.Exec(ctx, `
 			insert into activity_laps(
-				activity_id, lap_index, start_time, elapsed_time_s, distance_m,
-				elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
+				activity_id, lap_index, start_time, elapsed_time_s, moving_time_s, distance_m,
+				avg_pace_s_per_km, elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
 			)
-			values($1,$2,$3,$4,$5,$6,$7,$8)
-		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.DistanceM,
-			lap.ElevationGainM, lap.ElevationLossM, lap.AvgGradeAdjustedPaceSPKM)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.MovingTimeS, lap.DistanceM,
+			lap.AvgPaceSPKM, lap.ElevationGainM, lap.ElevationLossM, lap.AvgGradeAdjustedPaceSPKM)
 		if err != nil {
 			return "", err
 		}
@@ -1076,6 +1081,30 @@ func (s *Store) UpdateActivityNotes(ctx context.Context, id, requestedNotes stri
 	return s.GetActivity(ctx, id)
 }
 
+func (s *Store) UpdateActivityFeedback(ctx context.Context, id string, requestedFeedback *string, rpeSet bool, requestedRPE *int) (Activity, error) {
+	feedback := ""
+	if requestedFeedback != nil {
+		var err error
+		feedback, err = localActivityFeedbackValue(*requestedFeedback)
+		if err != nil {
+			return Activity{}, err
+		}
+	}
+	if requestedRPE != nil && (*requestedRPE < 1 || *requestedRPE > 10) {
+		return Activity{}, ErrInvalidActivityRPE
+	}
+	if _, err := s.db.Exec(ctx, `
+		update activities
+		set local_feedback = case when $2 then $3 else local_feedback end,
+			rpe = case when $4 then $5 else rpe end,
+			updated_at = now()
+		where id = $1
+	`, id, requestedFeedback != nil, feedback, rpeSet, requestedRPE); err != nil {
+		return Activity{}, err
+	}
+	return s.GetActivity(ctx, id)
+}
+
 func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummaryStats, error) {
 	var stats SummaryStats
 	stats.Recent = make([]Activity, 0)
@@ -1339,8 +1368,8 @@ func (s *Store) listSamples(ctx context.Context, activityID string) ([]ActivityS
 
 func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap, error) {
 	rows, err := s.db.Query(ctx, `
-		select lap_index, start_time, elapsed_time_s, distance_m,
-			elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
+		select lap_index, start_time, elapsed_time_s, moving_time_s, distance_m,
+			avg_pace_s_per_km, elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
 		from activity_laps
 		where activity_id = $1
 		order by lap_index
@@ -1354,10 +1383,11 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 	for rows.Next() {
 		var lap ActivityLap
 		var ts pgtype.Timestamptz
-		var gain, loss, avgGradeAdjustedPace sql.NullFloat64
-		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.DistanceM, &gain, &loss, &avgGradeAdjustedPace); err != nil {
+		var avgPace, gain, loss, avgGradeAdjustedPace sql.NullFloat64
+		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.MovingTimeS, &lap.DistanceM, &avgPace, &gain, &loss, &avgGradeAdjustedPace); err != nil {
 			return nil, err
 		}
+		lap.AvgPaceSPKM = floatPtrFromNull(avgPace)
 		if ts.Valid {
 			lap.StartTime = &ts.Time
 		}
@@ -1371,7 +1401,7 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 
 const activitySelectSQL = `
 	select activities.id::text, activities.source, activities.source_id, coalesce(nullif(activities.local_name, ''), activities.name),
-		activities.name, activities.local_name, activities.local_notes, activities.sport_type, activities.start_time, activities.distance_m,
+		activities.name, activities.local_name, activities.local_notes, activities.local_feedback, activities.rpe, activities.sport_type, activities.start_time, activities.distance_m,
 		activities.moving_time_s, activities.elapsed_time_s, activities.elevation_gain_m, activities.avg_heart_rate,
 		activities.max_heart_rate, activities.avg_pace_s_per_km, activities.avg_grade_adjusted_pace_s_per_km,
 		activities.calories_kcal, activities.original_provider_url, activities.summary_polyline, activities.created_at
@@ -1404,8 +1434,8 @@ func scanActivities(rows pgx.Rows) ([]Activity, error) {
 
 func scanActivity(row rowScanner, activity *Activity) error {
 	var avgHR, maxHR, avgPace, avgGradeAdjustedPace sql.NullFloat64
-	var calories sql.NullInt32
-	if err := row.Scan(&activity.ID, &activity.Source, &activity.SourceID, &activity.Name, &activity.SourceName, &activity.LocalName, &activity.Notes, &activity.SportType,
+	var calories, rpe sql.NullInt32
+	if err := row.Scan(&activity.ID, &activity.Source, &activity.SourceID, &activity.Name, &activity.SourceName, &activity.LocalName, &activity.Notes, &activity.Feedback, &rpe, &activity.SportType,
 		&activity.StartTime, &activity.DistanceM, &activity.MovingTimeS, &activity.ElapsedTimeS,
 		&activity.ElevationGainM, &avgHR, &maxHR, &avgPace, &avgGradeAdjustedPace, &calories,
 		&activity.OriginalProviderURL, &activity.SummaryPolyline, &activity.CreatedAt); err != nil {
@@ -1416,6 +1446,7 @@ func scanActivity(row rowScanner, activity *Activity) error {
 	activity.AvgPaceSPKM = floatPtrFromNull(avgPace)
 	activity.AvgGradeAdjustedPaceSPKM = floatPtrFromNull(avgGradeAdjustedPace)
 	activity.CaloriesKcal = intPtrFromNull(calories)
+	activity.RPE = intPtrFromNull(rpe)
 	return nil
 }
 
@@ -1740,6 +1771,14 @@ func localActivityNameOverride(requestedName, sourceName string) (string, error)
 		return "", ErrInvalidActivityName
 	}
 	return name, nil
+}
+
+func localActivityFeedbackValue(requestedFeedback string) (string, error) {
+	feedback := strings.TrimSpace(requestedFeedback)
+	if utf8.RuneCountInString(feedback) > 5000 {
+		return "", ErrInvalidActivityFeedback
+	}
+	return feedback, nil
 }
 
 func localActivityNotesValue(requestedNotes string) (string, error) {

@@ -18,6 +18,7 @@ type PlannedActivity struct {
 	SheetID           string         `json:"sheetId"`
 	SheetTitle        string         `json:"sheetTitle"`
 	PlanCell          string         `json:"planCell"`
+	FeedbackCell      string         `json:"feedbackCell,omitempty"`
 	PlannedDate       time.Time      `json:"plannedDate"`
 	Name              string         `json:"name"`
 	SportType         string         `json:"sportType"`
@@ -32,12 +33,16 @@ type PlannedActivity struct {
 }
 
 type PlannedActivityMatchResponse struct {
-	Candidates []PlannedActivity `json:"candidates"`
-	Matched    *PlannedActivity  `json:"matched,omitempty"`
+	Candidates  []PlannedActivity          `json:"candidates"`
+	SuggestedID string                     `json:"suggestedId,omitempty"`
+	HasMore     bool                       `json:"hasMore"`
+	Matched     *PlannedActivity            `json:"matched,omitempty"`
+	Writeback   *TrainingSheetWritebackStatus `json:"writeback,omitempty"`
 }
 
 type GoogleSheetsStatus struct {
 	Configured bool   `json:"configured"`
 	Connected  bool   `json:"connected"`
+	WriteReady bool   `json:"writeReady"`
 	Provider   string `json:"provider"`
 }
