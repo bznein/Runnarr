@@ -5,6 +5,10 @@ import type {
   ActivityMedia,
   ActivityCalendar,
   ActivityTypeFilters,
+  GoogleSheetsStatus,
+  PlannedActivity,
+  PlannedActivityMatchResponse,
+  TrainingSheetConfig,
   AppConfig,
   ClimbDetectionSettingsUpdate,
   DailyHealthMetric,
@@ -202,5 +206,19 @@ export const api = {
       body: JSON.stringify(range ?? {})
     }),
   garminGearSync: () => request<{ jobId: string; status: string }>("/api/providers/garmin/gear-sync", { method: "POST" }),
+  googleSheetsStatus: () => request<GoogleSheetsStatus>("/api/providers/google/status"),
+  trainingSheetConfig: () => request<TrainingSheetConfig>("/api/config/training-sheet"),
+  updateTrainingSheetConfig: (body: Partial<TrainingSheetConfig> & { restoreDefaults?: boolean }) => request<TrainingSheetConfig>("/api/config/training-sheet", {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
+  plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
+  plannedMatchCandidates: (activityID: string) => request<PlannedActivityMatchResponse>(`/api/activities/${activityID}/planned-match-candidates`),
+  matchPlannedActivity: (activityID: string, plannedActivityId: string) => request<{ planned: PlannedActivity }>(`/api/activities/${activityID}/planned-match`, {
+    method: "POST",
+    body: JSON.stringify({ plannedActivityId })
+  }),
+  unmatchPlannedActivity: (activityID: string) => request<{ matched: boolean }>(`/api/activities/${activityID}/planned-match`, { method: "DELETE" }),
   syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
 };

@@ -21,6 +21,9 @@ type Config struct {
 	GarminBridgePython string
 	GarminBridgeScript string
 	GarminTokenDir     string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
 }
 
 func LoadConfig() (Config, error) {
@@ -37,6 +40,12 @@ func LoadConfig() (Config, error) {
 		GarminBridgePython: env("RUNNARR_GARMIN_BRIDGE_PYTHON", "python3"),
 		GarminBridgeScript: env("RUNNARR_GARMIN_BRIDGE_SCRIPT", "internal/app/garmin_bridge.py"),
 		GarminTokenDir:     env("RUNNARR_GARMIN_TOKEN_DIR", "data/garmin_tokens"),
+		GoogleClientID:     env("RUNNARR_GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: env("RUNNARR_GOOGLE_CLIENT_SECRET", ""),
+		GoogleRedirectURL:  env("RUNNARR_GOOGLE_REDIRECT_URL", ""),
+	}
+	if cfg.GoogleRedirectURL == "" {
+		cfg.GoogleRedirectURL = cfg.BaseURL + "/api/providers/google/callback"
 	}
 
 	if cfg.DatabaseURL == "" {

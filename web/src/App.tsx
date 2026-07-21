@@ -23,6 +23,7 @@ import type {
   Gear,
   GearSummary,
   ImportFile,
+  PlannedActivityMatchResponse,
   SyncJob,
   ToolsPaceResponse,
   ToolsVdotResponse
@@ -1769,7 +1770,7 @@ function ActivityCalendarPage() {
                         </Link>
                         <span className="calendar-day-activity-meta">
                           {activity.sportType}
-                          {activity.sportType && ` · ${activity.movingTimeS ? formatDuration(activity.movingTimeS) : ""}`}
+                          {activity.sportType && activity.movingTimeS > 0 && ` · ${formatDuration(activity.movingTimeS)}`}
                         </span>
                       </li>
                     ))}
@@ -2236,6 +2237,31 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const plannedMatchCandidates = useQuery({
+    queryKey: ["planned-match-candidates", id],
+    queryFn: () => api.plannedMatchCandidates(id!),
+    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
+  });
+  const matchPlannedActivity = useMutation({
+    mutationFn: (plannedActivityId: string) => api.matchPlannedActivity(id!, plannedActivityId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] }),
+        queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-calendar"] })
+      ]);
+    }
+  });
+  const unmatchPlannedActivity = useMutation({
+    mutationFn: () => api.unmatchPlannedActivity(id!),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] }),
+        queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-calendar"] })
+      ]);
+    }
+  });
   const deleteActivity = useMutation({
     mutationFn: api.deleteActivity,
     onSuccess: async () => {
@@ -2371,6 +2397,19 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   if (!activity.data || !item) {
     return <Page title="Activity"><EmptyState title="Activity not found" /></Page>;
   }
+  if (item.source === "training_sheet") {
+    const notes = (item.notes ?? "").trim();
+    return (
+      <Page title={item.name}>
+        {notes && (
+          <section className="panel">
+            <div className="panel-heading">Note</div>
+            <p>{notes}</p>
+          </section>
+        )}
+      </Page>
+    );
+  }
 
   const confirmedItem = item;
   const mediaItems = item.media ?? [];
@@ -2502,6 +2541,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             open={actionsOpen}
             deleting={deleteActivity.isPending}
             canExportGPX={canExportGPX}
+            canUnmatchPlanned={Boolean(plannedMatchCandidates.data?.matched)}
+            unmatching={unmatchPlannedActivity.isPending}
             onToggle={() => setActionsOpen((current) => !current)}
             onRename={() => {
               renameActivity.reset();
@@ -2516,6 +2557,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             onExportGPX={() => {
               setExportOpen(true);
               setActionsOpen(false);
+            }}
+            onUnmatchPlanned={() => {
+              setActionsOpen(false);
+              unmatchPlannedActivity.mutate();
             }}
             onDelete={handleDelete}
           />
@@ -2547,6 +2592,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onClose={() => setExportOpen(false)}
         />
       )}
+      <PlannedActivityMatchPanel
+        data={plannedMatchCandidates.data}
+        loading={plannedMatchCandidates.isLoading}
+        error={plannedMatchCandidates.error ?? matchPlannedActivity.error ?? unmatchPlannedActivity.error}
+        matching={matchPlannedActivity.isPending}
+        onMatch={(plannedActivityId) => matchPlannedActivity.mutate(plannedActivityId)}
+      />
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
@@ -2652,6 +2704,53 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
     </Page>
+  );
+}
+
+function PlannedActivityMatchPanel({
+  data,
+  loading,
+  error,
+  matching,
+  onMatch
+}: {
+  data?: PlannedActivityMatchResponse;
+  loading: boolean;
+  error: unknown;
+  matching: boolean;
+  onMatch: (plannedActivityId: string) => void;
+}) {
+  if (loading) return null;
+  if (error) return <div className="error">{error instanceof Error ? error.message : "Could not load planned activity matches"}</div>;
+  if (!data) return null;
+  if (!data.matched && data.candidates.length === 0) return null;
+  if (data.matched) {
+    return (
+      <section className="panel planned-match-panel">
+        <div className="panel-heading">Matched planned run</div>
+        <strong>{data.matched.name}</strong>
+        {data.matched.notes && <p className="muted">{data.matched.notes}</p>}
+      </section>
+    );
+  }
+  return (
+    <section className="panel planned-match-panel">
+      <div className="panel-heading">Match planned run</div>
+      <p className="muted">Same-day planned runs:</p>
+      <div className="planned-match-candidates">
+        {(data.candidates ?? []).map((candidate) => (
+          <div className="planned-match-candidate" key={candidate.id}>
+            <div>
+              <strong>{candidate.name}</strong>
+              {candidate.notes && <p className="muted">{candidate.notes}</p>}
+            </div>
+            <button className="secondary-button small-button" type="button" disabled={matching} onClick={() => onMatch(candidate.id)}>
+              {matching ? "Matching..." : "Match"}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -3043,20 +3142,26 @@ function ActivityDetailActions({
   open,
   deleting,
   canExportGPX,
+  canUnmatchPlanned,
+  unmatching,
   onToggle,
   onRename,
   onNotes,
   onExportGPX,
+  onUnmatchPlanned,
   onDelete
 }: {
   activity: Activity;
   open: boolean;
   deleting: boolean;
   canExportGPX: boolean;
+  canUnmatchPlanned: boolean;
+  unmatching: boolean;
   onToggle: () => void;
   onRename: () => void;
   onNotes: () => void;
   onExportGPX: () => void;
+  onUnmatchPlanned: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -3083,6 +3188,12 @@ function ActivityDetailActions({
               <ExternalLink size={16} />
               Open original
             </a>
+          )}
+          {canUnmatchPlanned && (
+            <button className="action-menu-item" type="button" role="menuitem" disabled={unmatching} onClick={onUnmatchPlanned}>
+              <RotateCcw size={16} />
+              {unmatching ? "Unmatching..." : "Unmatch planned run"}
+            </button>
           )}
           <button className="action-menu-item danger" type="button" role="menuitem" disabled={deleting} onClick={onDelete}>
             <Trash2 size={16} />
@@ -3401,6 +3512,7 @@ function SettingsPage({
       {garminConnect.error && <div className="error">{garminConnect.error instanceof Error ? garminConnect.error.message : "Garmin connection failed"}</div>}
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
+      <TrainingSheetSettings />
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} />
       <section id="import" className="panel upload-panel">
         <div>
@@ -3421,6 +3533,66 @@ function SettingsPage({
         importsLoading={imports.isLoading}
       />
     </Page>
+  );
+}
+
+function TrainingSheetSettings() {
+  const queryClient = useQueryClient();
+  const config = useQuery({ queryKey: ["training-sheet-config"], queryFn: api.trainingSheetConfig });
+  const google = useQuery({ queryKey: ["google-sheets-status"], queryFn: api.googleSheetsStatus });
+  const [enabled, setEnabled] = useState(false);
+  const [sheetURL, setSheetURL] = useState("");
+  const [checkEveryHours, setCheckEveryHours] = useState(24);
+  const [planYear, setPlanYear] = useState(new Date().getFullYear());
+  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
+  useEffect(() => {
+    if (!config.data) return;
+    setEnabled(config.data.enabled);
+    setSheetURL(config.data.sheetURL);
+    setCheckEveryHours(config.data.checkEveryHours);
+    setPlanYear(config.data.planYear ?? new Date().getFullYear());
+  }, [config.data]);
+  const save = useMutation({
+    mutationFn: () => api.updateTrainingSheetConfig({ enabled, sheetURL: sheetURL.trim(), checkEveryHours, planYear }),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["training-sheet-config"] }); }
+  });
+  const sync = useMutation({ mutationFn: api.trainingSheetSync, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }); } });
+  const trainingSheetJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "training_sheet");
+  const trainingSheetSyncRunning = sync.isPending || trainingSheetJob?.status === "running";
+  const syncStage = typeof trainingSheetJob?.payload?.stage === "string" ? trainingSheetJob.payload.stage : "";
+  useEffect(() => {
+    if (!trainingSheetJob || trainingSheetJob.status === "running") return;
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["training-sheet-config"] }),
+      queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
+      queryClient.invalidateQueries({ queryKey: ["activities"] }),
+      queryClient.invalidateQueries({ queryKey: ["summary"] })
+    ]);
+  }, [trainingSheetJob?.id, trainingSheetJob?.status, queryClient]);
+  const canSync = enabled && sheetURL.trim().length > 0 && google.data?.connected === true;
+  return (
+    <details className="panel settings-advanced-details">
+      <summary><span className="panel-heading">Training plan import (Experimental)</span></summary>
+      <div className="settings-advanced-content">
+        <p className="muted">Opt-in Google Sheets integration for a structured coach training workbook. Leave disabled if you do not use this workflow.</p>
+        <label className="checkbox-field"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Enable training plan sync</label>
+        <label className="field"><span>Google Sheet URL</span><input type="url" value={sheetURL} onChange={(event) => setSheetURL(event.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." /></label>
+        <label className="field"><span>Plan year</span><input type="number" min={1900} max={9999} value={planYear} onChange={(event) => setPlanYear(Number(event.target.value))} /></label>
+        <label className="field"><span>Check every (hours)</span><input type="number" min={1} max={720} value={checkEveryHours} onChange={(event) => setCheckEveryHours(Number(event.target.value))} /></label>
+        <p className="muted">Google account: {google.data?.connected ? "connected" : google.data?.configured ? "not connected" : "OAuth not configured on the server"}</p>
+        <div className="training-sheet-actions">
+          <a className="secondary-button small-button" href="/api/providers/google/connect">Connect Google account</a>
+          <button className="primary-button small-button" type="button" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? "Saving..." : "Save settings"}</button>
+          <button className="secondary-button small-button" type="button" disabled={!canSync || trainingSheetSyncRunning} onClick={() => sync.mutate()}>{trainingSheetSyncRunning ? "Syncing..." : "Sync now"}</button>
+        </div>
+        {trainingSheetSyncRunning && <p className="muted">Training plan sync is running{syncStage ? `: ${syncStage}` : "..."}</p>}
+        {trainingSheetJob?.status === "completed" && <p className="muted">Training plan sync completed.</p>}
+        {trainingSheetJob?.status === "failed" && <div className="error">Training plan sync failed: {trainingSheetJob.error || "See the server logs for details."}</div>}
+        {config.data?.lastSyncedAt && <p className="muted">Last synced: {config.data.lastSyncedAt}</p>}
+        {save.error && <div className="error">{save.error instanceof Error ? save.error.message : "Could not save training sheet settings"}</div>}
+        {sync.error && <div className="error">{sync.error instanceof Error ? sync.error.message : "Training sheet sync failed"}</div>}
+      </div>
+    </details>
   );
 }
 

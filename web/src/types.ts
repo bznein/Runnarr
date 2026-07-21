@@ -70,6 +70,43 @@ export type AppConfig = {
   climbDetection: ClimbDetectionConfig;
 };
 
+export type TrainingSheetConfig = {
+  enabled: boolean;
+  sheetURL: string;
+  checkEveryHours: number;
+  planYear?: number;
+  lastSyncedAt?: string;
+};
+
+export type GoogleSheetsStatus = {
+  configured: boolean;
+  connected: boolean;
+  provider: string;
+};
+
+export type PlannedActivity = {
+  id: string;
+  source: string;
+  sourceId: string;
+  workbookId: string;
+  sheetId: string;
+  sheetTitle: string;
+  planCell: string;
+  plannedDate: string;
+  name: string;
+  sportType: string;
+  notes?: string;
+  status: string;
+  sourceUrl?: string;
+  matchedActivityId?: string;
+  matchedAt?: string;
+};
+
+export type PlannedActivityMatchResponse = {
+  candidates: PlannedActivity[];
+  matched?: PlannedActivity;
+};
+
 export type ActivityClimbPreviewResponse = {
   climbs: ActivityClimb[];
 };

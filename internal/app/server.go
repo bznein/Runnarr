@@ -65,10 +65,13 @@ func (s *Server) Routes() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/session/login", s.handleLogin)
 		r.Get("/session", s.handleSession)
+		r.Get("/providers/google/callback", s.handleGoogleCallback)
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
 			r.Get("/config", s.handleConfig)
+			r.Get("/config/training-sheet", s.handleTrainingSheetConfig)
+			r.Patch("/config/training-sheet", s.handleUpdateTrainingSheetConfig)
 			r.Patch("/config/climb-detection", s.handleUpdateClimbDetection)
 			r.Post("/tools/pace", s.handleToolsPace)
 			r.Post("/tools/vdot", s.handleToolsVDOT)
@@ -77,6 +80,9 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
 			r.Post("/activities/{id}/climbs-preview", s.handleActivityClimbsPreview)
 			r.Get("/activities/{id}", s.handleGetActivity)
+			r.Get("/activities/{id}/planned-match-candidates", s.handlePlannedMatchCandidates)
+			r.Post("/activities/{id}/planned-match", s.handleMatchPlannedActivity)
+			r.Delete("/activities/{id}/planned-match", s.handleUnmatchPlannedActivity)
 			r.Patch("/activities/{id}", s.handleRenameActivity)
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
 			r.Post("/activities/{id}/media", s.handleUploadActivityMedia)
@@ -92,10 +98,15 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/imports", s.handleListImports)
 			r.Post("/imports", s.handleImport)
 			r.Get("/providers/garmin/status", s.handleGarminStatus)
+			r.Get("/providers/google/status", s.handleGoogleStatus)
+			r.Get("/providers/google/connect", s.handleGoogleConnect)
+			r.Post("/providers/google/disconnect", s.handleGoogleDisconnect)
 			r.Post("/providers/garmin/connect", s.handleGarminConnect)
 			r.Post("/providers/garmin/sync", s.handleGarminSync)
 			r.Post("/providers/garmin/health-sync", s.handleGarminHealthSync)
 			r.Post("/providers/garmin/gear-sync", s.handleGarminGearSync)
+			r.Post("/training-sheet/sync", s.handleTrainingSheetSync)
+			r.Get("/planned-activities", s.handlePlannedActivities)
 			r.Get("/sync-jobs", s.handleSyncJobs)
 		})
 	})
@@ -748,6 +759,7 @@ func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) StartBackgroundSync(ctx context.Context) {
 	go s.runGarminScheduledSync(ctx)
+	go s.runTrainingSheetScheduledSync(ctx)
 }
 
 func (s *Server) runGarminScheduledSync(ctx context.Context) {
