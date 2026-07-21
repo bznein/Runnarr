@@ -455,6 +455,7 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 		select
 			date(start_time) as day,
 			id::text,
+			source,
 			coalesce(nullif(local_name, ''), name),
 			start_time,
 			sport_type,
@@ -474,7 +475,7 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 	for rows.Next() {
 		var day time.Time
 		var item CalendarActivity
-		if err := rows.Scan(&day, &item.ID, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS); err != nil {
+		if err := rows.Scan(&day, &item.ID, &item.Source, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS); err != nil {
 			return ActivityCalendar{}, err
 		}
 		dayKey := day.Format("2006-01-02")
@@ -1633,12 +1634,12 @@ func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, 
 	if !filters.IncludeTrainingSheet {
 		conditions = append(conditions, "source <> 'training_sheet'")
 	} else {
-		conditions = append(conditions, `(source <> 'training_sheet' or not exists (
+		conditions = append(conditions, `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
 			select 1 from planned_activities
 			where planned_activities.source = 'training_sheet'
 				and planned_activities.source_id = activities.source_id
 				and planned_activities.status = 'completed'
-		))`)
+		)))`)
 	}
 	nextArg := startArg
 	if strings.TrimSpace(filters.Search) != "" {

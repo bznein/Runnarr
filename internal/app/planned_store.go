@@ -150,6 +150,7 @@ func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) (
 		select `+plannedActivityColumns+`
 		from planned_activities
 		where planned_date >= $1::date and planned_date < $2::date
+			and planned_date >= current_date
 			and status <> 'completed'
 		order by planned_date, plan_cell
 	`, from, to)
