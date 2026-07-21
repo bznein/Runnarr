@@ -26,6 +26,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgres://runnarr:runnarr@db:5432/runnarr?sslmode=disable}
       RUNNARR_HTTP_ADDR: ${RUNNARR_HTTP_ADDR:-:8080}
       RUNNARR_BASE_URL: ${RUNNARR_BASE_URL:-http://localhost:37617}
+      RUNNARR_GOOGLE_CLIENT_ID: ${RUNNARR_GOOGLE_CLIENT_ID:-}
+      RUNNARR_GOOGLE_CLIENT_SECRET: ${RUNNARR_GOOGLE_CLIENT_SECRET:-}
+      RUNNARR_GOOGLE_REDIRECT_URL: ${RUNNARR_GOOGLE_REDIRECT_URL:-http://localhost:37617/api/providers/google/callback}
       RUNNARR_ADMIN_PASSWORD: ${RUNNARR_ADMIN_PASSWORD:-change-me}
       RUNNARR_ADMIN_PASSWORD_HASH: ${RUNNARR_ADMIN_PASSWORD_HASH:-}
       RUNNARR_SECRET_KEY: ${RUNNARR_SECRET_KEY:-change-this-to-a-long-random-secret-with-at-least-32-bytes}

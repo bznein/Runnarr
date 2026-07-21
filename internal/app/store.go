@@ -449,6 +449,7 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 }
 
 func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (ActivityCalendar, error) {
+	filters.IncludeTrainingSheet = true
 	where, args := activityFilterWhere(filters, 1)
 	rows, err := s.db.Query(ctx, `
 		select
@@ -1622,6 +1623,9 @@ func activityFilterWhere(filters ActivityFilters, startArg int) (string, []any) 
 func activityFilterConditions(filters ActivityFilters, startArg int) ([]string, []any) {
 	conditions := make([]string, 0, 5)
 	args := make([]any, 0, 5)
+	if !filters.IncludeTrainingSheet {
+		conditions = append(conditions, "source <> 'training_sheet'")
+	}
 	nextArg := startArg
 	if strings.TrimSpace(filters.Search) != "" {
 		conditions = append(conditions, fmt.Sprintf("coalesce(nullif(local_name, ''), name) ilike $%d", nextArg))

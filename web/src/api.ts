@@ -5,6 +5,9 @@ import type {
   ActivityMedia,
   ActivityCalendar,
   ActivityTypeFilters,
+  GoogleSheetsStatus,
+  PlannedActivity,
+  TrainingSheetConfig,
   AppConfig,
   ClimbDetectionSettingsUpdate,
   DailyHealthMetric,
@@ -202,5 +205,13 @@ export const api = {
       body: JSON.stringify(range ?? {})
     }),
   garminGearSync: () => request<{ jobId: string; status: string }>("/api/providers/garmin/gear-sync", { method: "POST" }),
+  googleSheetsStatus: () => request<GoogleSheetsStatus>("/api/providers/google/status"),
+  trainingSheetConfig: () => request<TrainingSheetConfig>("/api/config/training-sheet"),
+  updateTrainingSheetConfig: (body: Partial<TrainingSheetConfig> & { restoreDefaults?: boolean }) => request<TrainingSheetConfig>("/api/config/training-sheet", {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
+  plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
   syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
 };

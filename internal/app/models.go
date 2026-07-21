@@ -158,6 +158,7 @@ type ActivityMedia struct {
 type ImportedActivity struct {
 	Name                     string           `json:"name"`
 	SportType                string           `json:"sportType"`
+	LocalNotes               string           `json:"localNotes,omitempty"`
 	StartTime                time.Time        `json:"startTime"`
 	DistanceM                float64          `json:"distanceM"`
 	MovingTimeS              int              `json:"movingTimeS"`
@@ -182,6 +183,7 @@ type ActivityFilters struct {
 	DateTo             time.Time
 	SortBy             string
 	SortOrder          string
+	IncludeTrainingSheet bool
 }
 
 type ImportFile struct {
