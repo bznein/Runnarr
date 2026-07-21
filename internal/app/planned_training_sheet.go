@@ -42,6 +42,9 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 	}
 	sheetID, tabs, err := auth.ReadWorkbook(ctx, cfg.SheetURL)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
 	if progress != nil {
@@ -51,14 +54,23 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 	warnings := make([]string, 0)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	for _, tab := range tabs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		weekEnd, ok := parseWeeklyTabDate(tab.Title, planYear)
 		if !ok {
 			continue
 		}
 		for _, candidate := range plannedActivitiesFromTab(sheetID, tab, weekEnd) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if candidate.PlannedDate.Before(today) {
 				exists, err := s.store.PlannedActivityExists(ctx, candidate.Source, candidate.SourceID)
 				if err != nil {
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
 					return nil, err
 				}
 				if !exists {
@@ -68,6 +80,9 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 			}
 			processed++
 			if err := s.store.UpsertPlannedActivity(ctx, candidate); err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				skipped++
 				warnings = append(warnings, fmt.Sprintf("%s %s: %v", tab.Title, candidate.PlanCell, err))
 				continue

@@ -265,5 +265,6 @@ export const api = {
   }),
   unmatchPlannedActivity: (activityID: string) => request<{ matched: boolean }>(`/api/activities/${activityID}/planned-match`, { method: "DELETE" }),
   retryPlannedWriteback: (activityID: string) => request<{ jobId: string; status: string }>(`/api/activities/${activityID}/planned-writeback`, { method: "POST" }),
-  syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs")
+  syncJobs: () => request<{ jobs: SyncJob[] | null }>("/api/sync-jobs"),
+  cancelSyncJob: (jobId: string) => request<{ jobId: string; status: string; cancelRequested: boolean }>(`/api/sync-jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" })
 };

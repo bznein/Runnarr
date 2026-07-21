@@ -131,6 +131,9 @@ export type PlannedActivity = {
 export type TrainingSheetWritebackStatus = {
   plannedActivityId: string;
   activityId: string;
+  jobId?: string;
+  jobStatus?: string;
+  cancelRequestedAt?: string;
   summaryStatus: string;
   summaryError?: string;
   summaryWrittenAt?: string;
@@ -370,6 +373,7 @@ export type SyncJob = {
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+  cancelRequestedAt?: string;
   payload?: Record<string, unknown>;
 };
 

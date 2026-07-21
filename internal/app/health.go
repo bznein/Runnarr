@@ -52,6 +52,9 @@ func (s *GarminService) SyncHealth(ctx context.Context, opts GarminHealthSyncOpt
 
 		day, err := s.bridge.FetchHealthDay(ctx, tokenStore, currentDate)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			failed++
 			firstErrors = appendGarminHealthSyncError(firstErrors, currentDate, err)
 			processed++
@@ -63,6 +66,9 @@ func (s *GarminService) SyncHealth(ctx context.Context, opts GarminHealthSyncOpt
 		}
 		metric := normalizeGarminHealthDay(day)
 		if _, err := s.store.UpsertDailyHealthMetric(ctx, metric); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			failed++
 			firstErrors = appendGarminHealthSyncError(firstErrors, currentDate, err)
 			processed++

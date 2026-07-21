@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -2299,7 +2299,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       if (!writeback) {
         return false;
       }
-      return writeback.summaryStatus === "running" || writeback.feedbackStatus === "running" ? 1500 : false;
+      return writeback.jobStatus === "running" || writeback.summaryStatus === "running" || writeback.feedbackStatus === "running" ? 1500 : false;
     }
   });
   const matchPlannedActivity = useMutation({
@@ -2928,7 +2928,8 @@ function PlannedActivityMatchPanel({
                 {data.writeback.summaryError && <div className="muted">{data.writeback.summaryError}</div>}
                 <div>How it felt/go: {writebackStatusLabel(data.writeback.feedbackStatus)}</div>
                 {data.writeback.feedbackError && <div className="muted">{data.writeback.feedbackError}</div>}
-                {(data.writeback.summaryStatus === "failed" || data.writeback.summaryStatus === "completed_with_conflicts" || data.writeback.feedbackStatus === "failed" || data.writeback.feedbackStatus === "completed_with_conflicts") && (
+                {data.writeback.jobId && data.writeback.jobStatus === "running" && <SyncJobCancelButton job={{ id: data.writeback.jobId, status: data.writeback.jobStatus, cancelRequestedAt: data.writeback.cancelRequestedAt }} compact />}
+                {(data.writeback.summaryStatus === "failed" || data.writeback.summaryStatus === "canceled" || data.writeback.summaryStatus === "completed_with_conflicts" || data.writeback.feedbackStatus === "failed" || data.writeback.feedbackStatus === "canceled" || data.writeback.feedbackStatus === "completed_with_conflicts") && (
                   <button className="secondary-button small-button" type="button" disabled={retrying} onClick={onRetry}>
                     {retrying ? "Retrying..." : "Retry write-back"}
                   </button>
@@ -3125,6 +3126,8 @@ function writebackStatusLabel(status: string) {
       return "not applicable";
     case "running":
       return "writing...";
+    case "canceled":
+      return "canceled";
     case "failed":
       return "failed";
     default:
@@ -4013,7 +4016,7 @@ function TrainingSheetSettings() {
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["training-sheet-config"] }); }
   });
   const sync = useMutation({ mutationFn: api.trainingSheetSync, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }); } });
-  const trainingSheetJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "training_sheet");
+  const trainingSheetJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "training_sheet" && job.kind !== "writeback");
   const trainingSheetSyncRunning = sync.isPending || trainingSheetJob?.status === "running";
   const syncStage = typeof trainingSheetJob?.payload?.stage === "string" ? trainingSheetJob.payload.stage : "";
   useEffect(() => {
@@ -4040,9 +4043,11 @@ function TrainingSheetSettings() {
           <a className="secondary-button small-button" href="/api/providers/google/connect">Connect Google account</a>
           <button className="primary-button small-button" type="button" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? "Saving..." : "Save settings"}</button>
           <button className="secondary-button small-button" type="button" disabled={!canSync || trainingSheetSyncRunning} onClick={() => sync.mutate()}>{trainingSheetSyncRunning ? "Syncing..." : "Sync now"}</button>
+          <SyncJobCancelButton job={trainingSheetJob} compact />
         </div>
         {trainingSheetSyncRunning && <p className="muted">Training plan sync is running{syncStage ? `: ${syncStage}` : "..."}</p>}
         {trainingSheetJob?.status === "completed" && <p className="muted">Training plan sync completed.</p>}
+        {trainingSheetJob?.status === "canceled" && <p className="muted">Training plan sync canceled.</p>}
         {trainingSheetJob?.status === "failed" && <div className="error">Training plan sync failed: {trainingSheetJob.error || "See the server logs for details."}</div>}
         {config.data?.lastSyncedAt && <p className="muted">Last synced: {config.data.lastSyncedAt}</p>}
         {save.error && <div className="error">{save.error instanceof Error ? save.error.message : "Could not save training sheet settings"}</div>}
@@ -4236,6 +4241,7 @@ function SyncJobsTable({ jobs }: { jobs: SyncJob[] }) {
             <th>Progress</th>
             <th>Details</th>
             <th>Created</th>
+            <th aria-label="Actions" />
           </tr>
         </thead>
         <tbody>
@@ -4247,11 +4253,47 @@ function SyncJobsTable({ jobs }: { jobs: SyncJob[] }) {
               <td><SyncProgressBar job={job} /></td>
               <td>{formatSyncJobDetails(job)}</td>
               <td>{formatDate(job.createdAt)}</td>
+              <td><SyncJobCancelButton job={job} compact /></td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+type CancellableSyncJob = Pick<SyncJob, "id" | "status"> & {
+  cancelRequestedAt?: string;
+};
+
+function SyncJobCancelButton({ job, compact = false }: { job?: CancellableSyncJob; compact?: boolean }) {
+  const queryClient = useQueryClient();
+  const cancelSync = useMutation({
+    mutationFn: api.cancelSyncJob,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates"] })
+      ]);
+    }
+  });
+  if (!job || job.status !== "running") {
+    return null;
+  }
+  const cancelling = Boolean(job.cancelRequestedAt) || cancelSync.isPending;
+  return (
+    <>
+      <button
+        className={`secondary-button${compact ? " small-button" : ""}`}
+        type="button"
+        disabled={cancelling}
+        onClick={() => cancelSync.mutate(job.id)}
+      >
+        <Square size={compact ? 14 : 16} />
+        {cancelling ? "Cancelling..." : "Cancel"}
+      </button>
+      {cancelSync.error && <div className="error">{cancelSync.error instanceof Error ? cancelSync.error.message : "Failed to cancel sync job"}</div>}
+    </>
   );
 }
 
@@ -4320,7 +4362,8 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
     <section className="panel sync-progress-panel">
       <div className="filter-header">
         <div className="panel-heading">{gearSync ? "Garmin gear sync progress" : healthSync ? "Garmin health sync progress" : "Garmin sync progress"}</div>
-        <span className={`status ${job.status}`}>{job.status}</span>
+        <span className={`status ${job.cancelRequestedAt ? "cancelling" : job.status}`}>{job.cancelRequestedAt && job.status === "running" ? "cancelling" : job.status}</span>
+        <SyncJobCancelButton job={job} />
       </div>
       <SyncProgressBar job={job} />
       <div className="sync-progress-grid">
@@ -4481,6 +4524,9 @@ function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName
     if (job.status === "completed") {
       return total > 0 ? "Gear sync finished" : "No gear found";
     }
+    if (job.status === "canceled") {
+      return "Gear sync canceled";
+    }
     return "Waiting for first gear item";
   }
   if (isHealthSyncJob(job)) {
@@ -4489,6 +4535,9 @@ function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName
     }
     if (job.status === "completed") {
       return total > 0 ? "Health sync finished" : "No days found";
+    }
+    if (job.status === "canceled") {
+      return "Health sync canceled";
     }
     return from && to ? `${from} to ${to}` : "Waiting for first day";
   }
@@ -4500,6 +4549,9 @@ function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName
   }
   if (job.status === "completed") {
     return total > 0 ? "Sync finished" : "No activities found";
+  }
+  if (job.status === "canceled") {
+    return "Sync canceled";
   }
   return "Waiting for first activity";
 }

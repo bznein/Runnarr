@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,12 +25,14 @@ import (
 const sessionCookieName = "runnarr_session"
 
 type Server struct {
-	cfg     Config
-	store   *Store
-	imports *ImportService
-	garmin  *GarminService
-	media   *MediaService
-	logger  *slog.Logger
+	cfg           Config
+	store         *Store
+	imports       *ImportService
+	garmin        *GarminService
+	media         *MediaService
+	logger        *slog.Logger
+	syncCancelsMu sync.Mutex
+	syncCancels   map[string]context.CancelFunc
 }
 
 func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
@@ -52,12 +55,13 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 	garmin := NewGarminService(cfg, store)
 	garmin.legacyUserID = adminUser.ID
 	return &Server{
-		cfg:     cfg,
-		store:   store,
-		imports: NewImportService(store),
-		garmin:  garmin,
-		media:   NewMediaService(cfg, store),
-		logger:  logger,
+		cfg:         cfg,
+		store:       store,
+		imports:     NewImportService(store),
+		garmin:      garmin,
+		media:       NewMediaService(cfg, store),
+		logger:      logger,
+		syncCancels: make(map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -125,6 +129,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/training-sheet/sync", s.handleTrainingSheetSync)
 			r.Get("/planned-activities", s.handlePlannedActivities)
 			r.Get("/sync-jobs", s.handleSyncJobs)
+			r.Post("/sync-jobs/{jobID}/cancel", s.handleCancelSyncJob)
 		})
 	})
 
@@ -823,9 +828,95 @@ func (s *Server) handleSyncJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
+func (s *Server) handleCancelSyncJob(w http.ResponseWriter, r *http.Request) {
+	jobID := strings.TrimSpace(chi.URLParam(r, "jobID"))
+	if jobID == "" {
+		writeError(w, http.StatusBadRequest, "missing sync job id")
+		return
+	}
+	status, active, err := s.store.RequestSyncJobCancellation(r.Context(), jobID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "sync job not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("request sync job cancellation", "job_id", jobID, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not cancel sync job")
+		return
+	}
+	if active {
+		s.cancelSyncJob(jobID)
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"jobId":           jobID,
+			"status":          "cancelling",
+			"cancelRequested": true,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"jobId":           jobID,
+		"status":          status,
+		"cancelRequested": false,
+	})
+}
+
 func (s *Server) StartBackgroundSync(ctx context.Context) {
+	if err := s.store.ReconcileRunningSyncJobs(context.Background()); err != nil {
+		s.logger.Error("reconcile sync jobs after startup", "error", err)
+	}
 	go s.runGarminScheduledSync(ctx)
 	go s.runTrainingSheetScheduledSync(ctx)
+}
+
+func (s *Server) cancellableSyncJobContext(parent context.Context, userID, jobID string, timeout time.Duration) (context.Context, func()) {
+	userCtx := withUserID(parent, userID)
+	timeoutCtx, timeoutCancel := context.WithTimeout(userCtx, timeout)
+	syncCtx, cancel := context.WithCancel(timeoutCtx)
+
+	s.syncCancelsMu.Lock()
+	s.syncCancels[jobID] = cancel
+	s.syncCancelsMu.Unlock()
+
+	checkCtx, checkCancel := s.syncJobPersistenceContext(userID)
+	requested, err := s.store.SyncJobCancellationRequested(checkCtx, jobID)
+	checkCancel()
+	if err != nil {
+		s.logger.Error("check sync job cancellation", "job_id", jobID, "error", err)
+	} else if requested {
+		cancel()
+	}
+
+	cleanup := func() {
+		s.syncCancelsMu.Lock()
+		delete(s.syncCancels, jobID)
+		s.syncCancelsMu.Unlock()
+		timeoutCancel()
+		cancel()
+	}
+	return syncCtx, cleanup
+}
+
+func (s *Server) cancelSyncJob(jobID string) {
+	s.syncCancelsMu.Lock()
+	cancel, ok := s.syncCancels[jobID]
+	s.syncCancelsMu.Unlock()
+	if ok {
+		cancel()
+	}
+}
+
+func (s *Server) syncJobPersistenceContext(userID string) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(withUserID(context.Background(), userID), 30*time.Second)
+}
+
+func (s *Server) finishSyncJob(ctx context.Context, jobID, status, message string, payload map[string]any) error {
+	userID, err := userIDFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	persistCtx, cancel := s.syncJobPersistenceContext(userID)
+	defer cancel()
+	return s.store.FinishSyncJob(persistCtx, jobID, status, message, payload)
 }
 
 func (s *Server) runGarminScheduledSync(ctx context.Context) {
@@ -873,24 +964,25 @@ func (s *Server) runGarminScheduledSyncOnce(ctx context.Context) {
 }
 
 func (s *Server) runGarminScheduledSyncJob(parent context.Context, userID, jobID string, oldest time.Time) {
-	userCtx := withUserID(parent, userID)
-	syncCtx, cancel := context.WithTimeout(userCtx, 30*time.Minute)
-	defer cancel()
+	syncCtx, cleanup := s.cancellableSyncJobContext(parent, userID, jobID, 30*time.Minute)
+	defer cleanup()
 	if _, err := s.finishGarminSyncJob(syncCtx, jobID, GarminSyncOptions{Oldest: oldest}); err != nil {
 		s.logger.Error("scheduled garmin sync", "user_id", userID, "error", err)
+		return
 	}
-	s.runGarminScheduledHealthSyncOnce(userCtx)
+	s.runGarminScheduledHealthSyncOnce(withUserID(parent, userID))
 }
 
 func (s *Server) runGarminManualSyncJob(jobID string, opts GarminSyncOptions) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
-	defer cancel()
-	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	userID, err := s.store.SyncJobUserID(lookupCtx, jobID)
+	lookupCancel()
 	if err != nil {
 		s.logger.Error("load Garmin sync owner", "job_id", jobID, "error", err)
 		return
 	}
-	ctx = withUserID(ctx, userID)
+	ctx, cleanup := s.cancellableSyncJobContext(context.Background(), userID, jobID, 6*time.Hour)
+	defer cleanup()
 	if _, err := s.finishGarminSyncJob(ctx, jobID, opts); err != nil {
 		s.logger.Error("manual garmin sync", "job_id", jobID, "error", err)
 	}
@@ -904,15 +996,19 @@ func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts Gar
 	}
 	payload, err := s.garmin.Sync(ctx, opts, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), nil)
 		return nil, err
 	}
 	gearPayload, gearErr := s.garmin.SyncGear(ctx, progress)
+	if gearErr != nil && ctx.Err() != nil {
+		_ = s.finishSyncJob(ctx, jobID, "failed", gearErr.Error(), payload)
+		return nil, gearErr
+	}
 	mergeGearSyncPayload(payload, gearPayload, gearErr)
 	if gearErr != nil {
 		s.logger.Error("garmin gear refresh after activity sync", "job_id", jobID, "error", gearErr)
 	}
-	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+	if err := s.finishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
 		return nil, err
 	}
 	return payload, nil
@@ -938,8 +1034,8 @@ func (s *Server) runGarminScheduledHealthSyncOnce(ctx context.Context) {
 		s.logger.Error("create scheduled garmin health sync job", "error", err)
 		return
 	}
-	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
+	syncCtx, cleanup := s.cancellableSyncJobContext(ctx, scopedUserID(ctx), jobID, 30*time.Minute)
+	defer cleanup()
 	to := time.Now().UTC()
 	from := to.AddDate(0, 0, -(garminHealthScheduledRefreshDays - 1))
 	if _, err := s.finishGarminHealthSyncJob(syncCtx, jobID, GarminHealthSyncOptions{From: from, To: to}); err != nil {
@@ -959,28 +1055,30 @@ func (s *Server) garminScheduledHealthSyncDue(ctx context.Context) (bool, error)
 }
 
 func (s *Server) runGarminManualHealthSyncJob(jobID string, opts GarminHealthSyncOptions) {
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
-	defer cancel()
-	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	userID, err := s.store.SyncJobUserID(lookupCtx, jobID)
+	lookupCancel()
 	if err != nil {
 		s.logger.Error("load Garmin health sync owner", "job_id", jobID, "error", err)
 		return
 	}
-	ctx = withUserID(ctx, userID)
+	ctx, cleanup := s.cancellableSyncJobContext(context.Background(), userID, jobID, 6*time.Hour)
+	defer cleanup()
 	if _, err := s.finishGarminHealthSyncJob(ctx, jobID, opts); err != nil {
 		s.logger.Error("manual garmin health sync", "job_id", jobID, "error", err)
 	}
 }
 
 func (s *Server) runGarminManualGearSyncJob(jobID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
-	defer cancel()
-	userID, err := s.store.SyncJobUserID(ctx, jobID)
+	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	userID, err := s.store.SyncJobUserID(lookupCtx, jobID)
+	lookupCancel()
 	if err != nil {
 		s.logger.Error("load Garmin gear sync owner", "job_id", jobID, "error", err)
 		return
 	}
-	ctx = withUserID(ctx, userID)
+	ctx, cleanup := s.cancellableSyncJobContext(context.Background(), userID, jobID, 2*time.Hour)
+	defer cleanup()
 	if _, err := s.finishGarminGearSyncJob(ctx, jobID); err != nil {
 		s.logger.Error("manual garmin gear sync", "job_id", jobID, "error", err)
 	}
@@ -994,10 +1092,10 @@ func (s *Server) finishGarminGearSyncJob(ctx context.Context, jobID string) (map
 	}
 	payload, err := s.garmin.SyncGear(ctx, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), nil)
 		return nil, err
 	}
-	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+	if err := s.finishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
 		return nil, err
 	}
 	return payload, nil
@@ -1011,10 +1109,10 @@ func (s *Server) finishGarminHealthSyncJob(ctx context.Context, jobID string, op
 	}
 	payload, err := s.garmin.SyncHealth(ctx, opts, progress)
 	if err != nil {
-		_ = s.store.FinishSyncJob(ctx, jobID, "failed", err.Error(), nil)
+		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), nil)
 		return nil, err
 	}
-	if err := s.store.FinishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+	if err := s.finishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
 		return nil, err
 	}
 	return payload, nil

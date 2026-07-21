@@ -195,6 +195,9 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 	progress(map[string]any{"provider": garminProvider, "stage": "Listing Garmin activities", "activities": 0, "processed": 0, "imported": 0, "failed": 0, "oldest": oldest.Format("2006-01-02")})
 	activities, err := s.listActivitiesSince(ctx, oldest, progress)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, err
 	}
 
@@ -203,6 +206,9 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 	skippedExcluded := 0
 	firstErrors := make([]string, 0, 5)
 	for index, source := range activities {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		processed := index + 1
 		payload := map[string]any{
 			"provider":            garminProvider,
@@ -219,6 +225,9 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 
 		excluded, err := s.store.IsActivitySyncExcluded(ctx, garminProvider, source.ID)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, err
 		}
 		if excluded {
@@ -229,6 +238,9 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 
 		data, err := s.bridge.DownloadActivity(ctx, tokenStore, source.ID)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			failed++
 			firstErrors = appendGarminSyncError(firstErrors, source, err)
 			progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
@@ -236,6 +248,9 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		}
 		importedActivity, err := parseGarminActivityDownload(ctx, source.ID, data)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			failed++
 			firstErrors = appendGarminSyncError(firstErrors, source, err)
 			progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
@@ -245,9 +260,14 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		if len(importedActivity.Laps) > 0 && source.AvgGradeAdjustedSpeedMPS != nil {
 			if laps, err := s.bridge.ListActivitySplits(ctx, tokenStore, source.ID); err == nil {
 				applyGarminLapMetadata(&importedActivity, laps)
+			} else if ctx.Err() != nil {
+				return nil, ctx.Err()
 			}
 		}
 		if _, err := s.store.SaveImportedActivity(ctx, garminProvider, source.ID, nil, importedActivity); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if errors.Is(err, ErrActivitySyncExcluded) {
 				skippedExcluded++
 				progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "oldest": oldest.Format("2006-01-02")})
@@ -301,6 +321,9 @@ func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgres
 	warnings := make([]string, 0)
 	totalGear := len(response.Gear)
 	for index, source := range response.Gear {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		processed := index + 1
 		progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin gear", "gear": totalGear, "processed": index, "saved": saved, "assignments": assignments, "localAssignments": localAssignments, "currentGearName": source.Name, "warnings": warnings})
 
@@ -328,6 +351,9 @@ func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgres
 			StatsRaw:             source.StatsRaw,
 		})
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, err
 		}
 		saved++
@@ -335,6 +361,9 @@ func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgres
 		sourceActivityIDs, fetched, err := s.gearActivitySourceIDs(ctx, providerGearID)
 		assignments += fetched
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			warnings = appendGarminGearSyncWarning(warnings, source.Name, err)
 		} else {
 			assigned, err := s.store.ReplaceGearAssignmentsForGear(ctx, gear.ID, garminProvider, sourceActivityIDs)
@@ -363,6 +392,9 @@ func (s *GarminService) gearActivitySourceIDs(ctx context.Context, gearID string
 	sourceIDs := make([]string, 0)
 	fetched := 0
 	for start := 0; ; {
+		if err := ctx.Err(); err != nil {
+			return sourceIDs, fetched, err
+		}
 		page, err := s.bridge.ListGearActivities(ctx, s.tokenStore(ctx), gearID, start, garminGearActivityPageLimit)
 		if err != nil {
 			return sourceIDs, fetched, err
@@ -399,6 +431,9 @@ func (s *GarminService) listActivitiesSince(ctx context.Context, oldest time.Tim
 	out := make([]GarminBridgeActivity, 0)
 	tokenStore := s.tokenStore(ctx)
 	for start := 0; ; {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		page, err := s.bridge.ListActivities(ctx, tokenStore, start, garminActivityPageLimit)
 		if err != nil {
 			return nil, err
