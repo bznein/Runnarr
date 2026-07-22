@@ -1790,6 +1790,7 @@ textarea {
 
 .gear-card-header,
 .gear-distance-label {
+  min-width: 0;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1798,7 +1799,7 @@ textarea {
 
 .gear-card-header strong {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--color-heading);
   font-size: 17px;
   line-height: 1.2;
@@ -3299,6 +3300,12 @@ textarea {
   .filter-chip,
   .chart-toggle {
     min-height: 40px;
+  }
+}
+
+@media (max-width: 520px) {
+  .gear-grid {
+    grid-template-columns: 1fr;
   }
 }
 
