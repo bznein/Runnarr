@@ -3003,6 +3003,10 @@ textarea {
     width: 100%;
   }
 
+  .actions > .media-hidden-input {
+    width: 1px;
+  }
+
   .gear-sort-control,
   .gear-sort-control + .primary-button {
     grid-column: 1 / -1;
