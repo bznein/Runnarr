@@ -53,10 +53,11 @@ func (s *Store) CreateTrainingSheetWritebackJob(ctx context.Context, plannedID, 
 
 func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string) (*TrainingSheetWritebackStatus, error) {
 	status := &TrainingSheetWritebackStatus{}
-	var summaryWritten, feedbackWritten, lastAttempt, cancelRequestedAt sql.NullTime
+	var summaryWritten, intervalsWritten, feedbackWritten, lastAttempt, cancelRequestedAt sql.NullTime
 	var jobID, jobStatus sql.NullString
 	err := s.db.QueryRow(ctx, `
 		select planned_activity_id::text, activity_id::text, summary_status, summary_error, summary_written_at,
+			interval_status, interval_error, interval_written_at,
 			feedback_status, feedback_error, feedback_written_at, last_attempt_at,
 			writeback_job.id, writeback_job.status, writeback_job.cancel_requested_at
 		from training_sheet_writebacks
@@ -70,6 +71,7 @@ func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string)
 		) as writeback_job on true
 		where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $2)
 	`, plannedID, scopedUserID(ctx), trainingSheetProvider).Scan(&status.PlannedActivityID, &status.ActivityID, &status.SummaryStatus, &status.SummaryError, &summaryWritten,
+		&status.IntervalsStatus, &status.IntervalsError, &intervalsWritten,
 		&status.FeedbackStatus, &status.FeedbackError, &feedbackWritten, &lastAttempt, &jobID, &jobStatus, &cancelRequestedAt)
 	if err != nil {
 		return nil, err
@@ -86,6 +88,9 @@ func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string)
 	if summaryWritten.Valid {
 		status.SummaryWrittenAt = &summaryWritten.Time
 	}
+	if intervalsWritten.Valid {
+		status.IntervalsWrittenAt = &intervalsWritten.Time
+	}
 	if feedbackWritten.Valid {
 		status.FeedbackWrittenAt = &feedbackWritten.Time
 	}
@@ -98,6 +103,10 @@ func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string)
 func (s *Store) updateTrainingSheetWritebackSection(ctx context.Context, plannedID, section, status, message string) error {
 	if section == "summary" {
 		_, err := s.db.Exec(ctx, `update training_sheet_writebacks set summary_status = $2, summary_error = $3, summary_written_at = case when $2 = 'completed' then now() else summary_written_at end, updated_at = now() where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $4)`, plannedID, status, message, scopedUserID(ctx))
+		return err
+	}
+	if section == "intervals" {
+		_, err := s.db.Exec(ctx, `update training_sheet_writebacks set interval_status = $2, interval_error = $3, interval_written_at = case when $2 = 'completed' then now() else interval_written_at end, updated_at = now() where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $4)`, plannedID, status, message, scopedUserID(ctx))
 		return err
 	}
 	_, err := s.db.Exec(ctx, `update training_sheet_writebacks set feedback_status = $2, feedback_error = $3, feedback_written_at = case when $2 = 'completed' then now() else feedback_written_at end, updated_at = now() where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $4)`, plannedID, status, message, scopedUserID(ctx))
@@ -128,7 +137,7 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 		return nil, err
 	}
 
-	result := map[string]any{"plannedActivityId": plannedID, "activityId": activityID, "intervals": "not_implemented"}
+	result := map[string]any{"plannedActivityId": plannedID, "activityId": activityID, "intervalsStatus": "not_applicable"}
 	if ctx.Err() != nil {
 		return s.canceledWritebackResult(ctx, planned, result)
 	}
@@ -159,11 +168,42 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 		}
 		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "summary", summaryStatus, summaryErrorString(summaryError))
 		result["summaryStatus"] = summaryStatus
+
+		if ctx.Err() != nil {
+			return s.canceledWritebackResult(ctx, planned, result)
+		}
+		if err := s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "intervals", "running", ""); err != nil {
+			return nil, err
+		}
+		result["intervalsStatus"] = "running"
+		intervalsStatus, intervalsError := s.writeIntervals(ctx, planned, activity)
+		if ctx.Err() != nil {
+			return s.canceledWritebackResult(ctx, planned, result)
+		}
+		if intervalsError != nil && intervalsStatus == "failed" {
+			failures = append(failures, intervalsError.Error())
+		}
+		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "intervals", intervalsStatus, summaryErrorString(intervalsError))
+		result["intervalsStatus"] = intervalsStatus
 	} else {
 		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "summary", "failed", failures[0])
 		result["summaryStatus"] = "failed"
+		if workoutTableFromPlanned(planned) == nil {
+			_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "intervals", "not_applicable", "")
+			result["intervalsStatus"] = "not_applicable"
+		} else {
+			_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "intervals", "failed", failures[0])
+			result["intervalsStatus"] = "failed"
+		}
 	}
 
+	// Feedback can be entered immediately after matching, while this job is
+	// already writing the summary and interval table. Reload it here so the
+	// write-back uses the latest saved reflection rather than the snapshot
+	// taken when the job started.
+	if latestActivity, latestErr := s.store.GetActivity(ctx, activityID); latestErr == nil {
+		activity = latestActivity
+	}
 	feedbackCell := feedbackCellForPlanned(planned)
 	if ctx.Err() != nil {
 		return s.canceledWritebackResult(ctx, planned, result)
@@ -204,6 +244,10 @@ func (s *TrainingSheetWritebackService) canceledWritebackResult(ctx context.Cont
 		_ = s.store.updateTrainingSheetWritebackSection(persistCtx, planned.ID, "summary", "canceled", "Canceled by user")
 		result["summaryStatus"] = "canceled"
 	}
+	if status, _ := result["intervalsStatus"].(string); status == "running" {
+		_ = s.store.updateTrainingSheetWritebackSection(persistCtx, planned.ID, "intervals", "canceled", "Canceled by user")
+		result["intervalsStatus"] = "canceled"
+	}
 	feedbackCell := feedbackCellForPlanned(planned)
 	if feedbackCell == "" {
 		_ = s.store.updateTrainingSheetWritebackSection(persistCtx, planned.ID, "feedback", "not_applicable", "")
@@ -215,33 +259,29 @@ func (s *TrainingSheetWritebackService) canceledWritebackResult(ctx context.Cont
 	return result, context.Canceled
 }
 
+func (s *TrainingSheetWritebackService) writeIntervals(ctx context.Context, planned PlannedActivity, activity Activity) (string, error) {
+	table := workoutTableFromPlanned(planned)
+	if table == nil {
+		return "not_applicable", nil
+	}
+	updates, err := intervalUpdatesForPlannedActivity(planned, activity)
+	if err != nil {
+		return "skipped", err
+	}
+	heartColumns := map[string]bool{
+		table.Columns[trainingSheetMetricAvgHeart]: true,
+		table.Columns[trainingSheetMetricMaxHeart]: true,
+	}
+	return s.writeUpdatesPreservingExistingWith(ctx, planned.WorkbookID, updates, func(update googleValueRangeUpdate, existing [][][]string, index int) bool {
+		if !heartColumns[sheetRangeColumn(update.Range)] || index >= len(existing) {
+			return false
+		}
+		return rangeHasZeroClockValue(existing[index])
+	})
+}
+
 func (s *TrainingSheetWritebackService) writeSummary(ctx context.Context, planned PlannedActivity, activity Activity) (string, error) {
-	column := strings.TrimRight(planned.PlanCell, "0123456789")
-	updates := make([]googleValueRangeUpdate, 0, 6)
-	add := func(row string, value any) {
-		updates = append(updates, googleValueRangeUpdate{Range: sheetCellRange(planned.SheetTitle, column+row), Values: [][]any{{value}}})
-	}
-	add("3", math.Round(activity.DistanceM/10)/100)
-	duration := activity.MovingTimeS
-	if duration <= 0 {
-		duration = activity.ElapsedTimeS
-	}
-	if duration > 0 {
-		add("4", "'"+sheetDurationText(duration))
-	}
-	if activity.AvgPaceSPKM != nil {
-		add("5", "'"+sheetPaceText(*activity.AvgPaceSPKM))
-	}
-	if activity.AvgHeartRate != nil {
-		add("6", math.Round(*activity.AvgHeartRate))
-	}
-	if activity.MaxHeartRate != nil {
-		add("7", math.Round(*activity.MaxHeartRate))
-	}
-	if activity.RPE != nil {
-		add("8", *activity.RPE)
-	}
-	return s.writeUpdatesPreservingExisting(ctx, planned.WorkbookID, updates)
+	return s.writeUpdatesPreservingExisting(ctx, planned.WorkbookID, summaryUpdatesForActivity(planned, activity))
 }
 
 func sheetDurationText(totalSeconds int) string {
@@ -268,7 +308,10 @@ func (s *TrainingSheetWritebackService) writeFeedback(ctx context.Context, plann
 		return "not_applicable", nil
 	}
 	update := googleValueRangeUpdate{Range: sheetCellRange(planned.SheetTitle, cell), Values: [][]any{{strings.TrimSpace(activity.Feedback)}}}
-	return s.writeUpdatesPreservingExisting(ctx, planned.WorkbookID, []googleValueRangeUpdate{update})
+	if err := retryGoogle(ctx, func() error { return s.auth.WriteRanges(ctx, planned.WorkbookID, []googleValueRangeUpdate{update}) }); err != nil {
+		return "failed", err
+	}
+	return "completed", nil
 }
 
 func feedbackCellForPlanned(planned PlannedActivity) string {
@@ -319,6 +362,10 @@ func feedbackCellFromRaw(raw map[string]any, planCell string) string {
 }
 
 func (s *TrainingSheetWritebackService) writeUpdatesPreservingExisting(ctx context.Context, workbookID string, updates []googleValueRangeUpdate) (string, error) {
+	return s.writeUpdatesPreservingExistingWith(ctx, workbookID, updates, nil)
+}
+
+func (s *TrainingSheetWritebackService) writeUpdatesPreservingExistingWith(ctx context.Context, workbookID string, updates []googleValueRangeUpdate, replaceExisting func(googleValueRangeUpdate, [][][]string, int) bool) (string, error) {
 	if len(updates) == 0 {
 		return "completed", nil
 	}
@@ -334,7 +381,7 @@ func (s *TrainingSheetWritebackService) writeUpdatesPreservingExisting(ctx conte
 	writes := make([]googleValueRangeUpdate, 0, len(updates))
 	conflicts := make([]string, 0)
 	for index, update := range updates {
-		if index < len(existing) && rangeHasValue(existing[index]) {
+		if index < len(existing) && rangeHasValue(existing[index]) && (replaceExisting == nil || !replaceExisting(update, existing, index)) {
 			conflicts = append(conflicts, update.Range)
 			continue
 		}
@@ -366,6 +413,28 @@ func rangeHasValue(values [][]string) bool {
 		}
 	}
 	return false
+}
+
+func sheetRangeColumn(rangeName string) string {
+	cell := rangeName
+	if separator := strings.LastIndex(cell, "!"); separator >= 0 {
+		cell = cell[separator+1:]
+	}
+	return strings.ToUpper(strings.TrimRight(cell, "0123456789"))
+}
+
+func rangeHasZeroClockValue(values [][]string) bool {
+	if len(values) == 0 || len(values[0]) == 0 {
+		return false
+	}
+	for _, row := range values {
+		for _, value := range row {
+			if strings.TrimSpace(value) != "0:00" && strings.TrimSpace(value) != "0:00:00" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func retryGoogle(ctx context.Context, operation func() error) error {

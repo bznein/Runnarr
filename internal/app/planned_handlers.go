@@ -147,6 +147,89 @@ type plannedActivityMatchRequest struct {
 	PlannedActivityID string `json:"plannedActivityId"`
 }
 
+type plannedActivityMatchApplyRequest struct {
+	trainingSheetPreviewRequest
+	Fingerprint string `json:"fingerprint"`
+}
+
+func (s *Server) handlePlannedMatchPreview(w http.ResponseWriter, r *http.Request) {
+	var body trainingSheetPreviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.PlannedActivityID) == "" {
+		writeError(w, http.StatusBadRequest, "plannedActivityId is required")
+		return
+	}
+	preview, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).Preview(r.Context(), strings.TrimSpace(body.PlannedActivityID), chi.URLParam(r, "id"), body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity or planned activity not found")
+		return
+	}
+	if errors.Is(err, errPlannedMatchConflict) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, errPlannedMatchInvalid) || errors.Is(err, ErrInvalidActivityFeedback) || errors.Is(err, ErrInvalidActivityRPE) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"preview": preview})
+}
+
+func (s *Server) handleApplyPlannedMatchPreview(w http.ResponseWriter, r *http.Request) {
+	var body plannedActivityMatchApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.PlannedActivityID) == "" || strings.TrimSpace(body.Fingerprint) == "" {
+		writeError(w, http.StatusBadRequest, "plannedActivityId and fingerprint are required")
+		return
+	}
+	activityID := chi.URLParam(r, "id")
+	previewService := NewTrainingSheetWritebackService(s.store, s.googleAuth())
+	preview, err := previewService.Preview(r.Context(), strings.TrimSpace(body.PlannedActivityID), activityID, body.trainingSheetPreviewRequest)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity or planned activity not found")
+		return
+	}
+	if errors.Is(err, errPlannedMatchConflict) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, errPlannedMatchInvalid) || errors.Is(err, ErrInvalidActivityFeedback) || errors.Is(err, ErrInvalidActivityRPE) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if preview.Fingerprint != strings.TrimSpace(body.Fingerprint) {
+		writeError(w, http.StatusConflict, "the sheet changed since this preview; preview it again")
+		return
+	}
+
+	reflection := plannedActivityReflection{Feedback: body.Feedback, RPESet: body.RPESet, RPE: body.RPE}
+	planned, err := s.store.MatchPlannedActivityWithReflection(r.Context(), activityID, strings.TrimSpace(body.PlannedActivityID), reflection)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity or planned activity not found")
+		return
+	}
+	if errors.Is(err, errPlannedMatchConflict) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if errors.Is(err, errPlannedMatchInvalid) || errors.Is(err, ErrInvalidActivityFeedback) || errors.Is(err, ErrInvalidActivityRPE) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not apply planned activity match")
+		return
+	}
+	jobID := s.queueTrainingSheetWriteback(r.Context(), planned.ID, activityID)
+	writeJSON(w, http.StatusAccepted, map[string]any{"planned": planned, "writebackJobId": jobID, "status": "running"})
+}
+
 func (s *Server) handleMatchPlannedActivity(w http.ResponseWriter, r *http.Request) {
 	var body plannedActivityMatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.PlannedActivityID) == "" {
@@ -170,12 +253,7 @@ func (s *Server) handleMatchPlannedActivity(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "could not match planned activity")
 		return
 	}
-	jobID, enqueueErr := s.store.CreateTrainingSheetWritebackJob(r.Context(), planned.ID, chi.URLParam(r, "id"))
-	if enqueueErr != nil {
-		s.logger.Error("queue training sheet writeback", "activity_id", chi.URLParam(r, "id"), "planned_activity_id", planned.ID, "error", enqueueErr)
-	} else {
-		go s.runTrainingSheetWritebackJob(jobID, planned.ID, chi.URLParam(r, "id"))
-	}
+	jobID := s.queueTrainingSheetWriteback(r.Context(), planned.ID, chi.URLParam(r, "id"))
 	writeJSON(w, http.StatusOK, map[string]any{"planned": planned, "writebackJobId": jobID})
 }
 
@@ -424,4 +502,66 @@ func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID strin
 		return
 	}
 	_ = s.finishSyncJob(ctx, jobID, "completed", "", payload)
+}
+
+func (s *Server) queueTrainingSheetWriteback(ctx context.Context, plannedID, activityID string) string {
+	jobID, err := s.store.CreateTrainingSheetWritebackJob(ctx, plannedID, activityID)
+	if err == nil {
+		go s.runTrainingSheetWritebackJob(jobID, plannedID, activityID)
+		return jobID
+	}
+	if !errors.Is(err, ErrSyncJobAlreadyRunning) {
+		s.logger.Error("queue training sheet writeback", "activity_id", activityID, "planned_activity_id", plannedID, "error", err)
+		return ""
+	}
+
+	userID, userErr := userIDFromContext(ctx)
+	if userErr != nil {
+		s.logger.Error("queue deferred training sheet writeback", "activity_id", activityID, "planned_activity_id", plannedID, "error", userErr)
+		return ""
+	}
+	key := userID + ":" + plannedID
+	s.writebackRetryMu.Lock()
+	if s.writebackRetries == nil {
+		s.writebackRetries = make(map[string]struct{})
+	}
+	_, alreadyQueued := s.writebackRetries[key]
+	if !alreadyQueued {
+		s.writebackRetries[key] = struct{}{}
+	}
+	s.writebackRetryMu.Unlock()
+	if !alreadyQueued {
+		go s.retryTrainingSheetWriteback(userID, key, plannedID, activityID)
+	}
+	return ""
+}
+
+func (s *Server) retryTrainingSheetWriteback(userID, retryKey, plannedID, activityID string) {
+	defer func() {
+		s.writebackRetryMu.Lock()
+		delete(s.writebackRetries, retryKey)
+		s.writebackRetryMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(withUserID(context.Background(), userID), 30*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		jobID, err := s.store.CreateTrainingSheetWritebackJob(ctx, plannedID, activityID)
+		if err == nil {
+			go s.runTrainingSheetWritebackJob(jobID, plannedID, activityID)
+			return
+		}
+		if !errors.Is(err, ErrSyncJobAlreadyRunning) {
+			s.logger.Error("deferred training sheet writeback", "activity_id", activityID, "planned_activity_id", plannedID, "error", err)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			s.logger.Error("deferred training sheet writeback timed out", "activity_id", activityID, "planned_activity_id", plannedID)
+			return
+		case <-ticker.C:
+		}
+	}
 }

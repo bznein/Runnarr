@@ -26,8 +26,10 @@ import type {
   GearSummary,
   ImportFile,
   PlannedActivityMatchResponse,
+  TrainingSheetWritebackPreview,
   Session,
   SyncJob,
+  TrainingSheetPreviewCell,
   ToolsPaceResponse,
   ToolsVdotResponse,
   UserPreference
@@ -42,6 +44,7 @@ type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityAnalysisTab = "stats" | "intervals";
+type PlannedMatchDraft = { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean };
 type ActivityChartPoint = {
   index: number;
   label: string;
@@ -2312,18 +2315,29 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       if (!writeback) {
         return false;
       }
-      return writeback.jobStatus === "running" || writeback.summaryStatus === "running" || writeback.feedbackStatus === "running" ? 1500 : false;
+      return writeback.jobStatus === "running" || writeback.summaryStatus === "running" || writeback.intervalsStatus === "running" || writeback.feedbackStatus === "running" ? 1500 : false;
     }
   });
-  const matchPlannedActivity = useMutation({
-    mutationFn: (plannedActivityId: string) => api.matchPlannedActivity(id!, plannedActivityId),
+  const previewPlannedActivity = useMutation({
+    mutationFn: (draft: PlannedMatchDraft) => api.plannedMatchPreview(id!, draft),
+    onSuccess: ({ preview }) => {
+      setMatchPreview(preview);
+    }
+  });
+  const applyPlannedActivity = useMutation({
+    mutationFn: (draft: PlannedMatchDraft & { fingerprint: string }) => api.applyPlannedMatchPreview(id!, draft),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] }),
         queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["activity-calendar"] })
+        queryClient.invalidateQueries({ queryKey: ["activity-calendar"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity", id] })
       ]);
+      setMatchPreview(undefined);
       setMatchOpen(false);
+    },
+    onError: () => {
+      setMatchPreview(undefined);
     }
   });
   const unmatchPlannedActivity = useMutation({
@@ -2415,6 +2429,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [notesOpen, setNotesOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
   const [matchCandidateId, setMatchCandidateId] = useState<string>();
+  const [matchPreview, setMatchPreview] = useState<TrainingSheetWritebackPreview>();
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
@@ -2561,26 +2576,26 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     if (!nextCandidateId) {
       return;
     }
-    matchPlannedActivity.reset();
+    previewPlannedActivity.reset();
+    applyPlannedActivity.reset();
+    setMatchPreview(undefined);
     setMatchCandidateId(nextCandidateId);
     setMatchOpen(true);
   };
-  const handleConfirmMatch = ({
-    plannedActivityId,
-    feedback,
-    rpe
-  }: {
-    plannedActivityId: string;
-    feedback: string;
-    rpe: number | null;
-  }) => {
-    matchPlannedActivity.mutate(plannedActivityId, {
-      onSuccess: () => {
-        if (rpe !== null || feedback.trim()) {
-          updateActivityReflection.mutate({ feedback, rpe });
-        }
-      }
-    });
+  const handlePreviewMatch = (draft: PlannedMatchDraft) => {
+    applyPlannedActivity.reset();
+    previewPlannedActivity.mutate(draft);
+  };
+  const resetMatchPreview = () => {
+    setMatchPreview(undefined);
+    previewPlannedActivity.reset();
+    applyPlannedActivity.reset();
+  };
+  const handleApplyMatch = (draft: PlannedMatchDraft) => {
+    if (!matchPreview) {
+      return;
+    }
+    applyPlannedActivity.mutate({ ...draft, fingerprint: matchPreview.fingerprint });
   };
   const handleMediaFilesSelected = (files: File[]) => {
     if (files.length === 0 || uploadMedia.isPending) {
@@ -2720,10 +2735,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           data={plannedMatchCandidates.data}
           selectedCandidateId={matchCandidateId}
           canLoadMore={plannedMatchWindowDays === 7 && plannedMatchCandidates.data.hasMore}
-          matching={matchPlannedActivity.isPending || updateActivityReflection.isPending}
-          error={matchPlannedActivity.error ?? updateActivityReflection.error}
+          matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending}
+          error={previewPlannedActivity.error ?? applyPlannedActivity.error}
+          preview={matchPreview}
           onSelectCandidate={setMatchCandidateId}
-          onMatch={handleConfirmMatch}
+          onPreview={handlePreviewMatch}
+          onApply={handleApplyMatch}
+          onPreviewReset={resetMatchPreview}
           onLoadMore={() => setPlannedMatchWindowDays(30)}
           onClose={() => setMatchOpen(false)}
         />
@@ -2747,8 +2765,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       <PlannedActivityMatchPanel
         data={plannedMatchCandidates.data}
         loading={plannedMatchCandidates.isLoading}
-        error={plannedMatchCandidates.error ?? matchPlannedActivity.error ?? updateActivityReflection.error ?? unmatchPlannedActivity.error ?? retryWriteback.error}
-        matching={matchPlannedActivity.isPending || updateActivityReflection.isPending}
+        error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error ?? updateActivityReflection.error ?? unmatchPlannedActivity.error ?? retryWriteback.error}
+        matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending || updateActivityReflection.isPending}
         retrying={retryWriteback.isPending}
         feedbackAvailable={feedbackAvailable}
         canLoadMore={plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)}
@@ -3202,10 +3220,12 @@ function PlannedActivityMatchPanel({
                 <p className="muted">Sheet write-back</p>
                 <div>Summary: {writebackStatusLabel(data.writeback.summaryStatus)}</div>
                 {data.writeback.summaryError && <div className="muted">{data.writeback.summaryError}</div>}
+                <div>Structured intervals: {writebackStatusLabel(data.writeback.intervalsStatus)}</div>
+                {data.writeback.intervalsError && <div className="muted">{data.writeback.intervalsError}</div>}
                 <div>How it felt/go: {writebackStatusLabel(data.writeback.feedbackStatus)}</div>
                 {data.writeback.feedbackError && <div className="muted">{data.writeback.feedbackError}</div>}
                 {data.writeback.jobId && data.writeback.jobStatus === "running" && <SyncJobCancelButton job={{ id: data.writeback.jobId, status: data.writeback.jobStatus, cancelRequestedAt: data.writeback.cancelRequestedAt }} compact />}
-                {(data.writeback.summaryStatus === "failed" || data.writeback.summaryStatus === "canceled" || data.writeback.summaryStatus === "completed_with_conflicts" || data.writeback.feedbackStatus === "failed" || data.writeback.feedbackStatus === "canceled" || data.writeback.feedbackStatus === "completed_with_conflicts") && (
+                {(data.writeback.summaryStatus === "failed" || data.writeback.summaryStatus === "canceled" || data.writeback.summaryStatus === "completed_with_conflicts" || data.writeback.intervalsStatus === "failed" || data.writeback.intervalsStatus === "canceled" || data.writeback.intervalsStatus === "completed_with_conflicts" || data.writeback.feedbackStatus === "failed" || data.writeback.feedbackStatus === "canceled" || data.writeback.feedbackStatus === "completed_with_conflicts") && (
                   <button className="secondary-button small-button" type="button" disabled={retrying} onClick={onRetry}>
                     {retrying ? "Retrying..." : "Retry write-back"}
                   </button>
@@ -3262,8 +3282,11 @@ function PlannedActivityMatchDialog({
   canLoadMore,
   matching,
   error,
+  preview,
   onSelectCandidate,
-  onMatch,
+  onPreview,
+  onApply,
+  onPreviewReset,
   onLoadMore,
   onClose
 }: {
@@ -3272,8 +3295,11 @@ function PlannedActivityMatchDialog({
   canLoadMore: boolean;
   matching: boolean;
   error: unknown;
+  preview?: TrainingSheetWritebackPreview;
   onSelectCandidate: (plannedActivityId: string) => void;
-  onMatch: (input: { plannedActivityId: string; feedback: string; rpe: number | null }) => void;
+  onPreview: (input: PlannedMatchDraft) => void;
+  onApply: (input: PlannedMatchDraft) => void;
+  onPreviewReset: () => void;
   onLoadMore: () => void;
   onClose: () => void;
 }) {
@@ -3284,12 +3310,19 @@ function PlannedActivityMatchDialog({
   const valid = Array.from(trimmedFeedback).length <= 5000;
   const selectedCandidate = data.candidates.find((candidate) => candidate.id === selectedCandidateId);
   const feedbackAvailable = Boolean(selectedCandidate?.feedbackCell?.trim());
+  const draft = (): PlannedMatchDraft => ({
+    plannedActivityId: selectedCandidateId ?? "",
+    feedback: feedbackAvailable ? trimmedFeedback : undefined,
+    rpe: rpeTouched ? rpe : null,
+    rpeSet: rpeTouched
+  });
 
   useEffect(() => {
-    if (!feedbackAvailable) {
-      setFeedback("");
-    }
-  }, [feedbackAvailable]);
+    setFeedback("");
+    setRPE(5);
+    setRPETouched(false);
+    onPreviewReset();
+  }, [selectedCandidateId]);
 
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -3300,12 +3333,13 @@ function PlannedActivityMatchDialog({
         aria-labelledby="planned-match-title"
         onSubmit={(event) => {
           event.preventDefault();
-          if (selectedCandidateId && valid) {
-            onMatch({
-              plannedActivityId: selectedCandidateId,
-              feedback: feedbackAvailable ? trimmedFeedback : "",
-              rpe: rpeTouched ? rpe : null
-            });
+          if (!selectedCandidateId || !valid) {
+            return;
+          }
+          if (preview) {
+            onApply(draft());
+          } else {
+            onPreview(draft());
           }
         }}
       >
@@ -3318,7 +3352,7 @@ function PlannedActivityMatchDialog({
             <X size={16} />
           </button>
         </div>
-        <p className="muted">The first option is the date-based hint. Select another planned run if needed.</p>
+        <p className="muted">Review the sheet changes before matching and writing them back.</p>
         <div className="planned-match-candidates">
           {(data.candidates ?? []).map((candidate) => (
             <label className="planned-match-candidate" key={candidate.id}>
@@ -3356,13 +3390,14 @@ function PlannedActivityMatchDialog({
                 onChange={(event) => {
                   setRPE(Number(event.target.value));
                   setRPETouched(true);
+                  onPreviewReset();
                 }}
               />
             </label>
             {feedbackAvailable && (
               <label className="field">
                 <span>How did it feel/go?</span>
-                <textarea className="notes-textarea" maxLength={5000} rows={6} value={feedback} onChange={(event) => setFeedback(event.target.value)} />
+                <textarea className="notes-textarea" maxLength={5000} rows={6} value={feedback} onChange={(event) => { setFeedback(event.target.value); onPreviewReset(); }} />
               </label>
             )}
             {!feedbackAvailable && selectedCandidate && (
@@ -3374,20 +3409,172 @@ function PlannedActivityMatchDialog({
             )}
           </>
         )}
+        {preview && <TrainingSheetPreviewPanel preview={preview} />}
         {!valid && <div className="row-error">Feedback must be 5000 characters or fewer.</div>}
         {error instanceof Error && <div className="error">{error.message}</div>}
         <div className="dialog-actions">
           {canLoadMore && (
             <button className="secondary-button" type="button" disabled={matching} onClick={onLoadMore}>Load more plans</button>
           )}
+          {preview && (
+            <button className="secondary-button" type="button" disabled={matching} onClick={onPreviewReset}>Edit</button>
+          )}
           <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>
           <button className="primary-button" type="submit" disabled={matching || !selectedCandidateId || !valid}>
-            {matching ? "Matching..." : "Match planned run"}
+            {matching ? (preview ? "Applying..." : "Building preview...") : (preview ? "Apply match & write back" : "Preview changes")}
           </button>
         </div>
       </form>
     </div>
   );
+}
+
+function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebackPreview }) {
+  const [selectedRef, setSelectedRef] = useState<string>();
+  const grid = preview.grid;
+  const selectedCell = grid?.rows.flatMap((row) => row.cells).find((cell) => cell.ref === selectedRef);
+
+  useEffect(() => {
+    setSelectedRef(undefined);
+  }, [preview.fingerprint]);
+
+  return (
+    <section className="training-sheet-preview" aria-label="Training sheet preview">
+      <div className="training-sheet-preview-header">
+        <div>
+          <div className="panel-heading">Sheet preview</div>
+          <strong>{preview.sheetTitle}</strong>
+        </div>
+        {preview.sheetUrl && <a href={preview.sheetUrl} target="_blank" rel="noreferrer">Open sheet</a>}
+      </div>
+      <div className="muted">
+        {preview.writeCount} cell{preview.writeCount === 1 ? "" : "s"} will be written{preview.conflictCount > 0 ? ` · ${preview.conflictCount} existing value${preview.conflictCount === 1 ? "" : "s"} preserved` : ""}
+      </div>
+      <div className="training-sheet-preview-legend" aria-label="Preview legend">
+        <span><i className="training-sheet-preview-swatch write" /> Will write</span>
+        <span><i className="training-sheet-preview-swatch conflict" /> Existing value preserved</span>
+      </div>
+      {preview.warnings?.map((warning) => <div className="row-error" key={warning}>{warning}</div>)}
+      {grid?.rows.length ? (
+        <>
+          <div className="training-sheet-preview-grid-wrap">
+            <table className="training-sheet-grid">
+              <colgroup>
+                <col className="training-sheet-grid-row-number-column" />
+                {grid.columns.map((column) => <col key={column.label} style={column.widthPx ? { width: `${column.widthPx}px` } : undefined} />)}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="training-sheet-grid-corner" aria-label="Sheet corner" />
+                  {grid.columns.map((column) => <th key={column.label} scope="col">{column.label}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {grid.rows.map((row) => (
+                  <tr key={row.index} style={row.heightPx ? { height: `${row.heightPx}px` } : undefined}>
+                    <th className="training-sheet-grid-row-number" scope="row">{row.index}</th>
+                    {row.cells.map((cell) => {
+                      const selected = cell.ref === selectedRef;
+                      return (
+                        <td
+                          key={cell.ref}
+                          className={`training-sheet-grid-cell-container ${cell.status} ${selected ? "selected" : ""}`}
+                          rowSpan={cell.rowSpan}
+                          colSpan={cell.columnSpan}
+                        >
+                          <button
+                            className="training-sheet-grid-cell"
+                            type="button"
+                            style={trainingSheetCellInlineStyle(cell)}
+                            aria-label={trainingSheetCellAriaLabel(cell)}
+                            title={trainingSheetCellAriaLabel(cell)}
+                            onClick={() => setSelectedRef(cell.ref)}
+                          >
+                            {cell.displayValue || "\u00a0"}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {selectedCell && <TrainingSheetPreviewCellInspector cell={selectedCell} />}
+        </>
+      ) : (
+        <div className="muted">No sheet values are available to preview.</div>
+      )}
+    </section>
+  );
+}
+
+function TrainingSheetPreviewCellInspector({ cell }: { cell: TrainingSheetPreviewCell }) {
+  const changed = cell.status !== "unchanged";
+  return (
+    <div className="training-sheet-preview-inspector" aria-live="polite">
+      <div className="training-sheet-preview-inspector-heading">
+        <div>
+          <strong>{cell.ref}</strong>
+          {cell.label && <span>{cell.label}</span>}
+          {cell.section && <span className="muted">{cell.section}</span>}
+        </div>
+        <span className={`training-sheet-preview-status-badge ${cell.status}`}>{trainingSheetPreviewStatusLabel(cell.status)}</span>
+      </div>
+      <div className="training-sheet-preview-inspector-values">
+        <div><span>Current</span><strong>{cell.currentValue || "(blank)"}</strong></div>
+        {changed && <div><span>Proposed</span><strong>{cell.proposedValue || "(blank)"}</strong></div>}
+      </div>
+    </div>
+  );
+}
+
+function trainingSheetCellInlineStyle(cell: TrainingSheetPreviewCell): CSSProperties {
+  const style = cell.style;
+  return {
+    backgroundColor: cell.status === "unchanged" ? style?.backgroundColor : undefined,
+    color: style?.textColor,
+    fontWeight: style?.bold ? 700 : undefined,
+    fontStyle: style?.italic ? "italic" : undefined,
+    fontSize: style?.fontSize ? `${style.fontSize}px` : undefined,
+    textAlign: trainingSheetTextAlignment(style?.horizontalAlignment),
+    verticalAlign: trainingSheetVerticalAlignment(style?.verticalAlignment),
+    whiteSpace: style?.wrapStrategy === "CLIP" ? "nowrap" : "pre-wrap"
+  };
+}
+
+function trainingSheetTextAlignment(value?: string): CSSProperties["textAlign"] {
+  switch (value) {
+    case "LEFT": return "left";
+    case "CENTER": return "center";
+    case "RIGHT": return "right";
+    default: return undefined;
+  }
+}
+
+function trainingSheetVerticalAlignment(value?: string): CSSProperties["verticalAlign"] {
+  switch (value) {
+    case "TOP": return "top";
+    case "MIDDLE": return "middle";
+    case "BOTTOM": return "bottom";
+    default: return undefined;
+  }
+}
+
+function trainingSheetCellAriaLabel(cell: TrainingSheetPreviewCell) {
+  const current = cell.currentValue || "blank";
+  if (cell.status === "unchanged") {
+    return `${cell.ref}: ${current}`;
+  }
+  return `${cell.ref}: ${current} to ${cell.proposedValue || "blank"}; ${trainingSheetPreviewStatusLabel(cell.status)}`;
+}
+
+function trainingSheetPreviewStatusLabel(status: "write" | "conflict" | "unchanged") {
+  switch (status) {
+    case "write": return "will write";
+    case "conflict": return "existing value preserved";
+    case "unchanged": return "unchanged";
+  }
 }
 
 function writebackStatusLabel(status: string) {
@@ -3396,6 +3583,8 @@ function writebackStatusLabel(status: string) {
       return "written";
     case "completed_with_conflicts":
       return "existing values preserved";
+    case "skipped":
+      return "skipped; review needed";
     case "waiting_for_feedback":
       return "waiting for feedback";
     case "not_applicable":

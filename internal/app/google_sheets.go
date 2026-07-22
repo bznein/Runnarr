@@ -189,6 +189,76 @@ type googleValuesResponse struct {
 	} `json:"valueRanges"`
 }
 
+type googleSheetPreviewResponse struct {
+	Sheets []googleSheetPreviewResponseSheet `json:"sheets"`
+}
+
+type googleSheetPreviewResponseSheet struct {
+	Properties struct {
+		SheetID int    `json:"sheetId"`
+		Title   string `json:"title"`
+	} `json:"properties"`
+	Merges []googleGridRange `json:"merges"`
+	Data   []googleGridData  `json:"data"`
+}
+
+type googleGridRange struct {
+	StartRowIndex    int `json:"startRowIndex"`
+	EndRowIndex      int `json:"endRowIndex"`
+	StartColumnIndex int `json:"startColumnIndex"`
+	EndColumnIndex   int `json:"endColumnIndex"`
+}
+
+type googleGridData struct {
+	StartRow       int                   `json:"startRow"`
+	StartColumn    int                   `json:"startColumn"`
+	RowData        []googleRowData       `json:"rowData"`
+	RowMetadata    []googleDimensionData `json:"rowMetadata"`
+	ColumnMetadata []googleDimensionData `json:"columnMetadata"`
+}
+
+type googleRowData struct {
+	Values []googleGridCell `json:"values"`
+}
+
+type googleDimensionData struct {
+	PixelSize int  `json:"pixelSize"`
+	Hidden    bool `json:"hidden"`
+}
+
+type googleGridCell struct {
+	FormattedValue  string           `json:"formattedValue"`
+	EffectiveFormat googleCellFormat `json:"effectiveFormat"`
+}
+
+type googleCellFormat struct {
+	BackgroundColor      *googleColor      `json:"backgroundColor"`
+	BackgroundColorStyle *googleColorStyle `json:"backgroundColorStyle"`
+	TextFormat           googleTextFormat  `json:"textFormat"`
+	HorizontalAlignment  string            `json:"horizontalAlignment"`
+	VerticalAlignment    string            `json:"verticalAlignment"`
+	WrapStrategy         string            `json:"wrapStrategy"`
+}
+
+type googleTextFormat struct {
+	ForegroundColor      *googleColor      `json:"foregroundColor"`
+	ForegroundColorStyle *googleColorStyle `json:"foregroundColorStyle"`
+	Bold                 bool              `json:"bold"`
+	Italic               bool              `json:"italic"`
+	FontSize             float64           `json:"fontSize"`
+}
+
+type googleColorStyle struct {
+	RGBColor *googleColor `json:"rgbColor"`
+}
+
+type googleColor struct {
+	Red   float64 `json:"red"`
+	Green float64 `json:"green"`
+	Blue  float64 `json:"blue"`
+	Alpha float64 `json:"alpha"`
+}
+
 type googleValueRangeUpdate struct {
 	Range  string  `json:"range"`
 	Values [][]any `json:"values"`
@@ -264,6 +334,28 @@ func (s *GoogleSheetsAuthService) ReadRanges(ctx context.Context, sheetID string
 		result[index] = values.ValueRanges[index].Values
 	}
 	return result, nil
+}
+
+func (s *GoogleSheetsAuthService) ReadPreviewGrid(ctx context.Context, sheetID, sheetTitle, rangeName string) (googleSheetPreviewResponseSheet, error) {
+	accessToken, err := s.AccessToken(ctx)
+	if err != nil {
+		return googleSheetPreviewResponseSheet{}, err
+	}
+	query := url.Values{}
+	query.Set("includeGridData", "true")
+	query.Add("ranges", rangeName)
+	query.Set("fields", "sheets(properties(sheetId,title),merges(startRowIndex,endRowIndex,startColumnIndex,endColumnIndex),data(startRow,startColumn,rowData(values(formattedValue,effectiveFormat(backgroundColor,backgroundColorStyle,textFormat(foregroundColor,foregroundColorStyle,bold,italic,fontSize),horizontalAlignment,verticalAlignment,wrapStrategy))),rowMetadata(pixelSize,hidden),columnMetadata(pixelSize,hidden)))")
+	endpoint := fmt.Sprintf("https://sheets.googleapis.com/v4/spreadsheets/%s?%s", url.PathEscape(sheetID), query.Encode())
+	response, err := googleGET[googleSheetPreviewResponse](ctx, s.client, endpoint, accessToken)
+	if err != nil {
+		return googleSheetPreviewResponseSheet{}, fmt.Errorf("read sheet preview grid: %w", err)
+	}
+	for _, sheet := range response.Sheets {
+		if sheet.Properties.Title == sheetTitle {
+			return sheet, nil
+		}
+	}
+	return googleSheetPreviewResponseSheet{}, fmt.Errorf("sheet %q was not found", sheetTitle)
 }
 
 func (s *GoogleSheetsAuthService) WriteRanges(ctx context.Context, sheetID string, updates []googleValueRangeUpdate) error {

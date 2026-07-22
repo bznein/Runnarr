@@ -84,6 +84,7 @@ The default deployment still works for one person, but local account management 
 - Re-running sync must update existing Garmin activities by Garmin activity ID and add newly discovered activities without creating duplicates.
 - Garmin original activity downloads should be parsed from FIT where available, including session-level elevation gain and lap data.
 - The provider settings UI should make clear that importing requires connecting Garmin first, then triggering sync.
+- Matched training-sheet activities should write structured workout table rows back to Google Sheets when Garmin workout metadata is available, including exact repetitions, weighted aggregate rows, and fastest/slowest repetitions; ambiguous mappings must preserve existing cells and report a warning.
 
 ### Garmin Health Metrics
 
@@ -297,3 +298,6 @@ All top-level user-owned records carry a non-null owner reference after bootstra
 - The admin can manually sync Garmin gear, see active and retired gear on the Gear page, and inspect assigned local activities for each gear item.
 - The admin can see whether provider sync is running, completed, or failed, including the latest result and error details.
 - Duplicate imports do not create duplicate activities.
+- Matched structured workouts populate the corresponding training-sheet interval table without overwriting existing values, while activities without sufficient structured metadata leave the table unchanged and expose a reviewable warning.
+- Before matching a Garmin activity to a planned training-sheet run, the user can preview summary, interval, and feedback cell changes, review preserved conflicts, and explicitly apply the match and writeback after live-sheet revalidation.
+- The training-sheet preview presents the matched day and workout section in a spreadsheet-like live grid, highlighting writable cells and preserved conflicts in their sheet positions with current/proposed cell details.

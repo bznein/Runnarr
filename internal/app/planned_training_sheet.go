@@ -158,6 +158,9 @@ func plannedActivitiesFromTab(workbookID string, tab googleSheetTab, weekEnd tim
 		notes := strings.TrimSpace(strings.Join(details[day], "\n\n"))
 		feedbackCell := feedbackCells[day]
 		raw := map[string]any{"sheetTitle": tab.Title, "sheetId": tab.ID, "weekEnding": weekEnd.Format("2006-01-02"), "planCell": cell, "planName": name, "notes": notes, "feedbackCell": feedbackCell, "values": tab.Values}
+		if table := workoutTableForDay(tab.Values, day); table != nil {
+			raw["workoutTable"] = table
+		}
 		activities = append(activities, PlannedActivity{Source: trainingSheetProvider, SourceID: fmt.Sprintf("%s:%s:%s", workbookID, tab.ID, cell), WorkbookID: workbookID, SheetID: tab.ID, SheetTitle: tab.Title, PlanCell: cell, FeedbackCell: feedbackCell, PlannedDate: plannedDate, Name: name, SportType: "Run", Notes: notes, Status: "pending", SourceURL: fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/edit#gid=%s", workbookID, tab.ID), Raw: raw})
 	}
 	return activities

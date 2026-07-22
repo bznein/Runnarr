@@ -32,17 +32,19 @@ const (
 )
 
 type Server struct {
-	cfg           Config
-	store         *Store
-	imports       *ImportService
-	garmin        *GarminService
-	media         *MediaService
-	logger        *slog.Logger
-	syncCancelsMu sync.Mutex
-	syncCancels   map[string]context.CancelFunc
-	oidcMu        sync.Mutex
-	oidc          *oidcClient
-	loginLimiter  *loginRateLimiter
+	cfg              Config
+	store            *Store
+	imports          *ImportService
+	garmin           *GarminService
+	media            *MediaService
+	logger           *slog.Logger
+	syncCancelsMu    sync.Mutex
+	syncCancels      map[string]context.CancelFunc
+	writebackRetryMu sync.Mutex
+	writebackRetries map[string]struct{}
+	oidcMu           sync.Mutex
+	oidc             *oidcClient
+	loginLimiter     *loginRateLimiter
 }
 
 func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
@@ -65,14 +67,15 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 	garmin := NewGarminService(cfg, store)
 	garmin.legacyUserID = adminUser.ID
 	return &Server{
-		cfg:          cfg,
-		store:        store,
-		imports:      NewImportService(store),
-		garmin:       garmin,
-		media:        NewMediaService(cfg, store),
-		logger:       logger,
-		syncCancels:  make(map[string]context.CancelFunc),
-		loginLimiter: newLoginRateLimiter(),
+		cfg:              cfg,
+		store:            store,
+		imports:          NewImportService(store),
+		garmin:           garmin,
+		media:            NewMediaService(cfg, store),
+		logger:           logger,
+		syncCancels:      make(map[string]context.CancelFunc),
+		writebackRetries: make(map[string]struct{}),
+		loginLimiter:     newLoginRateLimiter(),
 	}, nil
 }
 
@@ -116,6 +119,8 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/activities/{id}/climbs-preview", s.handleActivityClimbsPreview)
 			r.Get("/activities/{id}", s.handleGetActivity)
 			r.Get("/activities/{id}/planned-match-candidates", s.handlePlannedMatchCandidates)
+			r.Post("/activities/{id}/planned-match-preview", s.handlePlannedMatchPreview)
+			r.Post("/activities/{id}/planned-match-apply", s.handleApplyPlannedMatchPreview)
 			r.Post("/activities/{id}/planned-match", s.handleMatchPlannedActivity)
 			r.Post("/activities/{id}/planned-writeback", s.handleTrainingSheetWriteback)
 			r.Delete("/activities/{id}/planned-match", s.handleUnmatchPlannedActivity)
@@ -630,12 +635,7 @@ func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Feedback != nil || rpeSet {
 		if planned, matchErr := s.store.GetMatchedPlannedActivity(r.Context(), id); matchErr == nil {
-			jobID, queueErr := s.store.CreateTrainingSheetWritebackJob(r.Context(), planned.ID, id)
-			if queueErr != nil {
-				s.logger.Error("queue training sheet feedback writeback", "activity_id", id, "error", queueErr)
-			} else {
-				go s.runTrainingSheetWritebackJob(jobID, planned.ID, id)
-			}
+			s.queueTrainingSheetWriteback(r.Context(), planned.ID, id)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})

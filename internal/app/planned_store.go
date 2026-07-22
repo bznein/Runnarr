@@ -248,13 +248,39 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	return response, nil
 }
 
+type plannedActivityReflection struct {
+	Feedback *string
+	RPESet   bool
+	RPE      *int
+}
+
 func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedActivityID string) (PlannedActivity, error) {
+	return s.matchPlannedActivity(ctx, activityID, plannedActivityID, nil)
+}
+
+func (s *Store) MatchPlannedActivityWithReflection(ctx context.Context, activityID, plannedActivityID string, reflection plannedActivityReflection) (PlannedActivity, error) {
+	return s.matchPlannedActivity(ctx, activityID, plannedActivityID, &reflection)
+}
+
+func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedActivityID string, reflection *plannedActivityReflection) (PlannedActivity, error) {
+	feedback := ""
+	if reflection != nil && reflection.Feedback != nil {
+		var err error
+		feedback, err = localActivityFeedbackValue(*reflection.Feedback)
+		if err != nil {
+			return PlannedActivity{}, err
+		}
+	}
+	if reflection != nil && reflection.RPESet && reflection.RPE != nil && (*reflection.RPE < 1 || *reflection.RPE > 10) {
+		return PlannedActivity{}, ErrInvalidActivityRPE
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return PlannedActivity{}, err
 	}
+	committed := false
 	defer func() {
-		if err != nil {
+		if !committed {
 			_ = tx.Rollback(ctx)
 		}
 	}()
@@ -272,8 +298,24 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 	if err = scanPlannedActivity(tx.QueryRow(ctx, `select `+plannedActivityColumns+` from planned_activities where id = $1 and user_id = $2 for update`, plannedActivityID, scopedUserID(ctx)), &planned); err != nil {
 		return PlannedActivity{}, err
 	}
+	updateReflection := func() error {
+		if reflection == nil || (reflection.Feedback == nil && !reflection.RPESet) {
+			return nil
+		}
+		_, updateErr := tx.Exec(ctx, `
+			update activities
+			set local_feedback = case when $2 then $3 else local_feedback end,
+				rpe = case when $4 then $5 else rpe end,
+				updated_at = now()
+			where id = $1 and user_id = $6
+		`, activityID, reflection.Feedback != nil, feedback, reflection.RPESet, reflection.RPE, scopedUserID(ctx))
+		return updateErr
+	}
 	if planned.MatchedActivityID != "" {
 		if planned.MatchedActivityID == activityID {
+			if err = updateReflection(); err != nil {
+				return PlannedActivity{}, err
+			}
 			if _, err = tx.Exec(ctx, `
 				insert into training_sheet_writebacks(planned_activity_id, activity_id)
 				values($1, $2)
@@ -284,12 +326,16 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 			if err = tx.Commit(ctx); err != nil {
 				return PlannedActivity{}, err
 			}
+			committed = true
 			return planned, nil
 		}
 		return PlannedActivity{}, errPlannedMatchConflict
 	}
 	if planned.Status != "pending" {
 		return PlannedActivity{}, errPlannedMatchConflict
+	}
+	if err = updateReflection(); err != nil {
+		return PlannedActivity{}, err
 	}
 	matchedAt := time.Now().UTC()
 	if _, err = tx.Exec(ctx, `
@@ -312,6 +358,7 @@ func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedAct
 	if err = tx.Commit(ctx); err != nil {
 		return PlannedActivity{}, err
 	}
+	committed = true
 	return planned, nil
 }
 

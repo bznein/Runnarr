@@ -1199,6 +1199,235 @@ textarea {
   text-transform: uppercase;
 }
 
+.training-sheet-preview {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-muted);
+}
+
+.training-sheet-preview-header,
+.training-sheet-preview-change,
+.training-sheet-preview-values {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.training-sheet-preview-header,
+.training-sheet-preview-change {
+  justify-content: space-between;
+}
+
+.training-sheet-preview-header > div,
+.training-sheet-preview-change > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.training-sheet-preview-header a {
+  font-size: 12px;
+}
+
+.training-sheet-preview-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  color: var(--color-muted-strong);
+  font-size: 11px;
+}
+
+.training-sheet-preview-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.training-sheet-preview-swatch {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 2px;
+}
+
+.training-sheet-preview-swatch.write {
+  border-color: var(--color-primary);
+  background: var(--color-success-soft);
+}
+
+.training-sheet-preview-swatch.conflict {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.training-sheet-preview-grid-wrap {
+  max-height: min(54vh, 520px);
+  overflow: auto;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.training-sheet-grid {
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: var(--color-text);
+  font-size: 11px;
+}
+
+.training-sheet-grid th,
+.training-sheet-grid td {
+  border-right: 1px solid var(--color-border-control);
+  border-bottom: 1px solid var(--color-border-control);
+}
+
+.training-sheet-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-width: 72px;
+  height: 26px;
+  padding: 4px 6px;
+  color: var(--color-muted-strong);
+  background: var(--color-surface-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.training-sheet-grid .training-sheet-grid-corner,
+.training-sheet-grid .training-sheet-grid-row-number {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 38px;
+  min-width: 38px;
+  color: var(--color-muted);
+  background: var(--color-surface-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.training-sheet-grid .training-sheet-grid-corner {
+  z-index: 4;
+}
+
+.training-sheet-grid-row-number {
+  padding: 0 4px;
+}
+
+.training-sheet-grid-cell-container {
+  min-width: 72px;
+  padding: 0;
+  background: var(--color-surface);
+  vertical-align: top;
+}
+
+.training-sheet-grid-cell-container.write {
+  background: var(--color-success-soft);
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+}
+
+.training-sheet-grid-cell-container.conflict {
+  background: var(--color-warning-soft);
+  box-shadow: inset 0 0 0 2px var(--color-warning);
+}
+
+.training-sheet-grid-cell-container.selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.training-sheet-grid-cell {
+  display: block;
+  width: 100%;
+  min-height: 27px;
+  padding: 5px 6px;
+  overflow-wrap: anywhere;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+
+.training-sheet-grid-cell:hover,
+.training-sheet-grid-cell:focus-visible {
+  background: var(--color-primary-soft);
+  outline: none;
+}
+
+.training-sheet-preview-inspector {
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-size: 12px;
+}
+
+.training-sheet-preview-inspector-heading,
+.training-sheet-preview-inspector-values {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.training-sheet-preview-inspector-heading > div,
+.training-sheet-preview-inspector-values > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  min-width: 0;
+}
+
+.training-sheet-preview-inspector-heading span,
+.training-sheet-preview-inspector-values span {
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.training-sheet-preview-inspector-values > div {
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface-muted);
+}
+
+.training-sheet-preview-status-badge {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: var(--color-muted-strong);
+  background: var(--color-surface-muted);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.training-sheet-preview-status-badge.write {
+  color: var(--color-primary-strong);
+  background: var(--color-success-soft);
+}
+
+.training-sheet-preview-status-badge.conflict {
+  color: var(--color-warning-strong);
+  background: var(--color-warning-soft);
+}
+
 .notes-textarea {
   width: 100%;
   min-height: 180px;
