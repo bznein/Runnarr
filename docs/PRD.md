@@ -13,6 +13,8 @@ The first release is intentionally not a full training science platform. It shou
 - Import local activity files with an extensible parser architecture.
 - Store activities in a canonical schema that is independent from Garmin or any one file format.
 - Render a useful activity dashboard, activity list, detail view, route map, and basic charts.
+- Make the web client responsive and installable as a PWA for the primary self-hosted deployment.
+- Keep domain calculations, filtering, aggregation, and derived activity/health series authoritative in the backend so clients focus on querying and rendering.
 - Establish a durable architecture for future providers, import formats, races, analytics, and trusted local multi-user support.
 
 ## 3. Non-Goals for V1
@@ -21,7 +23,6 @@ The first release is intentionally not a full training science platform. It shou
 - Writing activities back to Garmin or other providers.
 - Deep physiological analytics, training load modeling, interval detection, structured workouts, or coach workflows.
 - Public signup, email recovery, and hosted multi-tenant administration.
-- Native mobile apps.
 - Self-hosted map tile server.
 
 ## 4. Target User
@@ -38,6 +39,13 @@ The default deployment still works for one person, but local account management 
 - Configuration must be environment driven.
 - The app must expose one HTTP port and serve both API and frontend.
 - Database migrations must run automatically at startup.
+- The web frontend must remain usable at 320px wide and support installable PWA contexts.
+
+### Client Architecture
+
+- Backend APIs are the source of truth for filtering, sorting, aggregation, domain calculations, derived activity/health series, permissions, and sync state.
+- The web client should keep business logic thin and focus on request state, interaction state, accessibility, responsive layout, and rendering.
+- Activity chart and route payloads must be bounded or server-sampled so browser clients do not receive unbounded raw samples for normal inspection.
 
 ### Authentication and Privacy
 
@@ -172,6 +180,8 @@ The default deployment still works for one person, but local account management 
 - Each user should be able to override the automatic theme preference and persist that choice per account.
 - Maps and charts should favor inspection and accuracy over decorative presentation.
 - Empty states should explain what action unlocks the page without over-explaining the product.
+- Chrome on the Google Pixel 8 Pro is the primary mobile design and acceptance profile, but layouts must use adaptive breakpoints and remain usable on smaller phones, tablets, and desktop browsers.
+- Mobile navigation should prioritize Dashboard, Activities, Calendar, and Health, with secondary tools and administration behind a secondary menu.
 
 ## 7. Canonical Data Model
 

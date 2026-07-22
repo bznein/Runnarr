@@ -115,6 +115,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/tools/vdot", s.handleToolsVDOT)
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
+			r.Get("/activities/{id}/series", s.handleActivitySeries)
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
 			r.Post("/activities/{id}/climbs-preview", s.handleActivityClimbsPreview)
 			r.Get("/activities/{id}", s.handleGetActivity)
@@ -429,7 +430,34 @@ func (s *Server) handleGetActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activity.Media = media
+	// Raw samples are intentionally served by the bounded series endpoint.
+	// Server-side exports and analysis still use the complete activity model.
+	activity.Samples = nil
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})
+}
+
+func (s *Server) handleActivitySeries(w http.ResponseWriter, r *http.Request) {
+	activity, err := s.store.GetActivity(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("get activity series", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not get activity series")
+		return
+	}
+
+	maxPoints := 0
+	if raw := r.URL.Query().Get("maxPoints"); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "maxPoints must be an integer")
+			return
+		}
+		maxPoints = parsed
+	}
+	writeJSON(w, http.StatusOK, boundedActivitySeries(activity.Samples, maxPoints))
 }
 
 func (s *Server) handleExportActivityGPX(w http.ResponseWriter, r *http.Request) {
@@ -681,7 +709,12 @@ func (s *Server) handleDailyHealthMetrics(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "could not load health metrics")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"metrics": metrics})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"from":    from.Format("2006-01-02"),
+		"to":      to.Format("2006-01-02"),
+		"metrics": metrics,
+		"chart":   healthChartPoints(metrics),
+	})
 }
 
 func (s *Server) handleListGears(w http.ResponseWriter, r *http.Request) {
@@ -1246,9 +1279,29 @@ func healthRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	from, to, err = garminHealthSyncRange(GarminHealthSyncOptions{From: from, To: to}, time.Now().UTC())
-	if err != nil {
-		return time.Time{}, time.Time{}, err
+	return healthDisplayRange(from, to, time.Now().UTC())
+}
+
+func healthDisplayRange(from, to, now time.Time) (time.Time, time.Time, error) {
+	now = dateOnly(now)
+	if to.IsZero() {
+		to = now
+	} else {
+		to = dateOnly(to)
+	}
+	if from.IsZero() {
+		from = to.AddDate(0, 0, -(healthDisplayDefaultDays - 1))
+	} else {
+		from = dateOnly(from)
+	}
+	if from.After(to) {
+		return time.Time{}, time.Time{}, errors.New("from must be before or equal to to")
+	}
+	if to.After(now) {
+		return time.Time{}, time.Time{}, errors.New("to cannot be in the future")
+	}
+	if daysInclusive(from, to) > garminHealthMaxRangeDays {
+		return time.Time{}, time.Time{}, fmt.Errorf("health range cannot exceed %d days", garminHealthMaxRangeDays)
 	}
 	return from, to, nil
 }
@@ -1305,6 +1358,18 @@ func activityFiltersFromQuery(r *http.Request) ActivityFilters {
 		DateTo:             parseActivityFilterDate(values.Get("dateTo")),
 		SortBy:             strings.TrimSpace(values.Get("sortBy")),
 		SortOrder:          strings.TrimSpace(values.Get("sortOrder")),
+		SummaryPeriod:      normalizeSummaryPeriod(values.Get("period")),
+	}
+}
+
+func normalizeSummaryPeriod(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "monthly", "month":
+		return "monthly"
+	case "yearly", "year":
+		return "yearly"
+	default:
+		return "weekly"
 	}
 }
 
@@ -1466,6 +1531,14 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		switch filepath.Base(path) {
+		case "manifest.webmanifest":
+			w.Header().Set("Content-Type", "application/manifest+json")
+			w.Header().Set("Cache-Control", "no-store")
+		case "sw.js":
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		http.ServeFile(w, r, path)
 		return
 	}

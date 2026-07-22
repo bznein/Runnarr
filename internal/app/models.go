@@ -89,6 +89,30 @@ type ActivityListPage struct {
 	HasMore    bool       `json:"hasMore"`
 }
 
+// ActivitySeries is the bounded display representation of an activity's
+// samples. Full samples remain available to server-side exports and analysis,
+// but clients should use this response for charts and maps.
+type ActivitySeries struct {
+	Samples      []ActivitySample      `json:"samples"`
+	Points       []ActivitySeriesPoint `json:"points"`
+	TotalSamples int                   `json:"totalSamples"`
+	Sampled      bool                  `json:"sampled"`
+}
+
+type ActivitySeriesPoint struct {
+	Index       int      `json:"index"`
+	Label       string   `json:"label"`
+	DistanceM   *float64 `json:"distanceM,omitempty"`
+	Latitude    *float64 `json:"latitude,omitempty"`
+	Longitude   *float64 `json:"longitude,omitempty"`
+	ElevationM  *float64 `json:"elevationM,omitempty"`
+	HeartRate   *int     `json:"heartRate,omitempty"`
+	PaceSPKM    *float64 `json:"paceSPKM,omitempty"`
+	RawPaceSPKM *float64 `json:"rawPaceSPKM,omitempty"`
+	Power       *int     `json:"power,omitempty"`
+	Cadence     *int     `json:"cadence,omitempty"`
+}
+
 type DeleteActivityMediaResult struct {
 	Deleted bool `json:"deleted"`
 }
@@ -284,6 +308,7 @@ type ActivityFilters struct {
 	DateTo               time.Time
 	SortBy               string
 	SortOrder            string
+	SummaryPeriod        string
 	IncludeTrainingSheet bool
 }
 
@@ -381,13 +406,37 @@ type DailyHealthMetric struct {
 	UpdatedAt           time.Time      `json:"updatedAt,omitempty"`
 }
 
+type HealthChartPoint struct {
+	Date                   string   `json:"date"`
+	Steps                  *float64 `json:"steps,omitempty"`
+	TotalCalories          *float64 `json:"totalCalories,omitempty"`
+	ActiveCalories         *float64 `json:"activeCalories,omitempty"`
+	RemainingCalories      *float64 `json:"remainingCalories,omitempty"`
+	SleepHours             *float64 `json:"sleepHours,omitempty"`
+	RestingHeartRate       *float64 `json:"restingHeartRate,omitempty"`
+	Stress                 *float64 `json:"stress,omitempty"`
+	BodyBatteryGained      *float64 `json:"bodyBatteryGained,omitempty"`
+	BodyBatteryDrained     *float64 `json:"bodyBatteryDrained,omitempty"`
+	BodyBatteryDrainedLoss *float64 `json:"bodyBatteryDrainedLoss,omitempty"`
+	BodyBatteryHighest     *float64 `json:"bodyBatteryHighest,omitempty"`
+	HRV                    *float64 `json:"hrv,omitempty"`
+	Weight                 *float64 `json:"weight,omitempty"`
+}
+
 type SummaryStats struct {
-	ActivityCount  int            `json:"activityCount"`
-	DistanceM      float64        `json:"distanceM"`
-	MovingTimeS    int            `json:"movingTimeS"`
-	ElevationGainM float64        `json:"elevationGainM"`
-	Recent         []Activity     `json:"recent"`
-	WeeklyDistance []WeeklyBucket `json:"weeklyDistance"`
+	ActivityCount   int             `json:"activityCount"`
+	DistanceM       float64         `json:"distanceM"`
+	MovingTimeS     int             `json:"movingTimeS"`
+	ElevationGainM  float64         `json:"elevationGainM"`
+	Recent          []Activity      `json:"recent"`
+	WeeklyDistance  []WeeklyBucket  `json:"weeklyDistance"`
+	DistanceBuckets []SummaryBucket `json:"distanceBuckets"`
+	SummaryPeriod   string          `json:"summaryPeriod"`
+}
+
+type SummaryBucket struct {
+	Start     time.Time `json:"start"`
+	DistanceM float64   `json:"distanceM"`
 }
 
 type WeeklyBucket struct {
