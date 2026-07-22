@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,9 +13,11 @@ import type { PaceDisplayScale } from "./paceDisplay";
 import type {
   Activity,
   ActivityClimb,
+  ActivityInterval,
   ActivityLap,
   ActivityMedia,
   ActivitySample,
+  ActivityWorkoutStep,
   ActivitySortBy,
   ActivityTypeFilters as ActivityTypeFiltersValue,
   AppConfig,
@@ -39,6 +41,7 @@ type GearSortBy = "first_used" | "last_used" | "activity_count" | "distance" | "
 type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
+type ActivityAnalysisTab = "stats" | "intervals";
 type ActivityChartPoint = {
   index: number;
   label: string;
@@ -2416,6 +2419,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
+  const [analysisTab, setAnalysisTab] = useState<ActivityAnalysisTab>("stats");
   const [climbSensitivityDraft, setClimbSensitivityDraft] = useState(defaultClimbSensitivity);
   const [climbSensitivityPreview, setClimbSensitivityPreview] = useState(defaultClimbSensitivity);
   const routeUsesGap = (activity.data?.activity.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
@@ -2462,6 +2466,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setPlannedMatchWindowDays(7);
     setExportOpen(false);
     setSelectedMediaId(undefined);
+    setAnalysisTab("stats");
     updateActivityNotes.reset();
     uploadMedia.reset();
     setMediaFileInputKey((key) => key + 1);
@@ -2522,8 +2527,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
   const climbMapSegments = climbMapSegmentsFor(confirmedItem, finalClimbs);
   const selectedClimbProfile = climbProfileFor(confirmedItem, selectedClimb);
-  const showLapElevation = (confirmedItem.laps ?? []).some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
-  const showLapGap = (confirmedItem.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
   const isClimbSensitivitySaved = climbSensitivity === configuredClimbSensitivity;
   const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
   const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
@@ -2831,41 +2834,304 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         onSelect={handleSelectClimb}
       />
 
-      <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
-
-      {item.laps && item.laps.length > 0 && (
-        <section className="panel">
-          <div className="panel-heading">Laps</div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Lap</th>
-                <th>Distance</th>
-                <th>Time</th>
-                <th>Pace</th>
-                {showLapGap && <th>GAP</th>}
-                {showLapElevation && <th>Gain</th>}
-                {showLapElevation && <th>Loss</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {item.laps.map((lap) => (
-                <tr key={lap.index}>
-                  <td>{lap.index + 1}</td>
-                  <td>{formatDistance(lap.distanceM)}</td>
-                  <td>{formatDuration(lapMovingTimeS(lap, item.samples ?? []))}</td>
-                  <td>{formatPace(lapPaceSPKM(lap, item.samples ?? []))}</td>
-                  {showLapGap && <td>{lap.avgGradeAdjustedPaceSPKM !== undefined ? formatPace(lap.avgGradeAdjustedPaceSPKM) : ""}</td>}
-                  {showLapElevation && <td>{lap.elevationGainM !== undefined ? `${Math.round(lap.elevationGainM).toLocaleString()} m` : "-"}</td>}
-                  {showLapElevation && <td>{lap.elevationLossM !== undefined ? `${Math.round(lap.elevationLossM).toLocaleString()} m` : "-"}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+      <div className="activity-analysis-tabs" role="tablist" aria-label="Activity analysis">
+        <button
+          className={analysisTab === "stats" ? "active" : ""}
+          type="button"
+          role="tab"
+          aria-selected={analysisTab === "stats"}
+          onClick={() => setAnalysisTab("stats")}
+        >
+          Stats
+        </button>
+        <button
+          className={analysisTab === "intervals" ? "active" : ""}
+          type="button"
+          role="tab"
+          aria-selected={analysisTab === "intervals"}
+          onClick={() => setAnalysisTab("intervals")}
+        >
+          Intervals
+        </button>
+      </div>
+      {analysisTab === "stats" ? (
+        <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
+      ) : (
+        <ActivityIntervalsPanel activity={confirmedItem} />
       )}
     </Page>
   );
+}
+
+function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
+  const intervals = activity.intervals ?? [];
+  const laps = activity.laps ?? [];
+  const [filter, setFilter] = useState("all");
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    setFilter("all");
+    setExpanded({});
+  }, [activity.id]);
+
+  if (intervals.length === 0) {
+    return <ActivityFlatLapTable activity={activity} />;
+  }
+
+  const categories = Array.from(new Set(intervals.map((interval) => interval.category).filter(Boolean)));
+  const filteredIntervals = filter === "all" ? intervals : intervals.filter((interval) => interval.category === filter);
+  const lapsByIndex = new Map(laps.map((lap) => [lap.index, lap]));
+  const showGap = intervals.some((interval) => interval.avgGradeAdjustedPaceSPKM !== undefined) || laps.some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  const showHeartRate = intervals.some((interval) => interval.avgHeartRate !== undefined || interval.maxHeartRate !== undefined) || laps.some((lap) => lap.avgHeartRate !== undefined || lap.maxHeartRate !== undefined);
+  const showElevation = intervals.some((interval) => interval.elevationGainM !== undefined || interval.elevationLossM !== undefined) || laps.some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
+  const showCadence = intervals.some((interval) => interval.avgRunCadence !== undefined) || laps.some((lap) => lap.avgRunCadence !== undefined);
+  const showGroundContact = intervals.some((interval) => interval.avgGroundContactTimeMS !== undefined) || laps.some((lap) => lap.avgGroundContactTimeMS !== undefined);
+  const showPower = intervals.some((interval) => interval.avgPower !== undefined) || laps.some((lap) => lap.avgPower !== undefined);
+
+  return (
+    <section className="panel activity-intervals-panel">
+      <div className="intervals-header">
+        <div>
+          <div className="panel-heading">Intervals</div>
+          {activity.workout?.name && <div className="muted">Workout: {activity.workout.name}</div>}
+        </div>
+        <label className="compact-field" htmlFor="activity-interval-filter">
+          <span>Step Type</span>
+          <select id="activity-interval-filter" value={filter} onChange={(event) => setFilter(event.target.value)}>
+            <option value="all">All</option>
+            {categories.map((category) => (
+              <option key={category} value={category}>{intervalCategoryLabel(category, activity.sportType)}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="table-wrap">
+        <table className="data-table interval-table">
+          <thead>
+            <tr>
+              <th aria-label="Expand" />
+              <th>Step</th>
+              <th>Laps</th>
+              <th>Time</th>
+              <th>Cumulative</th>
+              <th>Distance</th>
+              <th>Avg Pace</th>
+              {showGap && <th>Avg GAP</th>}
+              {showHeartRate && <th>Avg HR</th>}
+              {showHeartRate && <th>Max HR</th>}
+              {showElevation && <th>Gain</th>}
+              {showElevation && <th>Loss</th>}
+              {showCadence && <th>Avg Cadence</th>}
+              {showGroundContact && <th>Avg GCT</th>}
+              {showPower && <th>Avg Power</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredIntervals.map((interval) => {
+              const intervalLaps = interval.lapIndexes?.map((index) => lapsByIndex.get(index)).filter((lap): lap is ActivityLap => Boolean(lap)) ?? [];
+              const isExpanded = Boolean(expanded[interval.index]);
+              const label = intervalStepLabel(interval, activity.sportType);
+              return (
+                <Fragment key={`interval-group-${interval.index}`}>
+                  <tr className="interval-summary-row" key={`interval-${interval.index}`}>
+                    <td className="interval-expand-cell">
+                      <button
+                        className="table-icon-button"
+                        type="button"
+                        aria-label={`${isExpanded ? "Collapse" : "Expand"} ${label}`}
+                        aria-expanded={isExpanded}
+                        onClick={() => setExpanded((current) => ({ ...current, [interval.index]: !isExpanded }))}
+                      >
+                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
+                    </td>
+                    <td>
+                      <strong>{label}</strong>
+                      {intervalTargetLabel(activity.workout, interval) && <span className="interval-target">{intervalTargetLabel(activity.workout, interval)}</span>}
+                    </td>
+                    <td>{formatLapRange(interval.lapIndexes)}</td>
+                    <td>{formatDuration(interval.elapsedTimeS)}</td>
+                    <td>{formatDuration(intervalCumulativeTime(interval, intervals, activity.startTime))}</td>
+                    <td>{formatDistance(interval.distanceM)}</td>
+                    <td>{optionalPace(interval.avgPaceSPKM)}</td>
+                    {showGap && <td>{optionalPace(interval.avgGradeAdjustedPaceSPKM)}</td>}
+                    {showHeartRate && <td>{optionalBPM(interval.avgHeartRate)}</td>}
+                    {showHeartRate && <td>{optionalBPM(interval.maxHeartRate)}</td>}
+                    {showElevation && <td>{optionalMeters(interval.elevationGainM)}</td>}
+                    {showElevation && <td>{optionalMeters(interval.elevationLossM)}</td>}
+                    {showCadence && <td>{optionalCadence(interval.avgRunCadence)}</td>}
+                    {showGroundContact && <td>{optionalMilliseconds(interval.avgGroundContactTimeMS)}</td>}
+                    {showPower && <td>{optionalWatts(interval.avgPower)}</td>}
+                  </tr>
+                  {isExpanded && intervalLaps.map((lap) => (
+                    <tr className="interval-lap-row" key={`interval-${interval.index}-lap-${lap.index}`}>
+                      <td />
+                      <td>Lap {lap.index + 1}</td>
+                      <td>{lap.index + 1}</td>
+                      <td>{formatDuration(lapMovingTimeS(lap, laps.length > 0 ? activity.samples ?? [] : []))}</td>
+                      <td>{formatDuration(lapCumulativeTime(lap, laps, activity.startTime))}</td>
+                      <td>{formatDistance(lap.distanceM)}</td>
+                      <td>{optionalPace(lapPaceSPKM(lap, activity.samples ?? []))}</td>
+                      {showGap && <td>{optionalPace(lap.avgGradeAdjustedPaceSPKM)}</td>}
+                      {showHeartRate && <td>{optionalBPM(lap.avgHeartRate)}</td>}
+                      {showHeartRate && <td>{optionalBPM(lap.maxHeartRate)}</td>}
+                      {showElevation && <td>{optionalMeters(lap.elevationGainM)}</td>}
+                      {showElevation && <td>{optionalMeters(lap.elevationLossM)}</td>}
+                      {showCadence && <td>{optionalCadence(lap.avgRunCadence)}</td>}
+                      {showGroundContact && <td>{optionalMilliseconds(lap.avgGroundContactTimeMS)}</td>}
+                      {showPower && <td>{optionalWatts(lap.avgPower)}</td>}
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ActivityFlatLapTable({ activity }: { activity: Activity }) {
+  const laps = activity.laps ?? [];
+  if (laps.length === 0) {
+    return <section className="panel"><EmptyState title="No lap or structured workout data" /></section>;
+  }
+  const showGap = laps.some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
+  const showElevation = laps.some((lap) => lap.elevationGainM !== undefined || lap.elevationLossM !== undefined);
+  return (
+    <section className="panel">
+      <div className="panel-heading">Laps</div>
+      <p className="muted interval-fallback-note">No structured workout steps were provided; showing recorded laps.</p>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead><tr><th>Lap</th><th>Distance</th><th>Time</th><th>Pace</th>{showGap && <th>GAP</th>}{showElevation && <th>Gain</th>}{showElevation && <th>Loss</th>}</tr></thead>
+          <tbody>
+            {laps.map((lap) => (
+              <tr key={lap.index}>
+                <td>{lap.index + 1}</td>
+                <td>{formatDistance(lap.distanceM)}</td>
+                <td>{formatDuration(lapMovingTimeS(lap, activity.samples ?? []))}</td>
+                <td>{optionalPace(lapPaceSPKM(lap, activity.samples ?? []))}</td>
+                {showGap && <td>{optionalPace(lap.avgGradeAdjustedPaceSPKM)}</td>}
+                {showElevation && <td>{optionalMeters(lap.elevationGainM)}</td>}
+                {showElevation && <td>{optionalMeters(lap.elevationLossM)}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function intervalCategoryLabel(category: string, sportType: string) {
+  switch (category.toLowerCase()) {
+    case "warmup": return "Warm Up";
+    case "active": return isRunningSport(sportType) ? "Run" : "Active";
+    case "recovery": return "Recovery";
+    case "cooldown": return "Cool Down";
+    default: return category.replace(/(^|[-_])([a-z])/g, (_, prefix: string, letter: string) => `${prefix ? " " : ""}${letter.toUpperCase()}`);
+  }
+}
+
+function isRunningSport(sportType: string) {
+  return /run|walk|hike/i.test(sportType);
+}
+
+function intervalStepLabel(interval: ActivityInterval, sportType: string) {
+  const category = intervalCategoryLabel(interval.category, sportType);
+  if (interval.workoutRepeatIndex !== undefined && (interval.category === "active" || interval.category === "recovery")) {
+    return `${interval.workoutRepeatIndex}. ${category}`;
+  }
+  return category;
+}
+
+function formatLapRange(lapIndexes?: number[]) {
+  if (!lapIndexes || lapIndexes.length === 0) {
+    return "";
+  }
+  const first = lapIndexes[0] + 1;
+  const last = lapIndexes[lapIndexes.length - 1] + 1;
+  return first === last ? String(first) : `${first}–${last}`;
+}
+
+function intervalCumulativeTime(interval: ActivityInterval, intervals: ActivityInterval[], activityStart: string) {
+  if (interval.endTime) {
+    const end = Date.parse(interval.endTime);
+    const start = Date.parse(activityStart);
+    if (Number.isFinite(end) && Number.isFinite(start) && end >= start) {
+      return Math.round((end - start) / 1000);
+    }
+  }
+  const index = intervals.findIndex((candidate) => candidate.index === interval.index);
+  return intervals.slice(0, index + 1).reduce((total, candidate) => total + candidate.elapsedTimeS, 0);
+}
+
+function lapCumulativeTime(lap: ActivityLap, laps: ActivityLap[], activityStart: string) {
+  if (lap.startTime) {
+    const end = Date.parse(lap.startTime) + lap.elapsedTimeS * 1000;
+    const start = Date.parse(activityStart);
+    if (Number.isFinite(end) && Number.isFinite(start) && end >= start) {
+      return Math.round((end - start) / 1000);
+    }
+  }
+  return laps.filter((candidate) => candidate.index <= lap.index).reduce((total, candidate) => total + candidate.elapsedTimeS, 0);
+}
+
+function intervalTargetLabel(workout: Activity["workout"], interval: ActivityInterval) {
+  if (!workout?.steps) {
+    return "";
+  }
+  const stepType = interval.category === "active" ? "interval" : interval.category;
+  const step = flattenWorkoutSteps(workout.steps).find((candidate) => candidate.type?.toLowerCase() === stepType);
+  if (!step) {
+    return "";
+  }
+  if (step.targetType?.toLowerCase() === "pace.zone" && step.targetValueOne !== undefined && step.targetValueTwo !== undefined) {
+    const paces = [speedToPaceSPKM(step.targetValueOne), speedToPaceSPKM(step.targetValueTwo)].filter((pace): pace is number => pace !== undefined).sort((left, right) => left - right);
+    return paces.length === 2 ? `Target ${formatPace(paces[0])}–${formatPace(paces[1])}` : "";
+  }
+  if (step.endCondition?.toLowerCase() === "time" && step.endConditionValue !== undefined) {
+    return `Target ${formatDuration(step.endConditionValue)}`;
+  }
+  return "";
+}
+
+function flattenWorkoutSteps(steps?: ActivityWorkoutStep[]) {
+  const flattened: ActivityWorkoutStep[] = [];
+  const visit = (items?: ActivityWorkoutStep[]) => {
+    for (const item of items ?? []) {
+      flattened.push(item);
+      visit(item.children);
+    }
+  };
+  visit(steps);
+  return flattened;
+}
+
+function optionalPace(value?: number) {
+  return value !== undefined ? formatPace(value) : "";
+}
+
+function optionalBPM(value?: number) {
+  return value !== undefined ? formatBPM(value) : "";
+}
+
+function optionalMeters(value?: number) {
+  return value !== undefined ? `${Math.round(value).toLocaleString()} m` : "";
+}
+
+function optionalCadence(value?: number) {
+  return value !== undefined ? `${Math.round(value).toLocaleString()} spm` : "";
+}
+
+function optionalMilliseconds(value?: number) {
+  return value !== undefined ? `${Math.round(value).toLocaleString()} ms` : "";
+}
+
+function optionalWatts(value?: number) {
+  return value !== undefined ? `${Math.round(value).toLocaleString()} W` : "";
 }
 
 function PlannedActivityMatchPanel({
@@ -3855,7 +4121,8 @@ function SettingsPage({
   const [garminEmail, setGarminEmail] = useState("");
   const [garminPassword, setGarminPassword] = useState("");
   const [garminMFACode, setGarminMFACode] = useState("");
-  const [garminOldest, setGarminOldest] = useState("1970-01-01");
+  const [garminOldest, setGarminOldest] = useState(() => localDateString());
+  const [garminAllData, setGarminAllData] = useState(false);
   const garminJobs = jobs.data?.jobs ?? [];
   const latestGearJob = garminJobs.find((job) => job.provider === "garmin" && isGearSyncJob(job));
   const latestGarminJob = garminJobs.find((job) => job.provider === "garmin" && !isGearSyncJob(job)) ?? latestGearJob;
@@ -3964,11 +4231,15 @@ function SettingsPage({
             <Cloud size={16} />
             Connect
           </button>
+          <label className="checkbox-field">
+            <input type="checkbox" checked={garminAllData} onChange={(event) => setGarminAllData(event.target.checked)} />
+            <span>All data</span>
+          </label>
           <label className="compact-field">
             <span>Oldest</span>
-            <input type="date" value={garminOldest} onChange={(event) => setGarminOldest(event.target.value)} />
+            <input type="date" value={garminOldest} max={localDateString()} disabled={garminAllData} onChange={(event) => setGarminOldest(event.target.value)} />
           </label>
-          <button className="primary-button" type="button" disabled={!garminStatus.data?.connected || garminSync.isPending || anyGarminSyncRunning} onClick={() => garminSync.mutate(garminOldest)}>
+          <button className="primary-button" type="button" disabled={!garminStatus.data?.connected || garminSync.isPending || anyGarminSyncRunning} onClick={() => garminSync.mutate({ oldest: garminAllData ? undefined : garminOldest, allData: garminAllData })}>
             <RefreshCw size={16} />
             {garminSyncRunning ? "Syncing" : "Sync"}
           </button>
@@ -4361,6 +4632,7 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   const listing = isSyncListingStage(stage);
   const fetchedPages = payloadNumber(payload, "fetchedPages");
   const oldest = payloadText(payload, "oldest");
+  const allData = payload.allData === true;
   const from = payloadText(payload, "from");
   const to = payloadText(payload, "to");
   const currentDate = payloadText(payload, "currentDate");
@@ -4371,7 +4643,7 @@ function SyncProgressCard({ job }: { job?: SyncJob }) {
   const foundLabel = activities === 1 ? "activity" : "activities";
   const dayLabel = days === 1 ? "day" : "days";
   const gearLabel = gear === 1 ? "item" : "items";
-  const detailText = syncProgressDetailText(job, stage, currentActivityName, currentGearName, currentDate, oldest, from, to, total);
+  const detailText = syncProgressDetailText(job, stage, currentActivityName, currentGearName, currentDate, oldest, allData, from, to, total);
 
   return (
     <section className="panel sync-progress-panel">
@@ -4531,7 +4803,7 @@ function isGearSyncJob(job: SyncJob) {
   return job.kind.startsWith("gear") || payloadText(job.payload ?? {}, "kind") === "gear";
 }
 
-function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, currentGearName: string, currentDate: string, oldest: string, from: string, to: string, total: number) {
+function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName: string, currentGearName: string, currentDate: string, oldest: string, allData: boolean, from: string, to: string, total: number) {
   if (isGearSyncJob(job)) {
     if (currentGearName) {
       return currentGearName;
@@ -4557,6 +4829,9 @@ function syncProgressDetailText(job: SyncJob, stage: string, currentActivityName
     return from && to ? `${from} to ${to}` : "Waiting for first day";
   }
   if (isSyncListingStage(stage)) {
+    if (allData) {
+      return "Searching all available data";
+    }
     return oldest ? `Searching from ${oldest}` : "Searching Garmin Connect";
   }
   if (currentActivityName) {

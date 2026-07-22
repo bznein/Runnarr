@@ -35,6 +35,7 @@ Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in t
 - Keep PRD-only or product-direction changes in a separate commit when they are not part of the implementation.
 - Before asking the user to test, rebuild/restart the Docker Compose stack.
 - Do not restart or rebuild while a Garmin sync is running unless the user confirms the sync is complete or explicitly says the restart is safe.
+- Once the implementation is complete, do not restart the container again; this can break web access for the user.
 
 ## Implementation Guidelines
 

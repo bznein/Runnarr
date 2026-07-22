@@ -1174,10 +1174,14 @@ func (s *Server) finishGarminHealthSyncJob(ctx context.Context, jobID string, op
 
 func decodeGarminSyncOptions(r *http.Request) (GarminSyncOptions, error) {
 	var body struct {
-		Oldest string `json:"oldest"`
+		Oldest  string `json:"oldest"`
+		AllData bool   `json:"allData"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 		return GarminSyncOptions{}, errors.New("invalid JSON body")
+	}
+	if body.AllData {
+		return GarminSyncOptions{AllData: true}, nil
 	}
 	if strings.TrimSpace(body.Oldest) == "" {
 		return GarminSyncOptions{}, nil

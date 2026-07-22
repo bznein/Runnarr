@@ -239,10 +239,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body)
     }),
-  garminSync: (oldest: string) =>
+  garminSync: (options: { oldest?: string; allData?: boolean }) =>
     request<{ jobId: string; status: string }>("/api/providers/garmin/sync", {
       method: "POST",
-      body: JSON.stringify({ oldest })
+      body: JSON.stringify(options)
     }),
   garminHealthSync: (range?: HealthRange) =>
     request<{ jobId: string; status: string }>("/api/providers/garmin/health-sync", {

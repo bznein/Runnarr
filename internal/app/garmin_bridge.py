@@ -176,6 +176,30 @@ def parse_int(value):
         return None
 
 
+def pace_from_speed(value):
+    parsed = parse_number(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return 1000 / parsed
+
+
+def rounded_seconds(value):
+    parsed = parse_number(value)
+    if parsed is None or parsed < 0:
+        return 0
+    return int(round(parsed))
+
+
+def normalize_interval_category(value):
+    normalized = normalize_key(value)
+    return {
+        "intervalwarmup": "warmup",
+        "intervalactive": "active",
+        "intervalrecovery": "recovery",
+        "intervalcooldown": "cooldown",
+    }.get(normalized, "")
+
+
 def normalize_lap(item, fallback_index):
     if not isinstance(item, dict):
         return {
@@ -194,8 +218,201 @@ def normalize_lap(item, fallback_index):
 
     return {
         "index": index,
+        "startTime": parse_garmin_time(item.get("startTimeGMT") or item.get("startTimeLocal") or item.get("startTime")),
+        "elapsedTimeS": rounded_seconds(item.get("elapsedDuration") or item.get("duration")),
+        "movingTimeS": rounded_seconds(item.get("movingDuration") or item.get("duration")),
+        "distanceM": parse_number(item.get("distance")) or 0,
+        "avgPaceSPKM": pace_from_speed(item.get("averageSpeed") or item.get("averageMovingSpeed")),
         "avgGradeAdjustedSpeed": parse_number(item.get("avgGradeAdjustedSpeed")),
+        "avgGradeAdjustedPaceSPKM": pace_from_speed(item.get("avgGradeAdjustedSpeed")),
+        "elevationGainM": parse_number(item.get("elevationGain")),
+        "elevationLossM": parse_number(item.get("elevationLoss")),
+        "avgHeartRate": parse_number(item.get("averageHR")),
+        "maxHeartRate": parse_number(item.get("maxHR")),
+        "avgPower": parse_number(item.get("averagePower")),
+        "maxPower": parse_number(item.get("maxPower")),
+        "normalizedPower": parse_number(item.get("normalizedPower")),
+        "avgRunCadence": parse_number(item.get("averageRunCadence")),
+        "avgGroundContactTimeMS": parse_number(item.get("groundContactTime")),
+        "avgRespirationRate": parse_number(item.get("avgRespirationRate")),
+        "avgTemperatureC": parse_number(item.get("averageTemperature")),
+        "intensityType": str(item.get("intensityType") or "").strip().lower(),
+        "workoutStepIndex": parse_int(item.get("wktStepIndex")),
+        "workoutRepeatIndex": None,
+        "raw": item,
     }
+
+
+def normalize_workout_step(item, index):
+    if not isinstance(item, dict):
+        return {"index": index, "order": index}
+    step_type = item.get("stepType") or {}
+    if not isinstance(step_type, dict):
+        step_type = {}
+    end_condition = item.get("endCondition") or {}
+    if not isinstance(end_condition, dict):
+        end_condition = {}
+    target_type = item.get("targetType") or {}
+    if not isinstance(target_type, dict):
+        target_type = {}
+    target_unit = item.get("targetValueUnit") or {}
+    if not isinstance(target_unit, dict):
+        target_unit = {}
+    children = item.get("workoutSteps") or []
+    if not isinstance(children, list):
+        children = []
+    return {
+        "index": index,
+        "order": parse_int(item.get("stepOrder")) or index,
+        "type": str(step_type.get("stepTypeKey") or "").strip(),
+        "description": str(item.get("description") or "").strip(),
+        "repeatCount": parse_int(item.get("numberOfIterations")),
+        "endCondition": str(end_condition.get("conditionTypeKey") or "").strip(),
+        "endConditionValue": parse_number(item.get("endConditionValue")),
+        "targetType": str(target_type.get("workoutTargetTypeKey") or "").strip(),
+        "targetValueOne": parse_number(item.get("targetValueOne")),
+        "targetValueTwo": parse_number(item.get("targetValueTwo")),
+        "targetValueUnit": str(target_unit.get("unitKey") or "").strip(),
+        "zoneNumber": parse_int(item.get("zoneNumber")),
+        "children": [normalize_workout_step(child, index * 100 + child_index + 1) for child_index, child in enumerate(children)],
+    }
+
+
+def normalize_workout(payload):
+    if not isinstance(payload, dict) or not payload.get("workoutId"):
+        return None
+    segments = payload.get("workoutSegments") or []
+    if not isinstance(segments, list):
+        segments = []
+    steps = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        segment_steps = segment.get("workoutSteps") or []
+        if not isinstance(segment_steps, list):
+            continue
+        steps.extend(normalize_workout_step(step, index) for index, step in enumerate(segment_steps, 1))
+    sport_type = payload.get("sportType") or {}
+    if not isinstance(sport_type, dict):
+        sport_type = {}
+    return {
+        "provider": "garmin",
+        "providerWorkoutId": str(payload.get("workoutId") or ""),
+        "name": str(payload.get("workoutName") or "").strip(),
+        "sportType": str(sport_type.get("sportTypeKey") or "").strip(),
+        "steps": steps,
+        "raw": payload,
+    }
+
+
+def normalize_interval(item, fallback_index, laps_by_index, repeat_counts):
+    if not isinstance(item, dict):
+        return None
+    provider_type = str(item.get("type") or "").strip()
+    category = normalize_interval_category(provider_type)
+    if not category:
+        return None
+    raw_lap_indexes = item.get("lapIndexes") or []
+    if not isinstance(raw_lap_indexes, list):
+        raw_lap_indexes = []
+    lap_indexes = []
+    for value in raw_lap_indexes:
+        lap_index = parse_int(value)
+        if lap_index is not None and lap_index > 0:
+            lap_indexes.append(lap_index - 1)
+    matching_laps = [laps_by_index[index] for index in lap_indexes if index in laps_by_index]
+    step_index = next((lap.get("workoutStepIndex") for lap in matching_laps if lap.get("workoutStepIndex") is not None), None)
+    repeat_key = (category, step_index)
+    repeat_counts[repeat_key] = repeat_counts.get(repeat_key, 0) + 1
+    return {
+        "index": fallback_index,
+        "category": category,
+        "providerType": provider_type,
+        "workoutStepIndex": step_index,
+        "workoutRepeatIndex": repeat_counts[repeat_key],
+        "startTime": parse_garmin_time(item.get("startTimeGMT") or item.get("startTimeLocal") or item.get("startTime")),
+        "endTime": parse_garmin_time(item.get("endTimeGMT") or item.get("endTimeLocal") or item.get("endTime")),
+        "elapsedTimeS": rounded_seconds(item.get("elapsedDuration") or item.get("duration")),
+        "movingTimeS": rounded_seconds(item.get("movingDuration") or item.get("duration")),
+        "distanceM": parse_number(item.get("distance")) or 0,
+        "avgPaceSPKM": pace_from_speed(item.get("averageMovingSpeed") or item.get("averageSpeed")),
+        "avgGradeAdjustedPaceSPKM": pace_from_speed(item.get("avgGradeAdjustedSpeed")),
+        "avgHeartRate": parse_number(item.get("averageHR")),
+        "maxHeartRate": parse_number(item.get("maxHR")),
+        "avgPower": parse_number(item.get("averagePower")),
+        "maxPower": parse_number(item.get("maxPower")),
+        "normalizedPower": parse_number(item.get("normalizedPower")),
+        "avgRunCadence": parse_number(item.get("averageRunCadence")),
+        "avgGroundContactTimeMS": parse_number(item.get("groundContactTime")),
+        "avgRespirationRate": parse_number(item.get("avgRespirationRate")),
+        "avgTemperatureC": parse_number(item.get("averageTemperature")),
+        "elevationGainM": parse_number(item.get("elevationGain")),
+        "elevationLossM": parse_number(item.get("elevationLoss")),
+        "caloriesKcal": parse_int(item.get("calories")),
+        "lapIndexes": lap_indexes,
+        "raw": item,
+    }
+
+
+def activity_workout_response(client, activity_id):
+    errors = {}
+    activity_payload = safe_activity_call(errors, "activity", lambda: client.get_activity(activity_id))
+    splits_payload = safe_activity_call(errors, "splits", lambda: client.get_activity_splits(activity_id))
+    split_summaries_payload = safe_activity_call(errors, "splitSummaries", lambda: client.get_activity_split_summaries(activity_id))
+    typed_splits_payload = safe_activity_call(errors, "typedSplits", lambda: client.get_activity_typed_splits(activity_id))
+    if not isinstance(activity_payload, dict):
+        activity_payload = {}
+    if not isinstance(splits_payload, dict):
+        splits_payload = {}
+    if not isinstance(split_summaries_payload, dict):
+        split_summaries_payload = {}
+    if not isinstance(typed_splits_payload, dict):
+        typed_splits_payload = {}
+
+    workout_id = first_nested_value(activity_payload, ("associatedWorkoutId",))
+    workout_payload = {}
+    if workout_id not in (None, ""):
+        workout_payload = safe_activity_call(errors, "workout", lambda: client.get_workout_by_id(str(workout_id)))
+        if not isinstance(workout_payload, dict):
+            workout_payload = {}
+
+    lap_items = splits_payload.get("lapDTOs") or []
+    if not isinstance(lap_items, list):
+        lap_items = []
+    laps = [normalize_lap(item, index) for index, item in enumerate(lap_items)]
+    laps_by_index = {lap["index"]: lap for lap in laps}
+    repeat_counts = {}
+    typed_items = typed_splits_payload.get("splits") or []
+    if not isinstance(typed_items, list):
+        typed_items = []
+    intervals = []
+    for item in typed_items:
+        interval = normalize_interval(item, len(intervals), laps_by_index, repeat_counts)
+        if interval is not None:
+            intervals.append(interval)
+    return {
+        "available": "splits" not in errors and "typedSplits" not in errors,
+        "workout": normalize_workout(workout_payload),
+        "intervals": intervals,
+        "laps": laps,
+        "raw": {
+            "activity": activity_payload,
+            "splits": splits_payload,
+            "splitSummaries": split_summaries_payload,
+            "typedSplits": typed_splits_payload,
+            "workout": workout_payload,
+        },
+        "errors": errors,
+    }
+
+
+def safe_activity_call(errors, name, fn):
+    try:
+        result = fn()
+    except Exception as exc:
+        errors[name] = str(exc)
+        return None
+    return result if result is not None else {}
 
 
 def normalize_gear_response(client):
@@ -456,6 +673,13 @@ def main():
         if not isinstance(lap_items, list):
             lap_items = []
         print(json.dumps({"laps": [normalize_lap(item, index) for index, item in enumerate(lap_items)]}))
+        return
+
+    if action == "activity-workout":
+        activity_id = str(request.get("activityId") or "")
+        if not activity_id:
+            raise RuntimeError("missing activityId")
+        print(json.dumps(activity_workout_response(client, activity_id)))
         return
 
     if action == "health-day":

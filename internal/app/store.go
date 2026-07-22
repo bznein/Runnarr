@@ -364,6 +364,14 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	if _, err = tx.Exec(ctx, `delete from activity_laps where activity_id = $1`, id); err != nil {
 		return "", err
 	}
+	if activity.ReplaceWorkoutMetadata {
+		if _, err = tx.Exec(ctx, `delete from activity_intervals where activity_id = $1`, id); err != nil {
+			return "", err
+		}
+		if _, err = tx.Exec(ctx, `delete from activity_workouts where activity_id = $1`, id); err != nil {
+			return "", err
+		}
+	}
 
 	for _, sample := range activity.Samples {
 		_, err = tx.Exec(ctx, `
@@ -379,16 +387,80 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	}
 
 	for _, lap := range activity.Laps {
+		lapRawBytes, marshalErr := marshalJSONObject(lap.Raw)
+		if marshalErr != nil {
+			return "", marshalErr
+		}
 		_, err = tx.Exec(ctx, `
 			insert into activity_laps(
 				activity_id, lap_index, start_time, elapsed_time_s, moving_time_s, distance_m,
-				avg_pace_s_per_km, elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
+				avg_pace_s_per_km, elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km,
+				avg_heart_rate, max_heart_rate, avg_power, max_power, normalized_power,
+				avg_run_cadence, avg_ground_contact_time_ms, avg_respiration_rate, avg_temperature_c,
+				intensity_type, workout_step_index, workout_repeat_index, raw
 			)
-			values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 		`, id, lap.Index, lap.StartTime, lap.ElapsedTimeS, lap.MovingTimeS, lap.DistanceM,
-			lap.AvgPaceSPKM, lap.ElevationGainM, lap.ElevationLossM, lap.AvgGradeAdjustedPaceSPKM)
+			lap.AvgPaceSPKM, lap.ElevationGainM, lap.ElevationLossM, lap.AvgGradeAdjustedPaceSPKM,
+			lap.AvgHeartRate, lap.MaxHeartRate, lap.AvgPower, lap.MaxPower, lap.NormalizedPower,
+			lap.AvgRunCadence, lap.AvgGroundContactTimeMS, lap.AvgRespirationRate, lap.AvgTemperatureC,
+			lap.IntensityType, lap.WorkoutStepIndex, lap.WorkoutRepeatIndex, lapRawBytes)
 		if err != nil {
 			return "", err
+		}
+	}
+
+	if activity.ReplaceWorkoutMetadata {
+		if activity.Workout != nil {
+			stepsBytes, marshalErr := json.Marshal(activity.Workout.Steps)
+			if marshalErr != nil {
+				return "", marshalErr
+			}
+			workoutRawBytes, marshalErr := marshalJSONObject(activity.Workout.Raw)
+			if marshalErr != nil {
+				return "", marshalErr
+			}
+			_, err = tx.Exec(ctx, `
+				insert into activity_workouts(activity_id, provider, provider_workout_id, name, sport_type, steps, raw)
+				values($1,$2,$3,$4,$5,$6,$7)
+				on conflict (activity_id) do update set
+					provider = excluded.provider,
+					provider_workout_id = excluded.provider_workout_id,
+					name = excluded.name,
+					sport_type = excluded.sport_type,
+					steps = excluded.steps,
+					raw = excluded.raw,
+					updated_at = now()
+			`, id, activity.Workout.Provider, activity.Workout.ProviderWorkoutID, activity.Workout.Name,
+				activity.Workout.SportType, stepsBytes, workoutRawBytes)
+			if err != nil {
+				return "", err
+			}
+		}
+
+		for _, interval := range activity.Intervals {
+			intervalRawBytes, marshalErr := marshalJSONObject(interval.Raw)
+			if marshalErr != nil {
+				return "", marshalErr
+			}
+			_, err = tx.Exec(ctx, `
+				insert into activity_intervals(
+					activity_id, interval_index, category, provider_type, workout_step_index, workout_repeat_index,
+					start_time, end_time, elapsed_time_s, moving_time_s, distance_m,
+					avg_pace_s_per_km, avg_grade_adjusted_pace_s_per_km, avg_heart_rate, max_heart_rate,
+					avg_power, max_power, normalized_power, avg_run_cadence, avg_ground_contact_time_ms,
+					avg_respiration_rate, avg_temperature_c, elevation_gain_m, elevation_loss_m, calories_kcal,
+					lap_indexes, raw
+				) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+			`, id, interval.Index, interval.Category, interval.ProviderType, interval.WorkoutStepIndex, interval.WorkoutRepeatIndex,
+				interval.StartTime, interval.EndTime, interval.ElapsedTimeS, interval.MovingTimeS, interval.DistanceM,
+				interval.AvgPaceSPKM, interval.AvgGradeAdjustedPaceSPKM, interval.AvgHeartRate, interval.MaxHeartRate,
+				interval.AvgPower, interval.MaxPower, interval.NormalizedPower, interval.AvgRunCadence, interval.AvgGroundContactTimeMS,
+				interval.AvgRespirationRate, interval.AvgTemperatureC, interval.ElevationGainM, interval.ElevationLossM, interval.CaloriesKcal,
+				interval.LapIndexes, intervalRawBytes)
+			if err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -396,6 +468,13 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		return "", err
 	}
 	return id, nil
+}
+
+func marshalJSONObject(value map[string]any) ([]byte, error) {
+	if value == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(value)
 }
 
 func (s *Store) ListActivities(ctx context.Context, limit, offset int, filters ActivityFilters) ([]Activity, error) {
@@ -540,6 +619,12 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	}
 	activity.Samples = samples
 	activity.Laps = laps
+	workout, intervals, err := s.getActivityWorkout(ctx, id)
+	if err != nil {
+		return activity, err
+	}
+	activity.Workout = workout
+	activity.Intervals = intervals
 	gear, err := s.ListActivityGear(ctx, id)
 	if err != nil {
 		return activity, err
@@ -1417,10 +1502,109 @@ func (s *Store) listSamples(ctx context.Context, activityID string) ([]ActivityS
 	return samples, rows.Err()
 }
 
+func (s *Store) getActivityWorkout(ctx context.Context, activityID string) (*ActivityWorkout, []ActivityInterval, error) {
+	var workout ActivityWorkout
+	var stepsBytes, rawBytes []byte
+	err := s.db.QueryRow(ctx, `
+		select provider, provider_workout_id, name, sport_type, steps, raw
+		from activity_workouts
+		where activity_id = $1 and exists (select 1 from activities where activities.id = activity_workouts.activity_id and activities.user_id = $2)
+	`, activityID, scopedUserID(ctx)).Scan(&workout.Provider, &workout.ProviderWorkoutID, &workout.Name, &workout.SportType, &stepsBytes, &rawBytes)
+	var workoutPtr *ActivityWorkout
+	if errors.Is(err, pgx.ErrNoRows) {
+		workoutPtr = nil
+	} else if err != nil {
+		return nil, nil, err
+	} else {
+		if len(stepsBytes) > 0 {
+			if err := json.Unmarshal(stepsBytes, &workout.Steps); err != nil {
+				return nil, nil, err
+			}
+		}
+		if len(rawBytes) > 0 {
+			if err := json.Unmarshal(rawBytes, &workout.Raw); err != nil {
+				return nil, nil, err
+			}
+		}
+		workoutPtr = &workout
+	}
+
+	rows, err := s.db.Query(ctx, `
+		select interval_index, category, provider_type, workout_step_index, workout_repeat_index,
+			start_time, end_time, elapsed_time_s, moving_time_s, distance_m,
+			avg_pace_s_per_km, avg_grade_adjusted_pace_s_per_km, avg_heart_rate, max_heart_rate,
+			avg_power, max_power, normalized_power, avg_run_cadence, avg_ground_contact_time_ms,
+			avg_respiration_rate, avg_temperature_c, elevation_gain_m, elevation_loss_m, calories_kcal,
+			lap_indexes, raw
+		from activity_intervals
+		where activity_id = $1
+		order by interval_index
+	`, activityID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	intervals := make([]ActivityInterval, 0)
+	for rows.Next() {
+		var interval ActivityInterval
+		var startTime, endTime pgtype.Timestamptz
+		var workoutStepIndex, workoutRepeatIndex sql.NullInt32
+		var avgPace, avgGap, avgHR, maxHR, avgPower, maxPower, normalizedPower sql.NullFloat64
+		var avgCadence, avgGroundContact, avgRespiration, avgTemperature sql.NullFloat64
+		var elevationGain, elevationLoss sql.NullFloat64
+		var calories sql.NullInt32
+		var lapIndexes []int32
+		var intervalRaw []byte
+		if err := rows.Scan(&interval.Index, &interval.Category, &interval.ProviderType, &workoutStepIndex, &workoutRepeatIndex,
+			&startTime, &endTime, &interval.ElapsedTimeS, &interval.MovingTimeS, &interval.DistanceM,
+			&avgPace, &avgGap, &avgHR, &maxHR, &avgPower, &maxPower, &normalizedPower, &avgCadence, &avgGroundContact,
+			&avgRespiration, &avgTemperature, &elevationGain, &elevationLoss, &calories, &lapIndexes, &intervalRaw); err != nil {
+			return nil, nil, err
+		}
+		if startTime.Valid {
+			interval.StartTime = &startTime.Time
+		}
+		if endTime.Valid {
+			interval.EndTime = &endTime.Time
+		}
+		interval.WorkoutStepIndex = intPtrFromNull(workoutStepIndex)
+		interval.WorkoutRepeatIndex = intPtrFromNull(workoutRepeatIndex)
+		interval.AvgPaceSPKM = floatPtrFromNull(avgPace)
+		interval.AvgGradeAdjustedPaceSPKM = floatPtrFromNull(avgGap)
+		interval.AvgHeartRate = floatPtrFromNull(avgHR)
+		interval.MaxHeartRate = floatPtrFromNull(maxHR)
+		interval.AvgPower = floatPtrFromNull(avgPower)
+		interval.MaxPower = floatPtrFromNull(maxPower)
+		interval.NormalizedPower = floatPtrFromNull(normalizedPower)
+		interval.AvgRunCadence = floatPtrFromNull(avgCadence)
+		interval.AvgGroundContactTimeMS = floatPtrFromNull(avgGroundContact)
+		interval.AvgRespirationRate = floatPtrFromNull(avgRespiration)
+		interval.AvgTemperatureC = floatPtrFromNull(avgTemperature)
+		interval.ElevationGainM = floatPtrFromNull(elevationGain)
+		interval.ElevationLossM = floatPtrFromNull(elevationLoss)
+		interval.CaloriesKcal = intPtrFromNull(calories)
+		for _, lapIndex := range lapIndexes {
+			interval.LapIndexes = append(interval.LapIndexes, int(lapIndex))
+		}
+		if len(intervalRaw) > 0 {
+			_ = json.Unmarshal(intervalRaw, &interval.Raw)
+		}
+		intervals = append(intervals, interval)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return workoutPtr, intervals, nil
+}
+
 func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap, error) {
 	rows, err := s.db.Query(ctx, `
 		select lap_index, start_time, elapsed_time_s, moving_time_s, distance_m,
-			avg_pace_s_per_km, elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km
+			avg_pace_s_per_km, elevation_gain_m, elevation_loss_m, avg_grade_adjusted_pace_s_per_km,
+			avg_heart_rate, max_heart_rate, avg_power, max_power, normalized_power,
+			avg_run_cadence, avg_ground_contact_time_ms, avg_respiration_rate, avg_temperature_c,
+			intensity_type, workout_step_index, workout_repeat_index, raw
 		from activity_laps
 		where activity_id = $1 and exists (select 1 from activities where activities.id = activity_laps.activity_id and activities.user_id = $2)
 		order by lap_index
@@ -1435,7 +1619,14 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 		var lap ActivityLap
 		var ts pgtype.Timestamptz
 		var avgPace, gain, loss, avgGradeAdjustedPace sql.NullFloat64
-		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.MovingTimeS, &lap.DistanceM, &avgPace, &gain, &loss, &avgGradeAdjustedPace); err != nil {
+		var avgHR, maxHR, avgPower, maxPower, normalizedPower sql.NullFloat64
+		var avgCadence, avgGroundContact, avgRespiration, avgTemperature sql.NullFloat64
+		var intensityType sql.NullString
+		var workoutStepIndex, workoutRepeatIndex sql.NullInt32
+		var rawBytes []byte
+		if err := rows.Scan(&lap.Index, &ts, &lap.ElapsedTimeS, &lap.MovingTimeS, &lap.DistanceM, &avgPace, &gain, &loss, &avgGradeAdjustedPace,
+			&avgHR, &maxHR, &avgPower, &maxPower, &normalizedPower, &avgCadence, &avgGroundContact, &avgRespiration, &avgTemperature,
+			&intensityType, &workoutStepIndex, &workoutRepeatIndex, &rawBytes); err != nil {
 			return nil, err
 		}
 		lap.AvgPaceSPKM = floatPtrFromNull(avgPace)
@@ -1445,6 +1636,23 @@ func (s *Store) listLaps(ctx context.Context, activityID string) ([]ActivityLap,
 		lap.ElevationGainM = floatPtrFromNull(gain)
 		lap.ElevationLossM = floatPtrFromNull(loss)
 		lap.AvgGradeAdjustedPaceSPKM = floatPtrFromNull(avgGradeAdjustedPace)
+		lap.AvgHeartRate = floatPtrFromNull(avgHR)
+		lap.MaxHeartRate = floatPtrFromNull(maxHR)
+		lap.AvgPower = floatPtrFromNull(avgPower)
+		lap.MaxPower = floatPtrFromNull(maxPower)
+		lap.NormalizedPower = floatPtrFromNull(normalizedPower)
+		lap.AvgRunCadence = floatPtrFromNull(avgCadence)
+		lap.AvgGroundContactTimeMS = floatPtrFromNull(avgGroundContact)
+		lap.AvgRespirationRate = floatPtrFromNull(avgRespiration)
+		lap.AvgTemperatureC = floatPtrFromNull(avgTemperature)
+		if intensityType.Valid {
+			lap.IntensityType = intensityType.String
+		}
+		lap.WorkoutStepIndex = intPtrFromNull(workoutStepIndex)
+		lap.WorkoutRepeatIndex = intPtrFromNull(workoutRepeatIndex)
+		if len(rawBytes) > 0 {
+			_ = json.Unmarshal(rawBytes, &lap.Raw)
+		}
 		laps = append(laps, lap)
 	}
 	return laps, rows.Err()
