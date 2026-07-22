@@ -33,9 +33,10 @@ Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in t
 - Update `CHANGELOG.md` for user-facing changes and release-relevant fixes.
 - Update `docs/PRD.md` when product scope, requirements, or roadmap decisions change.
 - Keep PRD-only or product-direction changes in a separate commit when they are not part of the implementation.
-- Before asking the user to test, rebuild/restart the Docker Compose stack.
+- Before asking the user to test, verify the relevant build/runtime checks; do not automatically rebuild or restart a running container.
 - Do not restart or rebuild while a Garmin sync is running unless the user confirms the sync is complete or explicitly says the restart is safe.
-- Once the implementation is complete, do not restart the container again; this can break web access for the user.
+- Never rebuild or restart any running container after implementation is complete unless the user explicitly authorizes that operation in the current request. This includes public-facing instances; do not infer permission from a need to deploy or from a local Compose workflow.
+- After any change affecting activities or training plans, explicitly confirm whether a Garmin sync, training-sheet sync/writeback, or no sync is needed, and briefly explain why.
 
 ## Implementation Guidelines
 
@@ -53,5 +54,5 @@ Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in t
 - Run the smallest meaningful checks for the change.
 - For backend behavior, run `go test ./...`; use `go test -race ./...` when touching shared state, sync, storage, or CI-sensitive code.
 - For frontend behavior, run `cd web && npm test` when tests exist for the affected logic, and `cd web && npm run build` for TypeScript/UI changes.
-- For Docker/runtime changes, run `docker compose up --build -d` and smoke check the app.
+- For Docker/runtime changes, run build and smoke checks without restarting when possible; run `docker compose up --build -d` only after explicit current-request authorization.
 - If a check cannot be run, say so clearly in the final response and explain why.

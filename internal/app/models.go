@@ -311,18 +311,21 @@ type ProviderConnection struct {
 }
 
 type TrainingSheetWritebackStatus struct {
-	PlannedActivityID string     `json:"plannedActivityId"`
-	ActivityID        string     `json:"activityId"`
-	JobID             string     `json:"jobId,omitempty"`
-	JobStatus         string     `json:"jobStatus,omitempty"`
-	CancelRequestedAt *time.Time `json:"cancelRequestedAt,omitempty"`
-	SummaryStatus     string     `json:"summaryStatus"`
-	SummaryError      string     `json:"summaryError,omitempty"`
-	SummaryWrittenAt  *time.Time `json:"summaryWrittenAt,omitempty"`
-	FeedbackStatus    string     `json:"feedbackStatus"`
-	FeedbackError     string     `json:"feedbackError,omitempty"`
-	FeedbackWrittenAt *time.Time `json:"feedbackWrittenAt,omitempty"`
-	LastAttemptAt     *time.Time `json:"lastAttemptAt,omitempty"`
+	PlannedActivityID  string     `json:"plannedActivityId"`
+	ActivityID         string     `json:"activityId"`
+	JobID              string     `json:"jobId,omitempty"`
+	JobStatus          string     `json:"jobStatus,omitempty"`
+	CancelRequestedAt  *time.Time `json:"cancelRequestedAt,omitempty"`
+	SummaryStatus      string     `json:"summaryStatus"`
+	SummaryError       string     `json:"summaryError,omitempty"`
+	SummaryWrittenAt   *time.Time `json:"summaryWrittenAt,omitempty"`
+	IntervalsStatus    string     `json:"intervalsStatus"`
+	IntervalsError     string     `json:"intervalsError,omitempty"`
+	IntervalsWrittenAt *time.Time `json:"intervalsWrittenAt,omitempty"`
+	FeedbackStatus     string     `json:"feedbackStatus"`
+	FeedbackError      string     `json:"feedbackError,omitempty"`
+	FeedbackWrittenAt  *time.Time `json:"feedbackWrittenAt,omitempty"`
+	LastAttemptAt      *time.Time `json:"lastAttemptAt,omitempty"`
 }
 
 type StoredProviderConnection struct {

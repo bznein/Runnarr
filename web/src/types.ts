@@ -131,6 +131,75 @@ export type PlannedActivity = {
   matchedAt?: string;
 };
 
+export type TrainingSheetPreviewChange = {
+  range: string;
+  section: "summary" | "intervals" | "feedback";
+  label: string;
+  currentValue: string;
+  proposedValue: string;
+  status: "write" | "conflict" | "unchanged";
+};
+
+export type TrainingSheetPreviewCellStyle = {
+  backgroundColor?: string;
+  textColor?: string;
+  bold?: boolean;
+  italic?: boolean;
+  fontSize?: number;
+  horizontalAlignment?: string;
+  verticalAlignment?: string;
+  wrapStrategy?: string;
+};
+
+export type TrainingSheetPreviewColumn = {
+  index: number;
+  label: string;
+  widthPx?: number;
+  hidden?: boolean;
+};
+
+export type TrainingSheetPreviewCell = {
+  ref: string;
+  currentValue: string;
+  displayValue: string;
+  proposedValue?: string;
+  status: "write" | "conflict" | "unchanged";
+  section?: string;
+  label?: string;
+  style?: TrainingSheetPreviewCellStyle;
+  rowSpan?: number;
+  columnSpan?: number;
+};
+
+export type TrainingSheetPreviewRow = {
+  index: number;
+  heightPx?: number;
+  cells: TrainingSheetPreviewCell[];
+};
+
+export type TrainingSheetPreviewGrid = {
+  startRow: number;
+  endRow: number;
+  startColumn: number;
+  endColumn: number;
+  formattingAvailable: boolean;
+  columns: TrainingSheetPreviewColumn[];
+  rows: TrainingSheetPreviewRow[];
+};
+
+export type TrainingSheetWritebackPreview = {
+  activityId: string;
+  plannedActivityId: string;
+  sheetTitle: string;
+  sheetUrl: string;
+  fingerprint: string;
+  changes: TrainingSheetPreviewChange[];
+  grid: TrainingSheetPreviewGrid;
+  warnings?: string[];
+  writeCount: number;
+  conflictCount: number;
+};
+
 export type TrainingSheetWritebackStatus = {
   plannedActivityId: string;
   activityId: string;
@@ -140,6 +209,9 @@ export type TrainingSheetWritebackStatus = {
   summaryStatus: string;
   summaryError?: string;
   summaryWrittenAt?: string;
+  intervalsStatus: string;
+  intervalsError?: string;
+  intervalsWrittenAt?: string;
   feedbackStatus: string;
   feedbackError?: string;
   feedbackWrittenAt?: string;

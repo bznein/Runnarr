@@ -8,6 +8,7 @@ import type {
   GoogleSheetsStatus,
   PlannedActivity,
   PlannedActivityMatchResponse,
+  TrainingSheetWritebackPreview,
   TrainingSheetConfig,
   AppConfig,
   ClimbDetectionSettingsUpdate,
@@ -259,6 +260,16 @@ export const api = {
   trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
   plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
   plannedMatchCandidates: (activityID: string, windowDays = 7) => request<PlannedActivityMatchResponse>(`/api/activities/${activityID}/planned-match-candidates?windowDays=${windowDays}`),
+  plannedMatchPreview: (activityID: string, body: { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean }) =>
+    request<{ preview: TrainingSheetWritebackPreview }>(`/api/activities/${activityID}/planned-match-preview`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
+  applyPlannedMatchPreview: (activityID: string, body: { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean; fingerprint: string }) =>
+    request<{ planned: PlannedActivity; writebackJobId?: string; status: string }>(`/api/activities/${activityID}/planned-match-apply`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
   matchPlannedActivity: (activityID: string, plannedActivityId: string) => request<{ planned: PlannedActivity }>(`/api/activities/${activityID}/planned-match`, {
     method: "POST",
     body: JSON.stringify({ plannedActivityId })
