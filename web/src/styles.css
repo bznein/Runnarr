@@ -3002,6 +3002,16 @@ textarea {
     width: 100%;
   }
 
+  .gear-sort-control,
+  .gear-sort-control + .primary-button {
+    grid-column: 1 / -1;
+  }
+
+  .gear-sort-control select {
+    flex: 1;
+    min-width: 0;
+  }
+
   .metric-grid,
   .tools-result-grid,
   .tools-equivalent-grid,
