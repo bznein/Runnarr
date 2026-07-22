@@ -182,6 +182,70 @@ export type ActivityLap = {
   elevationGainM?: number;
   elevationLossM?: number;
   avgGradeAdjustedPaceSPKM?: number;
+  avgHeartRate?: number;
+  maxHeartRate?: number;
+  avgPower?: number;
+  maxPower?: number;
+  normalizedPower?: number;
+  avgRunCadence?: number;
+  avgGroundContactTimeMS?: number;
+  avgRespirationRate?: number;
+  avgTemperatureC?: number;
+  intensityType?: string;
+  workoutStepIndex?: number;
+  workoutRepeatIndex?: number;
+};
+
+export type ActivityWorkoutStep = {
+  index: number;
+  order: number;
+  type?: string;
+  description?: string;
+  repeatCount?: number;
+  endCondition?: string;
+  endConditionValue?: number;
+  targetType?: string;
+  targetValueOne?: number;
+  targetValueTwo?: number;
+  targetValueUnit?: string;
+  zoneNumber?: number;
+  children?: ActivityWorkoutStep[];
+};
+
+export type ActivityWorkout = {
+  provider: string;
+  providerWorkoutId?: string;
+  name?: string;
+  sportType?: string;
+  steps?: ActivityWorkoutStep[];
+};
+
+export type ActivityInterval = {
+  index: number;
+  category: string;
+  providerType?: string;
+  workoutStepIndex?: number;
+  workoutRepeatIndex?: number;
+  startTime?: string;
+  endTime?: string;
+  elapsedTimeS: number;
+  movingTimeS: number;
+  distanceM: number;
+  avgPaceSPKM?: number;
+  avgGradeAdjustedPaceSPKM?: number;
+  avgHeartRate?: number;
+  maxHeartRate?: number;
+  avgPower?: number;
+  maxPower?: number;
+  normalizedPower?: number;
+  avgRunCadence?: number;
+  avgGroundContactTimeMS?: number;
+  avgRespirationRate?: number;
+  avgTemperatureC?: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
+  caloriesKcal?: number;
+  lapIndexes?: number[];
 };
 
 export type ActivityClimb = {
@@ -263,6 +327,8 @@ export type Activity = {
   gear?: GearSummary[];
   samples?: ActivitySample[];
   laps?: ActivityLap[];
+  workout?: ActivityWorkout;
+  intervals?: ActivityInterval[];
   climbs?: ActivityClimb[];
   media?: ActivityMedia[];
   createdAt: string;

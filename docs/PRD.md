@@ -149,6 +149,8 @@ The default deployment still works for one person, but local account management 
 - Climb detection thresholds should start with sensible defaults and may later become user-configurable settings.
 - Activity laps imported from providers should preserve provider interval metadata where available, including Garmin workout step or lap category fields if exposed by the source data.
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
+- Garmin activities with an associated structured workout should preserve the provider workout definition, repeat structure, step targets, grouped interval summaries, and the lap indexes contributing to each interval.
+- Activity detail should present structured workout intervals as grouped rows with expandable recorded laps, cumulative timing, target information, and sport-appropriate interval metrics; activities without structured workout metadata should retain the flat lap view.
 - Route maps must support mouse-wheel zooming for detailed activity inspection.
 - Route maps should show start and end markers, and should eventually support well-designed direction indicators along the route without cluttering the map.
 - Activity detail should allow attaching photo media to an activity.
@@ -215,7 +217,6 @@ All top-level user-owned records carry a non-null owner reference after bootstra
 - Weekly/monthly/yearly trends.
 - Best efforts and personal records.
 - Segment-like efforts on saved routes.
-- Intervals and workout structure detection.
 - Training load, fitness/fatigue, monotony, and freshness models.
 - Heart rate zones, pace zones, power zones, and distribution charts.
 - Heart-rate zones should be configurable by the admin when heart-rate data is available.

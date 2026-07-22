@@ -39,6 +39,7 @@ type GarminBridge interface {
 	Connect(ctx context.Context, tokenStore, email, password, mfaCode string) (GarminBridgeProfile, error)
 	ListActivities(ctx context.Context, tokenStore string, start, limit int) ([]GarminBridgeActivity, error)
 	ListActivitySplits(ctx context.Context, tokenStore, activityID string) ([]GarminBridgeLap, error)
+	GetActivityWorkout(ctx context.Context, tokenStore, activityID string) (GarminBridgeActivityWorkout, error)
 	DownloadActivity(ctx context.Context, tokenStore, activityID string) ([]byte, error)
 	FetchHealthDay(ctx context.Context, tokenStore, date string) (GarminBridgeHealthDay, error)
 	ListGear(ctx context.Context, tokenStore string) (GarminBridgeGearResponse, error)
@@ -62,8 +63,37 @@ type GarminBridgeActivity struct {
 }
 
 type GarminBridgeLap struct {
-	Index                    int      `json:"index"`
-	AvgGradeAdjustedSpeedMPS *float64 `json:"avgGradeAdjustedSpeed,omitempty"`
+	Index                    int            `json:"index"`
+	StartTime                *time.Time     `json:"startTime,omitempty"`
+	ElapsedTimeS             int            `json:"elapsedTimeS"`
+	MovingTimeS              int            `json:"movingTimeS"`
+	DistanceM                float64        `json:"distanceM"`
+	AvgPaceSPKM              *float64       `json:"avgPaceSPKM,omitempty"`
+	AvgGradeAdjustedSpeedMPS *float64       `json:"avgGradeAdjustedSpeed,omitempty"`
+	AvgGradeAdjustedPaceSPKM *float64       `json:"avgGradeAdjustedPaceSPKM,omitempty"`
+	ElevationGainM           *float64       `json:"elevationGainM,omitempty"`
+	ElevationLossM           *float64       `json:"elevationLossM,omitempty"`
+	AvgHeartRate             *float64       `json:"avgHeartRate,omitempty"`
+	MaxHeartRate             *float64       `json:"maxHeartRate,omitempty"`
+	AvgPower                 *float64       `json:"avgPower,omitempty"`
+	MaxPower                 *float64       `json:"maxPower,omitempty"`
+	NormalizedPower          *float64       `json:"normalizedPower,omitempty"`
+	AvgRunCadence            *float64       `json:"avgRunCadence,omitempty"`
+	AvgGroundContactTimeMS   *float64       `json:"avgGroundContactTimeMS,omitempty"`
+	AvgRespirationRate       *float64       `json:"avgRespirationRate,omitempty"`
+	AvgTemperatureC          *float64       `json:"avgTemperatureC,omitempty"`
+	IntensityType            string         `json:"intensityType,omitempty"`
+	WorkoutStepIndex         *int           `json:"workoutStepIndex,omitempty"`
+	Raw                      map[string]any `json:"raw,omitempty"`
+}
+
+type GarminBridgeActivityWorkout struct {
+	Available bool               `json:"available"`
+	Workout   *ActivityWorkout   `json:"workout,omitempty"`
+	Intervals []ActivityInterval `json:"intervals,omitempty"`
+	Laps      []GarminBridgeLap  `json:"laps,omitempty"`
+	Raw       map[string]any     `json:"raw,omitempty"`
+	Errors    map[string]string  `json:"errors,omitempty"`
 }
 
 type GarminBridgeHealthDay struct {
@@ -101,7 +131,8 @@ type GarminBridgeGearActivity struct {
 }
 
 type GarminSyncOptions struct {
-	Oldest time.Time
+	Oldest  time.Time
+	AllData bool
 }
 
 type GarminSyncProgress func(map[string]any)
@@ -193,13 +224,14 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		return nil, fmt.Errorf("could not prepare Garmin token storage: %w", err)
 	}
 
-	oldest := opts.Oldest
-	if oldest.IsZero() {
-		oldest = time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	oldest := garminSyncOldest(opts, time.Now().UTC())
+	report := func(payload map[string]any) {
+		payload["allData"] = opts.AllData
+		progress(payload)
 	}
 
-	progress(map[string]any{"provider": garminProvider, "stage": "Listing Garmin activities", "activities": 0, "processed": 0, "imported": 0, "failed": 0, "oldest": oldest.Format("2006-01-02")})
-	activities, err := s.listActivitiesSince(ctx, oldest, progress)
+	report(map[string]any{"provider": garminProvider, "stage": "Listing Garmin activities", "activities": 0, "processed": 0, "imported": 0, "failed": 0, "oldest": oldest.Format("2006-01-02")})
+	activities, err := s.listActivitiesSince(ctx, oldest, report)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -227,7 +259,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			"currentActivityName": source.Name,
 			"oldest":              oldest.Format("2006-01-02"),
 		}
-		progress(payload)
+		report(payload)
 
 		excluded, err := s.store.IsActivitySyncExcluded(ctx, garminProvider, source.ID)
 		if err != nil {
@@ -238,7 +270,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		}
 		if excluded {
 			skippedExcluded++
-			progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "oldest": oldest.Format("2006-01-02")})
+			report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "oldest": oldest.Format("2006-01-02")})
 			continue
 		}
 
@@ -249,7 +281,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			}
 			failed++
 			firstErrors = appendGarminSyncError(firstErrors, source, err)
-			progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
+			report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
 			continue
 		}
 		importedActivity, err := parseGarminActivityDownload(ctx, source.ID, data)
@@ -259,16 +291,14 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			}
 			failed++
 			firstErrors = appendGarminSyncError(firstErrors, source, err)
-			progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
+			report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
 			continue
 		}
 		applyGarminMetadata(&importedActivity, source)
-		if len(importedActivity.Laps) > 0 && source.AvgGradeAdjustedSpeedMPS != nil {
-			if laps, err := s.bridge.ListActivitySplits(ctx, tokenStore, source.ID); err == nil {
-				applyGarminLapMetadata(&importedActivity, laps)
-			} else if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
+		if workout, err := s.bridge.GetActivityWorkout(ctx, tokenStore, source.ID); err == nil {
+			applyGarminWorkoutMetadata(&importedActivity, workout)
+		} else if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 		if _, err := s.store.SaveImportedActivity(ctx, garminProvider, source.ID, nil, importedActivity); err != nil {
 			if ctx.Err() != nil {
@@ -276,16 +306,16 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			}
 			if errors.Is(err, ErrActivitySyncExcluded) {
 				skippedExcluded++
-				progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "oldest": oldest.Format("2006-01-02")})
+				report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "oldest": oldest.Format("2006-01-02")})
 				continue
 			}
 			failed++
 			firstErrors = appendGarminSyncError(firstErrors, source, err)
-			progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
+			report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
 			continue
 		}
 		imported++
-		progress(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
+		report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
 	}
 
 	return map[string]any{
@@ -298,7 +328,18 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		"skippedExcluded": skippedExcluded,
 		"firstErrors":     firstErrors,
 		"oldest":          oldest.Format("2006-01-02"),
+		"allData":         opts.AllData,
 	}, nil
+}
+
+func garminSyncOldest(opts GarminSyncOptions, now time.Time) time.Time {
+	if opts.AllData {
+		return time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	if !opts.Oldest.IsZero() {
+		return opts.Oldest
+	}
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func (s *GarminService) SyncGear(ctx context.Context, progress GarminSyncProgress) (map[string]any, error) {
@@ -562,24 +603,105 @@ func applyGarminMetadata(activity *ImportedActivity, source GarminBridgeActivity
 	}
 }
 
-func applyGarminLapMetadata(activity *ImportedActivity, sourceLaps []GarminBridgeLap) {
-	if len(activity.Laps) == 0 || len(sourceLaps) == 0 {
+func applyGarminWorkoutMetadata(activity *ImportedActivity, source GarminBridgeActivityWorkout) {
+	if !source.Available {
 		return
 	}
-
-	gapByIndex := make(map[int]*float64, len(sourceLaps))
-	for _, sourceLap := range sourceLaps {
-		if sourceLap.Index < 0 {
-			continue
-		}
-		if pace := gradeAdjustedPaceFromSpeedMPS(sourceLap.AvgGradeAdjustedSpeedMPS); pace != nil {
-			gapByIndex[sourceLap.Index] = pace
+	activity.ReplaceWorkoutMetadata = true
+	activity.Workout = source.Workout
+	activity.Intervals = append([]ActivityInterval(nil), source.Intervals...)
+	if activity.Raw == nil {
+		activity.Raw = map[string]any{}
+	}
+	if source.Raw != nil {
+		activity.Raw["garmin_workout"] = source.Raw
+	}
+	applyGarminLapMetadata(&activity.Laps, source.Laps)
+	for _, interval := range source.Intervals {
+		for _, lapIndex := range interval.LapIndexes {
+			if lapIndex < 0 || lapIndex >= len(activity.Laps) {
+				continue
+			}
+			lap := &activity.Laps[lapIndex]
+			if lap.IntensityType == "" {
+				lap.IntensityType = strings.ToUpper(interval.Category)
+			}
+			lap.WorkoutStepIndex = interval.WorkoutStepIndex
+			lap.WorkoutRepeatIndex = interval.WorkoutRepeatIndex
 		}
 	}
+}
 
-	for index := range activity.Laps {
-		if pace, ok := gapByIndex[activity.Laps[index].Index]; ok {
-			activity.Laps[index].AvgGradeAdjustedPaceSPKM = pace
+func applyGarminLapMetadata(activityLaps *[]ActivityLap, sourceLaps []GarminBridgeLap) {
+	if activityLaps == nil || len(*activityLaps) == 0 || len(sourceLaps) == 0 {
+		return
+	}
+	for _, sourceLap := range sourceLaps {
+		if sourceLap.Index < 0 || sourceLap.Index >= len(*activityLaps) {
+			continue
+		}
+		lap := &(*activityLaps)[sourceLap.Index]
+		if sourceLap.StartTime != nil {
+			lap.StartTime = sourceLap.StartTime
+		}
+		if sourceLap.ElapsedTimeS > 0 {
+			lap.ElapsedTimeS = sourceLap.ElapsedTimeS
+		}
+		if sourceLap.MovingTimeS > 0 {
+			lap.MovingTimeS = sourceLap.MovingTimeS
+		}
+		if sourceLap.DistanceM > 0 {
+			lap.DistanceM = sourceLap.DistanceM
+		}
+		if sourceLap.AvgPaceSPKM != nil {
+			lap.AvgPaceSPKM = sourceLap.AvgPaceSPKM
+		}
+		if sourceLap.AvgGradeAdjustedPaceSPKM != nil {
+			lap.AvgGradeAdjustedPaceSPKM = sourceLap.AvgGradeAdjustedPaceSPKM
+		} else if gap := gradeAdjustedPaceFromSpeedMPS(sourceLap.AvgGradeAdjustedSpeedMPS); gap != nil {
+			lap.AvgGradeAdjustedPaceSPKM = gap
+		}
+		if sourceLap.ElevationGainM != nil {
+			lap.ElevationGainM = sourceLap.ElevationGainM
+		}
+		if sourceLap.ElevationLossM != nil {
+			lap.ElevationLossM = sourceLap.ElevationLossM
+		}
+		if sourceLap.AvgHeartRate != nil {
+			lap.AvgHeartRate = sourceLap.AvgHeartRate
+		}
+		if sourceLap.MaxHeartRate != nil {
+			lap.MaxHeartRate = sourceLap.MaxHeartRate
+		}
+		if sourceLap.AvgPower != nil {
+			lap.AvgPower = sourceLap.AvgPower
+		}
+		if sourceLap.MaxPower != nil {
+			lap.MaxPower = sourceLap.MaxPower
+		}
+		if sourceLap.NormalizedPower != nil {
+			lap.NormalizedPower = sourceLap.NormalizedPower
+		}
+		if sourceLap.AvgRunCadence != nil {
+			lap.AvgRunCadence = sourceLap.AvgRunCadence
+		}
+		if sourceLap.AvgGroundContactTimeMS != nil {
+			lap.AvgGroundContactTimeMS = sourceLap.AvgGroundContactTimeMS
+		}
+		if sourceLap.AvgRespirationRate != nil {
+			lap.AvgRespirationRate = sourceLap.AvgRespirationRate
+		}
+		if sourceLap.AvgTemperatureC != nil {
+			lap.AvgTemperatureC = sourceLap.AvgTemperatureC
+		}
+		if sourceLap.IntensityType != "" {
+			lap.IntensityType = sourceLap.IntensityType
+		}
+		if sourceLap.WorkoutStepIndex != nil {
+			lap.WorkoutStepIndex = sourceLap.WorkoutStepIndex
+		}
+		if sourceLap.Raw != nil {
+			lap.Raw = sourceLap.Raw
 		}
 	}
 }
@@ -640,6 +762,16 @@ func (b PythonGarminBridge) ListActivitySplits(ctx context.Context, tokenStore, 
 		"activityId": activityID,
 	}, &response)
 	return response.Laps, err
+}
+
+func (b PythonGarminBridge) GetActivityWorkout(ctx context.Context, tokenStore, activityID string) (GarminBridgeActivityWorkout, error) {
+	var response GarminBridgeActivityWorkout
+	err := b.run(ctx, map[string]any{
+		"action":     "activity-workout",
+		"tokenStore": tokenStore,
+		"activityId": activityID,
+	}, &response)
+	return response, err
 }
 
 func (b PythonGarminBridge) DownloadActivity(ctx context.Context, tokenStore, activityID string) ([]byte, error) {

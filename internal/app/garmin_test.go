@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -66,16 +67,35 @@ func TestApplyGarminMetadata(t *testing.T) {
 	}
 }
 
-func TestApplyGarminLapMetadata(t *testing.T) {
-	activity := ImportedActivity{
-		Laps: []ActivityLap{
-			{Index: 0},
-			{Index: 1},
-			{Index: 2},
-		},
+func TestGarminSyncOldestDefaultsToToday(t *testing.T) {
+	now := time.Date(2026, 7, 22, 15, 30, 0, 0, time.UTC)
+	if got := garminSyncOldest(GarminSyncOptions{}, now); !got.Equal(time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("default oldest = %s, want start of today", got)
 	}
 
-	applyGarminLapMetadata(&activity, []GarminBridgeLap{
+	if got := garminSyncOldest(GarminSyncOptions{AllData: true}, now); !got.Equal(time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("all-data oldest = %s, want epoch", got)
+	}
+}
+
+func TestDecodeGarminSyncOptionsSupportsAllData(t *testing.T) {
+	request := httptest.NewRequest("POST", "/api/providers/garmin/sync", strings.NewReader(`{"allData":true,"oldest":"2026-07-22"}`))
+	options, err := decodeGarminSyncOptions(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !options.AllData || !options.Oldest.IsZero() {
+		t.Fatalf("options = %#v, want explicit all-data with no date", options)
+	}
+}
+
+func TestApplyGarminLapMetadata(t *testing.T) {
+	existingGap := 300.0
+	activity := ImportedActivity{
+		Laps: []ActivityLap{{Index: 0}, {Index: 1, AvgGradeAdjustedPaceSPKM: &existingGap}, {Index: 2}},
+	}
+
+	applyGarminLapMetadata(&activity.Laps, []GarminBridgeLap{
 		{Index: 0, AvgGradeAdjustedSpeedMPS: floatPtr(4)},
 		{Index: 1},
 		{Index: 2, AvgGradeAdjustedSpeedMPS: floatPtr(0)},
@@ -84,11 +104,45 @@ func TestApplyGarminLapMetadata(t *testing.T) {
 	if activity.Laps[0].AvgGradeAdjustedPaceSPKM == nil || *activity.Laps[0].AvgGradeAdjustedPaceSPKM != 250 {
 		t.Fatalf("lap 0 GAP = %#v, want 250", activity.Laps[0].AvgGradeAdjustedPaceSPKM)
 	}
-	if activity.Laps[1].AvgGradeAdjustedPaceSPKM != nil {
-		t.Fatalf("lap 1 GAP = %#v, want nil", activity.Laps[1].AvgGradeAdjustedPaceSPKM)
+	if activity.Laps[1].AvgGradeAdjustedPaceSPKM == nil || *activity.Laps[1].AvgGradeAdjustedPaceSPKM != existingGap {
+		t.Fatalf("lap 1 GAP = %#v, want existing value", activity.Laps[1].AvgGradeAdjustedPaceSPKM)
 	}
 	if activity.Laps[2].AvgGradeAdjustedPaceSPKM != nil {
 		t.Fatalf("lap 2 GAP = %#v, want nil", activity.Laps[2].AvgGradeAdjustedPaceSPKM)
+	}
+}
+
+func TestApplyGarminWorkoutMetadata(t *testing.T) {
+	activity := ImportedActivity{
+		Laps: []ActivityLap{{Index: 0}, {Index: 1}, {Index: 2}},
+	}
+	stepIndex := 1
+	repeatIndex := 2
+	workout := &ActivityWorkout{Provider: garminProvider, ProviderWorkoutID: "workout-1", Name: "5x7"}
+	response := GarminBridgeActivityWorkout{
+		Available: true,
+		Workout:   workout,
+		Intervals: []ActivityInterval{{Index: 0, Category: "active", WorkoutStepIndex: &stepIndex, WorkoutRepeatIndex: &repeatIndex, LapIndexes: []int{0, 1}}},
+		Laps:      []GarminBridgeLap{{Index: 0, IntensityType: "active", AvgHeartRate: floatPtr(160), Raw: map[string]any{"lapIndex": 1}}},
+		Raw:       map[string]any{"typedSplits": map[string]any{"count": 1}},
+	}
+
+	applyGarminWorkoutMetadata(&activity, response)
+
+	if !activity.ReplaceWorkoutMetadata {
+		t.Fatal("workout metadata should be marked for replacement")
+	}
+	if activity.Workout != workout || len(activity.Intervals) != 1 {
+		t.Fatalf("workout metadata = %#v, intervals = %#v", activity.Workout, activity.Intervals)
+	}
+	if activity.Laps[0].IntensityType != "active" || activity.Laps[0].WorkoutRepeatIndex == nil || *activity.Laps[0].WorkoutRepeatIndex != 2 {
+		t.Fatalf("lap metadata = %#v", activity.Laps[0])
+	}
+	if activity.Laps[1].WorkoutStepIndex == nil || *activity.Laps[1].WorkoutStepIndex != 1 {
+		t.Fatalf("interval mapping did not reach child lap: %#v", activity.Laps[1])
+	}
+	if activity.Raw["garmin_workout"] == nil {
+		t.Fatalf("raw workout payload missing: %#v", activity.Raw)
 	}
 }
 
@@ -162,6 +216,10 @@ func (b stubGarminBridge) ListActivities(context.Context, string, int, int) ([]G
 
 func (b stubGarminBridge) ListActivitySplits(context.Context, string, string) ([]GarminBridgeLap, error) {
 	return nil, nil
+}
+
+func (b stubGarminBridge) GetActivityWorkout(context.Context, string, string) (GarminBridgeActivityWorkout, error) {
+	return GarminBridgeActivityWorkout{}, nil
 }
 
 func (b stubGarminBridge) DownloadActivity(context.Context, string, string) ([]byte, error) {
