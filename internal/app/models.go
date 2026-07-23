@@ -89,6 +89,11 @@ type ActivityListPage struct {
 	HasMore    bool       `json:"hasMore"`
 }
 
+type ActivityNavigation struct {
+	PreviousID string `json:"previousId,omitempty"`
+	NextID     string `json:"nextId,omitempty"`
+}
+
 // ActivitySeries is the bounded display representation of an activity's
 // samples. Full samples remain available to server-side exports and analysis,
 // but clients should use this response for charts and maps.

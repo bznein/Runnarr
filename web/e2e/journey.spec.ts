@@ -141,6 +141,12 @@ test.describe("local product journey", () => {
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();
+    const previousActivity = page.getByRole("button", { name: "Previous activity" });
+    await expect(previousActivity).toBeEnabled();
+    await previousActivity.click();
+    await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    await page.getByRole("button", { name: "Next activity" }).click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
     if (mobile) {
       await expect(page.locator(".mobile-header-title")).toHaveText("Activity");
       await expectNoHorizontalOverflow(page);

@@ -115,6 +115,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/tools/vdot", s.handleToolsVDOT)
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
+			r.Get("/activities/{id}/navigation", s.handleActivityNavigation)
 			r.Get("/activities/{id}/series", s.handleActivitySeries)
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
 			r.Post("/activities/{id}/climbs-preview", s.handleActivityClimbsPreview)
@@ -401,6 +402,16 @@ func (s *Server) handleListActivities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func (s *Server) handleActivityNavigation(w http.ResponseWriter, r *http.Request) {
+	navigation, err := s.store.ActivityNavigation(r.Context(), chi.URLParam(r, "id"), activityFiltersFromQuery(r))
+	if err != nil {
+		s.logger.Error("get activity navigation", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not get activity navigation")
+		return
+	}
+	writeJSON(w, http.StatusOK, navigation)
 }
 
 func (s *Server) handleActivityTypes(w http.ResponseWriter, r *http.Request) {

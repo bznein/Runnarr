@@ -460,6 +460,11 @@ export type ActivityListPage = {
   hasMore: boolean;
 };
 
+export type ActivityNavigation = {
+  previousId?: string;
+  nextId?: string;
+};
+
 export type CalendarActivitySummary = {
   id: string;
   source: string;
