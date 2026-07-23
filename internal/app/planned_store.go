@@ -184,8 +184,9 @@ func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) (
 
 func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID string, windowDays int) (PlannedActivityMatchResponse, error) {
 	var activitySource string
+	var activitySportType string
 	var activityDate time.Time
-	if err := s.db.QueryRow(ctx, `select source, date(start_time) from activities where id = $1 and user_id = $2`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate); err != nil {
+	if err := s.db.QueryRow(ctx, `select source, date(start_time), sport_type from activities where id = $1 and user_id = $2`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate, &activitySportType); err != nil {
 		return PlannedActivityMatchResponse{}, err
 	}
 	if windowDays != 7 && windowDays != 30 {
@@ -193,6 +194,9 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	}
 	response := PlannedActivityMatchResponse{Candidates: make([]PlannedActivity, 0)}
 	if activitySource == trainingSheetProvider {
+		return response, nil
+	}
+	if !isRunningSport(activitySportType) {
 		return response, nil
 	}
 	rows, err := s.db.Query(ctx, `
@@ -296,11 +300,15 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 	}()
 
 	var activitySource string
+	var activitySportType string
 	var activityDate time.Time
-	if err = tx.QueryRow(ctx, `select source, date(start_time) from activities where id = $1 and user_id = $2 for update`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate); err != nil {
+	if err = tx.QueryRow(ctx, `select source, date(start_time), sport_type from activities where id = $1 and user_id = $2 for update`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate, &activitySportType); err != nil {
 		return PlannedActivity{}, err
 	}
 	if activitySource == trainingSheetProvider {
+		return PlannedActivity{}, errPlannedMatchInvalid
+	}
+	if !isRunningSport(activitySportType) {
 		return PlannedActivity{}, errPlannedMatchInvalid
 	}
 

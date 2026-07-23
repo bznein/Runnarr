@@ -57,3 +57,37 @@ on conflict (user_id, provider, provider_gear_id) do update set
     first_used_at = excluded.first_used_at,
     last_used_at = excluded.last_used_at,
     default_activity_types = excluded.default_activity_types;
+
+insert into activities(
+    user_id, source, source_id, name, sport_type, start_time,
+    distance_m, moving_time_s, elapsed_time_s, raw
+)
+select id, 'e2e', 'e2e-cycling-activity', 'E2E Cycling Activity', 'Cycling',
+    current_date + time '06:00', 25000, 3600, 3750, '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    start_time = excluded.start_time,
+    distance_m = excluded.distance_m,
+    moving_time_s = excluded.moving_time_s,
+    elapsed_time_s = excluded.elapsed_time_s,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw
+)
+select id, 'training_sheet', 'e2e-planned-run', 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', 'A1', current_date, 'E2E Planned Run', 'Run', 'pending', '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
