@@ -186,7 +186,9 @@ func (s *Server) handleApplyPlannedMatchPreview(w http.ResponseWriter, r *http.R
 	}
 	activityID := chi.URLParam(r, "id")
 	previewService := NewTrainingSheetWritebackService(s.store, s.googleAuth())
-	preview, err := previewService.Preview(r.Context(), strings.TrimSpace(body.PlannedActivityID), activityID, body.trainingSheetPreviewRequest)
+	baseRequest := body.trainingSheetPreviewRequest
+	baseRequest.Overrides = nil
+	preview, err := previewService.Preview(r.Context(), strings.TrimSpace(body.PlannedActivityID), activityID, baseRequest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity or planned activity not found")
 		return
@@ -207,8 +209,26 @@ func (s *Server) handleApplyPlannedMatchPreview(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusConflict, "the sheet changed since this preview; preview it again")
 		return
 	}
+	if len(body.Overrides) > 0 {
+		if _, err := previewService.Preview(r.Context(), strings.TrimSpace(body.PlannedActivityID), activityID, body.trainingSheetPreviewRequest); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "activity or planned activity not found")
+				return
+			}
+			if errors.Is(err, errPlannedMatchConflict) {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
+			if errors.Is(err, errPlannedMatchInvalid) || errors.Is(err, ErrInvalidActivityFeedback) || errors.Is(err, ErrInvalidActivityRPE) {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
-	reflection := plannedActivityReflection{Feedback: body.Feedback, RPESet: body.RPESet, RPE: body.RPE}
+	reflection := plannedActivityReflection{Feedback: body.Feedback, RPESet: body.RPESet, RPE: body.RPE, ManualOverrides: body.Overrides}
 	planned, err := s.store.MatchPlannedActivityWithReflection(r.Context(), activityID, strings.TrimSpace(body.PlannedActivityID), reflection)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "activity or planned activity not found")

@@ -177,6 +177,36 @@ func TestIntervalUpdatesForRecordsRejectsUnmappedRows(t *testing.T) {
 	}
 }
 
+func TestIntervalUpdatesForRecordsReportsUnmatchedActiveIntervals(t *testing.T) {
+	table := &trainingSheetWorkoutTable{
+		Columns: map[string]string{trainingSheetMetricAvgPace: "B"},
+		Rows: []trainingSheetWorkoutTableRow{
+			{Row: 1, Label: "5min rep 1", Kind: trainingSheetRowExact, Group: "duration:5m"},
+			{Row: 2, Label: "5min rep 2", Kind: trainingSheetRowExact, Group: "duration:5m"},
+			{Row: 3, Label: "5min rep 3", Kind: trainingSheetRowExact, Group: "duration:5m"},
+		},
+	}
+	records := make([]trainingSheetWorkoutRecord, 0, 11)
+	for _, duration := range []int{300, 300, 300, 159, 40, 40, 40, 40, 40, 40, 40} {
+		pace := 200.0
+		records = append(records, trainingSheetWorkoutRecord{DurationS: duration, MovingTimeS: duration, DistanceM: 1000, AvgPaceSPKM: &pace})
+	}
+
+	plan, err := intervalUpdatesForRecordsWithWarning("Week", table, records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SkippedRecord != 8 {
+		t.Fatalf("skipped records = %d, want 8", plan.SkippedRecord)
+	}
+	if len(plan.Updates) != 3 {
+		t.Fatalf("updates = %d, want 3", len(plan.Updates))
+	}
+	if _, err := intervalUpdatesForRecords("Week", table, records); err == nil {
+		t.Fatal("strict mapping should reject unmatched active intervals")
+	}
+}
+
 func updateValue(updates []googleValueRangeUpdate, rangeName string) any {
 	for _, update := range updates {
 		if update.Range != rangeName || len(update.Values) == 0 || len(update.Values[0]) == 0 {

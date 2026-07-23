@@ -29,6 +29,7 @@ import type {
   TrainingSheetWritebackPreview,
   Session,
   SyncJob,
+  TrainingSheetPreviewChange,
   TrainingSheetPreviewCell,
   ToolsPaceResponse,
   ToolsVdotResponse,
@@ -44,7 +45,7 @@ type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityAnalysisTab = "stats" | "intervals";
-type PlannedMatchDraft = { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean };
+type PlannedMatchDraft = { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean; overrides?: Record<string, string> };
 type ActivityChartPoint = {
   index: number;
   label: string;
@@ -3252,7 +3253,8 @@ function PlannedActivityMatchDialog({
 }) {
   const [feedback, setFeedback] = useState("");
   const [rpe, setRPE] = useState(5);
-  const [rpeTouched, setRPETouched] = useState(false);
+  const [rpeTouched, setRPETouched] = useState(true);
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
   const trimmedFeedback = feedback.trim();
   const valid = Array.from(trimmedFeedback).length <= 5000;
   const selectedCandidate = data.candidates.find((candidate) => candidate.id === selectedCandidateId);
@@ -3261,15 +3263,22 @@ function PlannedActivityMatchDialog({
     plannedActivityId: selectedCandidateId ?? "",
     feedback: feedbackAvailable ? trimmedFeedback : undefined,
     rpe: rpeTouched ? rpe : null,
-    rpeSet: rpeTouched
+    rpeSet: rpeTouched,
+    overrides: Object.keys(overrides).length > 0 ? overrides : undefined
   });
 
   useEffect(() => {
     setFeedback("");
     setRPE(5);
-    setRPETouched(false);
+    setRPETouched(true);
+    setOverrides({});
     onPreviewReset();
   }, [selectedCandidateId]);
+
+  const resetPreview = () => {
+    setOverrides({});
+    onPreviewReset();
+  };
 
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -3337,14 +3346,14 @@ function PlannedActivityMatchDialog({
                 onChange={(event) => {
                   setRPE(Number(event.target.value));
                   setRPETouched(true);
-                  onPreviewReset();
+                  resetPreview();
                 }}
               />
             </label>
             {feedbackAvailable && (
               <label className="field">
                 <span>How did it feel/go?</span>
-                <textarea className="notes-textarea" maxLength={5000} rows={6} value={feedback} onChange={(event) => { setFeedback(event.target.value); onPreviewReset(); }} />
+                <textarea className="notes-textarea" maxLength={5000} rows={6} value={feedback} onChange={(event) => { setFeedback(event.target.value); resetPreview(); }} />
               </label>
             )}
             {!feedbackAvailable && selectedCandidate && (
@@ -3356,7 +3365,7 @@ function PlannedActivityMatchDialog({
             )}
           </>
         )}
-        {preview && <TrainingSheetPreviewPanel preview={preview} />}
+        {preview && <TrainingSheetPreviewPanel preview={preview} overrides={overrides} onOverrideChange={(ref, value) => setOverrides((current) => ({ ...current, [ref]: value }))} />}
         {!valid && <div className="row-error">Feedback must be 5000 characters or fewer.</div>}
         {error instanceof Error && <div className="error">{error.message}</div>}
         <div className="dialog-actions">
@@ -3364,7 +3373,7 @@ function PlannedActivityMatchDialog({
             <button className="secondary-button" type="button" disabled={matching} onClick={onLoadMore}>Load more plans</button>
           )}
           {preview && (
-            <button className="secondary-button" type="button" disabled={matching} onClick={onPreviewReset}>Edit</button>
+            <button className="secondary-button" type="button" disabled={matching} onClick={resetPreview}>Edit</button>
           )}
           <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>
           <button className="primary-button" type="submit" disabled={matching || !selectedCandidateId || !valid}>
@@ -3376,10 +3385,14 @@ function PlannedActivityMatchDialog({
   );
 }
 
-function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebackPreview }) {
+function TrainingSheetPreviewPanel({ preview, overrides, onOverrideChange }: { preview: TrainingSheetWritebackPreview; overrides: Record<string, string>; onOverrideChange: (ref: string, value: string) => void }) {
   const [selectedRef, setSelectedRef] = useState<string>();
   const grid = preview.grid;
   const selectedCell = grid?.rows.flatMap((row) => row.cells).find((cell) => cell.ref === selectedRef);
+  const effectiveSelectedCell = selectedCell ? trainingSheetPreviewCellWithOverride(selectedCell, overrides) : undefined;
+  const effectiveChanges = preview.changes.map((change) => trainingSheetPreviewChangeWithOverride(change, overrides));
+  const writeCount = effectiveChanges.filter((change) => change.status === "write" || change.status === "manual").length;
+  const conflictCount = effectiveChanges.filter((change) => change.status === "conflict").length;
 
   useEffect(() => {
     setSelectedRef(undefined);
@@ -3395,13 +3408,15 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
         {preview.sheetUrl && <a href={preview.sheetUrl} target="_blank" rel="noreferrer">Open sheet</a>}
       </div>
       <div className="muted">
-        {preview.writeCount} cell{preview.writeCount === 1 ? "" : "s"} will be written{preview.conflictCount > 0 ? ` · ${preview.conflictCount} existing value${preview.conflictCount === 1 ? "" : "s"} preserved` : ""}
+        {writeCount} cell{writeCount === 1 ? "" : "s"} will be written{conflictCount > 0 ? ` · ${conflictCount} existing value${conflictCount === 1 ? "" : "s"} preserved` : ""}
       </div>
       <div className="training-sheet-preview-legend" aria-label="Preview legend">
         <span><i className="training-sheet-preview-swatch write" /> Will write</span>
         <span><i className="training-sheet-preview-swatch conflict" /> Existing value preserved</span>
+        <span><i className="training-sheet-preview-swatch manual" /> Manual override</span>
       </div>
-      {preview.warnings?.map((warning) => <div className="row-error" key={warning}>{warning}</div>)}
+      <div className="muted">Click a proposed cell to edit its value. Edited conflicts will replace the existing sheet value.</div>
+      {preview.warnings?.map((warning) => <div className="training-sheet-preview-warning" key={warning}>{warning}</div>)}
       {grid?.rows.length ? (
         <>
           <div className="training-sheet-preview-grid-wrap">
@@ -3421,11 +3436,12 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
                   <tr key={row.index} style={row.heightPx ? { height: `${row.heightPx}px` } : undefined}>
                     <th className="training-sheet-grid-row-number" scope="row">{row.index}</th>
                     {row.cells.map((cell) => {
+                      const displayCell = trainingSheetPreviewCellWithOverride(cell, overrides);
                       const selected = cell.ref === selectedRef;
                       return (
                         <td
                           key={cell.ref}
-                          className={`training-sheet-grid-cell-container ${cell.status} ${selected ? "selected" : ""}`}
+                          className={`training-sheet-grid-cell-container ${displayCell.status} ${selected ? "selected" : ""}`}
                           rowSpan={cell.rowSpan}
                           colSpan={cell.columnSpan}
                         >
@@ -3433,11 +3449,11 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
                             className="training-sheet-grid-cell"
                             type="button"
                             style={trainingSheetCellInlineStyle(cell)}
-                            aria-label={trainingSheetCellAriaLabel(cell)}
-                            title={trainingSheetCellAriaLabel(cell)}
+                            aria-label={trainingSheetCellAriaLabel(displayCell)}
+                            title={trainingSheetCellAriaLabel(displayCell)}
                             onClick={() => setSelectedRef(cell.ref)}
                           >
-                            {cell.displayValue || "\u00a0"}
+                            {displayCell.displayValue || "\u00a0"}
                           </button>
                         </td>
                       );
@@ -3447,7 +3463,7 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
               </tbody>
             </table>
           </div>
-          {selectedCell && <TrainingSheetPreviewCellInspector cell={selectedCell} />}
+          {effectiveSelectedCell && <TrainingSheetPreviewCellInspector cell={effectiveSelectedCell} onOverrideChange={onOverrideChange} />}
         </>
       ) : (
         <div className="muted">No sheet values are available to preview.</div>
@@ -3456,8 +3472,27 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
   );
 }
 
-function TrainingSheetPreviewCellInspector({ cell }: { cell: TrainingSheetPreviewCell }) {
+function trainingSheetPreviewCellWithOverride(cell: TrainingSheetPreviewCell, overrides: Record<string, string>): TrainingSheetPreviewCell {
+  if (!Object.prototype.hasOwnProperty.call(overrides, cell.ref) || !cell.section) {
+    return cell;
+  }
+  const value = overrides[cell.ref];
+  return { ...cell, displayValue: value, proposedValue: value, status: cell.currentValue === value ? "unchanged" : "manual" };
+}
+
+function trainingSheetPreviewChangeWithOverride(change: TrainingSheetPreviewChange, overrides: Record<string, string>): TrainingSheetPreviewChange {
+  const separator = change.range.lastIndexOf("!");
+  const ref = (separator >= 0 ? change.range.slice(separator + 1) : change.range).replace(/\$/g, "").toUpperCase();
+  if (!Object.prototype.hasOwnProperty.call(overrides, ref)) {
+    return change;
+  }
+  const proposedValue = overrides[ref];
+  return { ...change, proposedValue, status: change.currentValue === proposedValue ? "unchanged" : "manual" };
+}
+
+function TrainingSheetPreviewCellInspector({ cell, onOverrideChange }: { cell: TrainingSheetPreviewCell; onOverrideChange: (ref: string, value: string) => void }) {
   const changed = cell.status !== "unchanged";
+  const editable = Boolean(cell.section);
   return (
     <div className="training-sheet-preview-inspector" aria-live="polite">
       <div className="training-sheet-preview-inspector-heading">
@@ -3470,7 +3505,12 @@ function TrainingSheetPreviewCellInspector({ cell }: { cell: TrainingSheetPrevie
       </div>
       <div className="training-sheet-preview-inspector-values">
         <div><span>Current</span><strong>{cell.currentValue || "(blank)"}</strong></div>
-        {changed && <div><span>Proposed</span><strong>{cell.proposedValue || "(blank)"}</strong></div>}
+        {editable ? (
+          <label className="training-sheet-preview-edit-value">
+            <span>Proposed</span>
+            <input value={cell.proposedValue ?? cell.displayValue} onChange={(event) => onOverrideChange(cell.ref, event.target.value)} />
+          </label>
+        ) : changed && <div><span>Proposed</span><strong>{cell.proposedValue || "(blank)"}</strong></div>}
       </div>
     </div>
   );
@@ -3516,11 +3556,12 @@ function trainingSheetCellAriaLabel(cell: TrainingSheetPreviewCell) {
   return `${cell.ref}: ${current} to ${cell.proposedValue || "blank"}; ${trainingSheetPreviewStatusLabel(cell.status)}`;
 }
 
-function trainingSheetPreviewStatusLabel(status: "write" | "conflict" | "unchanged") {
+function trainingSheetPreviewStatusLabel(status: "write" | "conflict" | "unchanged" | "manual") {
   switch (status) {
     case "write": return "will write";
     case "conflict": return "existing value preserved";
     case "unchanged": return "unchanged";
+    case "manual": return "manual override";
   }
 }
 
@@ -3530,10 +3571,12 @@ function writebackStatusLabel(status: string) {
       return "written";
     case "completed_with_conflicts":
       return "existing values preserved";
+    case "completed_with_warnings":
+      return "written with warnings";
     case "skipped":
       return "skipped; review needed";
-    case "waiting_for_feedback":
-      return "waiting for feedback";
+    case "not_provided":
+      return "not provided";
     case "not_applicable":
       return "not applicable";
     case "running":

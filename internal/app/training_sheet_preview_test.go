@@ -22,6 +22,10 @@ func TestTrainingSheetPreviewStatusClassifiesWritesAndConflicts(t *testing.T) {
 	if got := trainingSheetPreviewStatus(base, "0:00", "163"); got != "write" {
 		t.Fatalf("zero-clock repair status = %q, want write", got)
 	}
+	base.ManualOverride = true
+	if got := trainingSheetPreviewStatus(base, "160", "163"); got != "manual" {
+		t.Fatalf("manual status = %q, want manual", got)
+	}
 }
 
 func TestTrainingSheetPreviewFingerprintIncludesCurrentAndProposedValues(t *testing.T) {
@@ -45,6 +49,48 @@ func TestApplyTrainingSheetPreviewDraft(t *testing.T) {
 	if activity.RPE == nil || *activity.RPE != 8 {
 		t.Fatalf("RPE = %#v, want 8", activity.RPE)
 	}
+}
+
+func TestTrainingSheetPreviewOverridesReplaceProposedValues(t *testing.T) {
+	planned := PlannedActivity{SheetTitle: "Week", PlanCell: "D2"}
+	activity := Activity{DistanceM: 12340}
+	updates, warnings, err := trainingSheetPreviewUpdates(planned, activity, map[string]string{"D3": "42.5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if value := updateValue(updatesToGoogle(updates), "'Week'!D3"); value != "42.5" {
+		t.Fatalf("override value = %#v, want 42.5", value)
+	}
+	if len(updates) != 1 || !updates[0].ManualOverride {
+		t.Fatalf("updates = %#v, want the first proposed cell manually overridden", updates)
+	}
+	if _, _, err := trainingSheetPreviewUpdates(planned, activity, map[string]string{"Z99": "bad"}); err == nil {
+		t.Fatal("invalid proposed-cell override should fail")
+	}
+}
+
+func TestTrainingSheetPreviewDoesNotWarnForMissingFeedback(t *testing.T) {
+	planned := PlannedActivity{SheetTitle: "Week", PlanCell: "D2", FeedbackCell: "C19"}
+	_, warnings, err := trainingSheetPreviewUpdates(planned, Activity{DistanceM: 1000}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, warning := range warnings {
+		if warning == "Feedback is waiting for a saved reflection." {
+			t.Fatal("missing feedback was reported as a warning")
+		}
+	}
+}
+
+func updatesToGoogle(updates []trainingSheetPreviewUpdate) []googleValueRangeUpdate {
+	result := make([]googleValueRangeUpdate, len(updates))
+	for index, update := range updates {
+		result[index] = update.Update
+	}
+	return result
 }
 
 func TestTrainingSheetPreviewGridResponseFocusesSelectedWorkoutSection(t *testing.T) {

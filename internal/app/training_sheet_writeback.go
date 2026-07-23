@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -39,6 +40,27 @@ func (s *Store) EnsureTrainingSheetWriteback(ctx context.Context, plannedID, act
 		on conflict(planned_activity_id) do update set activity_id = excluded.activity_id, updated_at = now()
 	`, plannedID, activityID, scopedUserID(ctx))
 	return err
+}
+
+func (s *Store) GetTrainingSheetWritebackOverrides(ctx context.Context, plannedID string) (map[string]string, error) {
+	var raw []byte
+	err := s.db.QueryRow(ctx, `
+		select manual_overrides
+		from training_sheet_writebacks
+		where planned_activity_id = $1::uuid
+			and exists (select 1 from planned_activities where id = $1::uuid and user_id = $2)
+	`, plannedID, scopedUserID(ctx)).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	overrides := make(map[string]string)
+	if len(raw) == 0 {
+		return overrides, nil
+	}
+	if err := json.Unmarshal(raw, &overrides); err != nil {
+		return nil, err
+	}
+	return overrides, nil
 }
 
 func (s *Store) CreateTrainingSheetWritebackJob(ctx context.Context, plannedID, activityID string) (string, error) {
@@ -133,6 +155,14 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 	if err := s.store.EnsureTrainingSheetWriteback(ctx, plannedID, activityID); err != nil {
 		return nil, err
 	}
+	manualOverrides, err := s.store.GetTrainingSheetWritebackOverrides(ctx, plannedID)
+	if err != nil {
+		return nil, err
+	}
+	previewPlan, err := trainingSheetPreviewUpdatePlanForActivity(planned, activity, manualOverrides)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.store.markTrainingSheetWritebackAttempt(ctx, plannedID); err != nil {
 		return nil, err
 	}
@@ -159,7 +189,7 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 		if err := s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "summary", "running", ""); err != nil {
 			return nil, err
 		}
-		summaryStatus, summaryError := s.writeSummary(ctx, planned, activity)
+		summaryStatus, summaryError := s.writeSummary(ctx, planned, previewPlan.Updates)
 		if ctx.Err() != nil {
 			return s.canceledWritebackResult(ctx, planned, result)
 		}
@@ -176,7 +206,7 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 			return nil, err
 		}
 		result["intervalsStatus"] = "running"
-		intervalsStatus, intervalsError := s.writeIntervals(ctx, planned, activity)
+		intervalsStatus, intervalsError := s.writeIntervals(ctx, planned, previewPlan.Updates, previewPlan.IntervalError, previewPlan.IntervalWarning)
 		if ctx.Err() != nil {
 			return s.canceledWritebackResult(ctx, planned, result)
 		}
@@ -212,11 +242,11 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "feedback", "not_applicable", "")
 		result["feedbackStatus"] = "not_applicable"
 	} else if strings.TrimSpace(activity.Feedback) == "" {
-		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "feedback", "waiting_for_feedback", "")
-		result["feedbackStatus"] = "waiting_for_feedback"
+		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "feedback", "not_provided", "")
+		result["feedbackStatus"] = "not_provided"
 	} else if len(failures) == 0 {
 		_ = s.store.updateTrainingSheetWritebackSection(ctx, plannedID, "feedback", "running", "")
-		feedbackStatus, feedbackError := s.writeFeedback(ctx, planned, activity)
+		feedbackStatus, feedbackError := s.writeFeedback(ctx, planned, previewPlan.Updates)
 		if ctx.Err() != nil {
 			return s.canceledWritebackResult(ctx, planned, result)
 		}
@@ -259,29 +289,45 @@ func (s *TrainingSheetWritebackService) canceledWritebackResult(ctx context.Cont
 	return result, context.Canceled
 }
 
-func (s *TrainingSheetWritebackService) writeIntervals(ctx context.Context, planned PlannedActivity, activity Activity) (string, error) {
+func (s *TrainingSheetWritebackService) writeIntervals(ctx context.Context, planned PlannedActivity, previewUpdates []trainingSheetPreviewUpdate, mappingErr error, mappingWarning string) (string, error) {
 	table := workoutTableFromPlanned(planned)
 	if table == nil {
 		return "not_applicable", nil
 	}
-	updates, err := intervalUpdatesForPlannedActivity(planned, activity)
-	if err != nil {
-		return "skipped", err
+	if mappingErr != nil {
+		return "skipped", mappingErr
 	}
+	updates, manualRanges := writebackUpdatesForSection(previewUpdates, "intervals")
 	heartColumns := map[string]bool{
 		table.Columns[trainingSheetMetricAvgHeart]: true,
 		table.Columns[trainingSheetMetricMaxHeart]: true,
 	}
-	return s.writeUpdatesPreservingExistingWith(ctx, planned.WorkbookID, updates, func(update googleValueRangeUpdate, existing [][][]string, index int) bool {
+	status, err := s.writeUpdatesPreservingExistingWith(ctx, planned.WorkbookID, updates, func(update googleValueRangeUpdate, existing [][][]string, index int) bool {
+		if manualRanges[update.Range] {
+			return true
+		}
 		if !heartColumns[sheetRangeColumn(update.Range)] || index >= len(existing) {
 			return false
 		}
 		return rangeHasZeroClockValue(existing[index])
 	})
+	if mappingWarning == "" || err != nil && status == "failed" {
+		return status, err
+	}
+	if status == "completed" {
+		return "completed_with_warnings", fmt.Errorf("%s", mappingWarning)
+	}
+	if err != nil {
+		return status, fmt.Errorf("%s; %w", mappingWarning, err)
+	}
+	return status, fmt.Errorf("%s", mappingWarning)
 }
 
-func (s *TrainingSheetWritebackService) writeSummary(ctx context.Context, planned PlannedActivity, activity Activity) (string, error) {
-	return s.writeUpdatesPreservingExisting(ctx, planned.WorkbookID, summaryUpdatesForActivity(planned, activity))
+func (s *TrainingSheetWritebackService) writeSummary(ctx context.Context, planned PlannedActivity, previewUpdates []trainingSheetPreviewUpdate) (string, error) {
+	updates, manualRanges := writebackUpdatesForSection(previewUpdates, "summary")
+	return s.writeUpdatesPreservingExistingWith(ctx, planned.WorkbookID, updates, func(update googleValueRangeUpdate, _ [][][]string, _ int) bool {
+		return manualRanges[update.Range]
+	})
 }
 
 func sheetDurationText(totalSeconds int) string {
@@ -302,16 +348,30 @@ func sheetPaceText(secondsPerKm float64) string {
 	return fmt.Sprintf("%d:%02d", totalSeconds/60, totalSeconds%60)
 }
 
-func (s *TrainingSheetWritebackService) writeFeedback(ctx context.Context, planned PlannedActivity, activity Activity) (string, error) {
-	cell := feedbackCellForPlanned(planned)
-	if cell == "" {
+func (s *TrainingSheetWritebackService) writeFeedback(ctx context.Context, planned PlannedActivity, previewUpdates []trainingSheetPreviewUpdate) (string, error) {
+	updates, _ := writebackUpdatesForSection(previewUpdates, "feedback")
+	if len(updates) == 0 {
 		return "not_applicable", nil
 	}
-	update := googleValueRangeUpdate{Range: sheetCellRange(planned.SheetTitle, cell), Values: [][]any{{strings.TrimSpace(activity.Feedback)}}}
-	if err := retryGoogle(ctx, func() error { return s.auth.WriteRanges(ctx, planned.WorkbookID, []googleValueRangeUpdate{update}) }); err != nil {
+	if err := retryGoogle(ctx, func() error { return s.auth.WriteRanges(ctx, planned.WorkbookID, updates) }); err != nil {
 		return "failed", err
 	}
 	return "completed", nil
+}
+
+func writebackUpdatesForSection(previewUpdates []trainingSheetPreviewUpdate, section string) ([]googleValueRangeUpdate, map[string]bool) {
+	updates := make([]googleValueRangeUpdate, 0)
+	manualRanges := make(map[string]bool)
+	for _, item := range previewUpdates {
+		if item.Section != section {
+			continue
+		}
+		updates = append(updates, item.Update)
+		if item.ManualOverride {
+			manualRanges[item.Update.Range] = true
+		}
+	}
+	return updates, manualRanges
 }
 
 func feedbackCellForPlanned(planned PlannedActivity) string {

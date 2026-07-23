@@ -12,11 +12,14 @@ import (
 )
 
 type trainingSheetPreviewRequest struct {
-	PlannedActivityID string  `json:"plannedActivityId"`
-	Feedback          *string `json:"feedback,omitempty"`
-	RPE               *int    `json:"rpe"`
-	RPESet            bool    `json:"rpeSet"`
+	PlannedActivityID string            `json:"plannedActivityId"`
+	Feedback          *string           `json:"feedback,omitempty"`
+	RPE               *int              `json:"rpe"`
+	RPESet            bool              `json:"rpeSet"`
+	Overrides         map[string]string `json:"overrides,omitempty"`
 }
+
+const maxTrainingSheetPreviewOverrides = 100
 
 type trainingSheetPreviewUpdate struct {
 	Update            googleValueRangeUpdate
@@ -24,6 +27,7 @@ type trainingSheetPreviewUpdate struct {
 	Label             string
 	ReplaceExisting   bool
 	RepairZeroClockHR bool
+	ManualOverride    bool
 }
 
 type TrainingSheetPreviewChange struct {
@@ -117,7 +121,10 @@ func (s *TrainingSheetWritebackService) Preview(ctx context.Context, plannedID, 
 		return TrainingSheetWritebackPreview{}, fmt.Errorf("Google Sheets write access requires reconnecting the Google account")
 	}
 
-	updates, warnings := trainingSheetPreviewUpdates(planned, activity)
+	updates, warnings, err := trainingSheetPreviewUpdates(planned, activity, request.Overrides)
+	if err != nil {
+		return TrainingSheetWritebackPreview{}, err
+	}
 	region := trainingSheetPreviewRegion(planned)
 	gridResponse, err := s.auth.ReadPreviewGrid(ctx, planned.WorkbookID, planned.SheetTitle, region.rangeName)
 	formattingAvailable := true
@@ -142,7 +149,7 @@ func (s *TrainingSheetWritebackService) Preview(ctx context.Context, plannedID, 
 		current := trainingSheetPreviewCurrentValue(existing, index)
 		proposed := previewValueText(item.Update.Values)
 		status := trainingSheetPreviewStatus(item, current, proposed)
-		if status == "write" {
+		if status == "write" || status == "manual" {
 			writeCount++
 		}
 		if status == "conflict" {
@@ -183,21 +190,43 @@ func applyTrainingSheetPreviewDraft(activity *Activity, request trainingSheetPre
 	}
 }
 
-func trainingSheetPreviewUpdates(planned PlannedActivity, activity Activity) ([]trainingSheetPreviewUpdate, []string) {
+func trainingSheetPreviewUpdates(planned PlannedActivity, activity Activity, overrides map[string]string) ([]trainingSheetPreviewUpdate, []string, error) {
+	plan, err := trainingSheetPreviewUpdatePlanForActivity(planned, activity, overrides)
+	if err != nil {
+		return nil, nil, err
+	}
+	return plan.Updates, plan.Warnings, nil
+}
+
+type trainingSheetPreviewUpdatePlan struct {
+	Updates         []trainingSheetPreviewUpdate
+	Warnings        []string
+	IntervalError   error
+	IntervalWarning string
+}
+
+func trainingSheetPreviewUpdatePlanForActivity(planned PlannedActivity, activity Activity, overrides map[string]string) (trainingSheetPreviewUpdatePlan, error) {
 	updates := make([]trainingSheetPreviewUpdate, 0)
 	warnings := make([]string, 0)
+	var intervalError error
+	var intervalWarning string
 	for _, update := range summaryUpdatesForActivity(planned, activity) {
 		updates = append(updates, trainingSheetPreviewUpdate{Update: update, Section: "summary", Label: summaryLabelForRange(update.Range)})
 	}
 
 	if workoutTableFromPlanned(planned) != nil {
-		intervalUpdates, err := intervalUpdatesForPlannedActivity(planned, activity)
+		intervalPlan, err := intervalUpdatesForPlannedActivity(planned, activity)
 		if err != nil {
 			warnings = append(warnings, "Structured intervals could not be mapped: "+err.Error())
+			intervalError = err
 		} else {
 			table := workoutTableFromPlanned(planned)
 			heartColumns := map[string]bool{table.Columns[trainingSheetMetricAvgHeart]: true, table.Columns[trainingSheetMetricMaxHeart]: true}
-			for _, update := range intervalUpdates {
+			if intervalPlan.SkippedRecord > 0 {
+				intervalWarning = fmt.Sprintf("Structured intervals partially mapped: worksheet table does not represent %d active structured interval%s; only matching rows will be written.", intervalPlan.SkippedRecord, pluralSuffix(intervalPlan.SkippedRecord))
+				warnings = append(warnings, intervalWarning)
+			}
+			for _, update := range intervalPlan.Updates {
 				updates = append(updates, trainingSheetPreviewUpdate{
 					Update: update, Section: "intervals", Label: intervalLabelForRange(table, update.Range),
 					RepairZeroClockHR: heartColumns[sheetRangeColumn(update.Range)],
@@ -211,10 +240,91 @@ func trainingSheetPreviewUpdates(planned PlannedActivity, activity Activity) ([]
 			Update:  googleValueRangeUpdate{Range: sheetCellRange(planned.SheetTitle, cell), Values: [][]any{{strings.TrimSpace(activity.Feedback)}}},
 			Section: "feedback", Label: "How did it feel/go?", ReplaceExisting: true,
 		})
-	} else if cell := feedbackCellForPlanned(planned); cell != "" {
-		warnings = append(warnings, "Feedback is waiting for a saved reflection.")
 	}
-	return updates, warnings
+	if err := applyTrainingSheetPreviewOverrides(updates, overrides); err != nil {
+		return trainingSheetPreviewUpdatePlan{}, err
+	}
+	return trainingSheetPreviewUpdatePlan{Updates: updates, Warnings: warnings, IntervalError: intervalError, IntervalWarning: intervalWarning}, nil
+}
+
+func pluralSuffix(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func applyTrainingSheetPreviewOverrides(updates []trainingSheetPreviewUpdate, overrides map[string]string) error {
+	if len(overrides) == 0 {
+		return nil
+	}
+	if len(overrides) > maxTrainingSheetPreviewOverrides {
+		return fmt.Errorf("too many training-sheet preview overrides")
+	}
+	byCell := make(map[string]int, len(updates))
+	for index, item := range updates {
+		cell, ok := previewCellReference(item.Update.Range)
+		if ok {
+			byCell[cell] = index
+		}
+	}
+	seen := make(map[string]struct{}, len(overrides))
+	for rawCell, rawValue := range overrides {
+		if len([]rune(rawValue)) > 5000 {
+			return fmt.Errorf("training-sheet preview override for %q is too long", rawCell)
+		}
+		cell, ok := normalizePreviewCellReference(rawCell)
+		if !ok {
+			return fmt.Errorf("invalid training-sheet preview override cell %q", rawCell)
+		}
+		if _, duplicate := seen[cell]; duplicate {
+			return fmt.Errorf("duplicate training-sheet preview override cell %q", rawCell)
+		}
+		seen[cell] = struct{}{}
+		index, exists := byCell[cell]
+		if !exists {
+			return fmt.Errorf("training-sheet preview override cell %q is not a proposed cell", rawCell)
+		}
+		item := &updates[index]
+		item.Update.Values = [][]any{{trainingSheetPreviewOverrideValue(item.Update.Values, strings.TrimSpace(rawValue))}}
+		item.ReplaceExisting = true
+		item.ManualOverride = true
+	}
+	return nil
+}
+
+func previewCellReference(rangeName string) (string, bool) {
+	cell := rangeName
+	if separator := strings.LastIndex(cell, "!"); separator >= 0 {
+		cell = cell[separator+1:]
+	}
+	return normalizePreviewCellReference(cell)
+}
+
+func normalizePreviewCellReference(raw string) (string, bool) {
+	cell := strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(strings.Trim(raw, "'"))), "$", "")
+	if strings.Contains(cell, "!") || strings.Contains(cell, ":") {
+		return "", false
+	}
+	_, _, ok := previewCellCoordinates(cell)
+	return cell, ok
+}
+
+func trainingSheetPreviewOverrideValue(values [][]any, rawValue string) any {
+	if rawValue == "" {
+		return ""
+	}
+	if strings.HasPrefix(previewValueRaw(values), "'") {
+		return "'" + strings.TrimPrefix(rawValue, "'")
+	}
+	return rawValue
+}
+
+func previewValueRaw(values [][]any) string {
+	if len(values) == 0 || len(values[0]) == 0 || values[0][0] == nil {
+		return ""
+	}
+	return fmt.Sprint(values[0][0])
 }
 
 func summaryUpdatesForActivity(planned PlannedActivity, activity Activity) []googleValueRangeUpdate {
@@ -629,11 +739,14 @@ func previewValueText(values [][]any) string {
 }
 
 func trainingSheetPreviewStatus(item trainingSheetPreviewUpdate, current, proposed string) string {
-	if current == "" {
-		return "write"
-	}
 	if current == proposed {
 		return "unchanged"
+	}
+	if item.ManualOverride {
+		return "manual"
+	}
+	if current == "" {
+		return "write"
 	}
 	if item.ReplaceExisting || (item.RepairZeroClockHR && (current == "0:00" || current == "0:00:00")) {
 		return "write"
