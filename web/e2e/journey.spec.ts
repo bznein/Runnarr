@@ -165,6 +165,14 @@ test.describe("local product journey", () => {
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/\.gpx$/);
     await page.goto("/activities");
+    const cyclingActivity = visibleActivityLink(page, "E2E Cycling Activity", mobile);
+    await expect(cyclingActivity).toBeVisible();
+    await cyclingActivity.click();
+
+    await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    await expect(page.getByText("Suggested planned run", { exact: true })).toBeHidden();
+
+    await page.goto("/activities");
     const swimmingActivity = visibleActivityLink(page, "E2E Pool Swim", mobile);
     await expect(swimmingActivity).toBeVisible();
     await swimmingActivity.click();

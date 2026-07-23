@@ -208,6 +208,19 @@ func TestNormalizeCadence(t *testing.T) {
 	}
 }
 
+func TestIsRunningSport(t *testing.T) {
+	for _, value := range []string{"Run", "running", "Treadmill Run"} {
+		if !isRunningSport(value) {
+			t.Fatalf("isRunningSport(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"Cycling", "Walk", "Swimming", "Strength Training"} {
+		if isRunningSport(value) {
+			t.Fatalf("isRunningSport(%q) = true, want false", value)
+		}
+	}
+}
+
 func TestIsProviderSyncedSource(t *testing.T) {
 	if !isProviderSyncedSource("garmin", "123", true) {
 		t.Fatal("garmin source should be provider synced")
