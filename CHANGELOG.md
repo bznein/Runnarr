@@ -65,6 +65,7 @@
 
 ### Fixes
 
+- Health range changes no longer load the preserved raw Garmin payload for every day, making first-time 30D and 90D views responsive.
 - Activity type filters now use a compact include/exclude control with checkbox bulk actions.
 - Activity detail charts now recover when the available metrics change.
 - Health summary cards now show the actual metric date and remain pinned to today's data while chart ranges change.
