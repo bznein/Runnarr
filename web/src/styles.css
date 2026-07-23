@@ -359,6 +359,26 @@ textarea {
   gap: 14px;
 }
 
+.health-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.health-summary-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.health-summary-header .panel-heading {
+  margin-bottom: 0;
+}
+
+.health-summary .health-controls-panel {
+  margin-top: 8px;
+}
+
 .metric,
 .panel,
 .login-panel {

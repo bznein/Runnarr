@@ -11,6 +11,7 @@ import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
+import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import type {
   Activity,
   ActivityClimb,
@@ -670,20 +671,28 @@ function HealthPage() {
   const [draftRange, setDraftRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
   const [selectedDate, setSelectedDate] = useState("");
   const dayDetailRef = useRef<HTMLDivElement | null>(null);
+  const today = localDateString();
   const health = useQuery({
     queryKey: ["health-daily", range],
     queryFn: () => api.healthDaily(range),
     refetchInterval: false
   });
+  const todayHealth = useQuery({
+    queryKey: ["health-daily", "today", today],
+    queryFn: () => api.healthDaily({ from: today, to: today }),
+    staleTime: Infinity,
+    refetchInterval: false
+  });
+  const healthError = health.error ?? todayHealth.error;
   const metrics = health.data?.metrics ?? [];
-  const latestMetric = latestHealthMetric(metrics);
+  const todayMetric = latestHealthMetric(todayHealth.data?.metrics ?? []);
   const selectedMetric = metrics.find((metric) => metric.date === selectedDate);
   const chartData = (health.data?.chart ?? healthChartData(metrics)).map((point) => ({
     ...point,
     label: point.label ?? healthChartLabel(point.date)
   }));
   const showLongRangeHealthLines = healthRangeDayCount(range) > healthBarChartMaxDays;
-  const cardItems = healthMetricCards(latestMetric);
+  const cardItems = healthMetricCards(todayMetric);
   const activePreset = healthRangePresets().find((preset) => healthRangesMatch(draftRange, healthRangeForLastDays(preset.days)));
   const draftRangeChanged = !healthRangesMatch(draftRange, range);
   const draftRangeValid = healthRangeDayCount(draftRange) > 0;
@@ -699,63 +708,74 @@ function HealthPage() {
     dayDetailRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [selectedMetric?.date]);
 
+  const healthRangeControls = (
+    <section className="panel health-controls-panel">
+      <div className="health-range-controls">
+        <div className="segmented-control health-preset-control" role="group" aria-label="Health date range">
+          {healthRangePresets().map((preset) => (
+            <button
+              key={preset.days}
+              className={activePreset?.days === preset.days ? "active" : ""}
+              type="button"
+              onClick={() => applyHealthRange(healthRangeForLastDays(preset.days))}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="date-range-grid health-date-grid">
+          <label className="field">
+            <span>From</span>
+            <input
+              type="date"
+              value={draftRange.from}
+              max={draftRange.to || localDateString()}
+              onChange={(event) => setDraftRange({ ...draftRange, from: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>To</span>
+            <input
+              type="date"
+              value={draftRange.to}
+              min={draftRange.from}
+              max={localDateString()}
+              onChange={(event) => setDraftRange({ ...draftRange, to: event.target.value })}
+            />
+          </label>
+        </div>
+        <div className="health-range-actions">
+          <button className="secondary-button small-button" type="button" disabled={!draftRangeChanged} onClick={() => setDraftRange(range)}>
+            Reset
+          </button>
+          <button className="primary-button small-button" type="button" disabled={!draftRangeChanged || !draftRangeValid} onClick={() => applyHealthRange(draftRange)}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+
   return (
     <Page title="Health">
-      <section className="panel health-controls-panel">
-        <div className="health-range-controls">
-          <div className="segmented-control health-preset-control" role="group" aria-label="Health date range">
-            {healthRangePresets().map((preset) => (
-              <button
-                key={preset.days}
-                className={activePreset?.days === preset.days ? "active" : ""}
-                type="button"
-                onClick={() => applyHealthRange(healthRangeForLastDays(preset.days))}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <div className="date-range-grid health-date-grid">
-            <label className="field">
-              <span>From</span>
-              <input
-                type="date"
-                value={draftRange.from}
-                max={draftRange.to || localDateString()}
-                onChange={(event) => setDraftRange({ ...draftRange, from: event.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>To</span>
-              <input
-                type="date"
-                value={draftRange.to}
-                min={draftRange.from}
-                max={localDateString()}
-                onChange={(event) => setDraftRange({ ...draftRange, to: event.target.value })}
-              />
-            </label>
-          </div>
-          <div className="health-range-actions">
-            <button className="secondary-button small-button" type="button" disabled={!draftRangeChanged} onClick={() => setDraftRange(range)}>
-              Reset
-            </button>
-            <button className="primary-button small-button" type="button" disabled={!draftRangeChanged || !draftRangeValid} onClick={() => applyHealthRange(draftRange)}>
-              Apply
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {health.error && <div className="error">{health.error instanceof Error ? health.error.message : "Could not load health metrics"}</div>}
+      {healthError && <div className="error">{healthError instanceof Error ? healthError.message : "Could not load health metrics"}</div>}
 
       {cardItems.length > 0 && (
-        <section className="metric-grid">
-          {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+        <section className="health-summary" aria-label="Health summary">
+          <div className="health-summary-header">
+            <div className="panel-heading">Summary</div>
+            <span className="muted">Data for {healthSummaryDateLabel(todayMetric)}</span>
+          </div>
+          <div className="metric-grid">
+            {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+          </div>
+          {healthRangeControls}
         </section>
       )}
 
-      {health.isLoading && <LoadingRow />}
+      {cardItems.length === 0 && healthRangeControls}
+
+      {(health.isLoading || todayHealth.isLoading) && <LoadingRow />}
       {!health.isLoading && metrics.length === 0 && (
         <EmptyState
           title="No health metrics found"
@@ -5631,6 +5651,10 @@ function formatHealthDate(date: string) {
   return new Date(year, month - 1, day).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function healthSummaryDateLabel(metric?: DailyHealthMetric) {
+  return formatHealthDate(metric?.date ?? localDateString());
+}
+
 function finiteValue(value?: number) {
   return isFiniteNumber(value) ? value : undefined;
 }
@@ -5724,13 +5748,22 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
   const defaultVisible = availableSeries.filter((series) => series.defaultVisible).map((series) => series.key);
   const initialVisible = defaultVisible.length > 0 ? defaultVisible : availableSeries.slice(0, 1).map((series) => series.key);
   const [visibleSeries, setVisibleSeries] = useState<ActivityChartSeriesKey[]>(initialVisible);
-  const activeSeries = availableSeries.filter((series) => visibleSeries.includes(series.key));
+  const availableKeys = availableSeries.map((series) => series.key);
+  const effectiveVisibleSeries = reconcileVisibleActivitySeries(visibleSeries, availableKeys, initialVisible);
+  const activeSeries = availableSeries.filter((series) => effectiveVisibleSeries.includes(series.key));
+  useEffect(() => {
+    setVisibleSeries((current) => {
+      const next = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      return next.length === current.length && next.every((key, index) => key === current[index]) ? current : next;
+    });
+  }, [availableKeys.join(","), initialVisible.join(",")]);
   const toggleSeries = (key: ActivityChartSeriesKey) => {
     setVisibleSeries((current) => {
-      if (current.includes(key)) {
-        return current.length === 1 ? current : current.filter((item) => item !== key);
+      const selected = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      if (selected.includes(key)) {
+        return selected.length === 1 ? selected : selected.filter((item) => item !== key);
       }
-      return [...current, key];
+      return [...selected, key];
     });
   };
 
