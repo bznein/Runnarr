@@ -114,3 +114,26 @@ func TestServeSPAFailsClosedForTraversal(t *testing.T) {
 		t.Fatalf("traversal status = %d, want 404", response.Code)
 	}
 }
+
+func TestServeSPAPWAAssetHeaders(t *testing.T) {
+	staticDir := t.TempDir()
+	if err := os.WriteFile(staticDir+"/manifest.webmanifest", []byte(`{"name":"Runnarr"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staticDir+"/sw.js", []byte("self.skipWaiting();"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{cfg: Config{StaticDir: staticDir}}
+
+	manifestResponse := httptest.NewRecorder()
+	server.serveSPA(manifestResponse, httptest.NewRequest("GET", "http://localhost/manifest.webmanifest", nil))
+	if manifestResponse.Code != 200 || manifestResponse.Header().Get("Content-Type") != "application/manifest+json" || manifestResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("manifest response = status %d headers %#v", manifestResponse.Code, manifestResponse.Header())
+	}
+
+	serviceWorkerResponse := httptest.NewRecorder()
+	server.serveSPA(serviceWorkerResponse, httptest.NewRequest("GET", "http://localhost/sw.js", nil))
+	if serviceWorkerResponse.Code != 200 || serviceWorkerResponse.Header().Get("Content-Type") != "application/javascript; charset=utf-8" || serviceWorkerResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("service worker response = status %d headers %#v", serviceWorkerResponse.Code, serviceWorkerResponse.Header())
+	}
+}

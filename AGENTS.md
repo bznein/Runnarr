@@ -21,6 +21,8 @@ This file defines the default operating rules for coding agents working in this 
 - Frontend build: `cd web && npm run build`
 - Full stack rebuild/restart: `docker compose up --build -d`
 - Compose smoke check: `curl -fsS http://localhost:37617/api/session`
+- GitHub operations: `gh` is installed and available for PR, check, issue, and Actions queries.
+- New features and behavior changes should add or update E2E coverage whenever feasible.
 
 Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in the current environment.
 

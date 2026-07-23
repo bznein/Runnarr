@@ -257,6 +257,15 @@ textarea {
   min-height: 100vh;
 }
 
+.mobile-header,
+.mobile-bottom-nav,
+.mobile-menu-backdrop,
+.activity-card-list,
+.health-card-list,
+.mobile-calendar-agenda {
+  display: none;
+}
+
 .sidebar {
   position: sticky;
   top: 0;
@@ -1822,6 +1831,7 @@ textarea {
 
 .gear-card-header,
 .gear-distance-label {
+  min-width: 0;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -1830,7 +1840,7 @@ textarea {
 
 .gear-card-header strong {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--color-heading);
   font-size: 17px;
   line-height: 1.2;
@@ -2921,5 +2931,513 @@ textarea {
 
   .filter-dialog {
     max-height: calc(100vh - 36px);
+  }
+}
+
+@media (max-width: 920px) {
+  :root {
+    --mobile-nav-height: 68px;
+    --mobile-header-height: 58px;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  .app-shell {
+    display: block;
+    min-height: 100svh;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .main {
+    width: 100%;
+    min-height: 100svh;
+    padding: calc(var(--mobile-header-height) + 14px) 12px calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 18px);
+  }
+
+  .mobile-header {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: var(--mobile-header-height);
+    padding: 0 12px;
+    padding-top: env(safe-area-inset-top);
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-heading);
+    background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+    box-shadow: var(--shadow-low);
+    backdrop-filter: blur(12px);
+  }
+
+  .mobile-header-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: inherit;
+    font-weight: 780;
+    text-decoration: none;
+  }
+
+  .mobile-header-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-muted);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-menu-button {
+    margin-left: auto;
+  }
+
+  .mobile-bottom-nav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 1100;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    min-height: var(--mobile-nav-height);
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+    box-shadow: 0 -4px 16px rgba(20, 28, 26, 0.08);
+  }
+
+  .mobile-nav-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    min-height: 48px;
+    padding: 5px 2px;
+    border: 0;
+    border-radius: 8px;
+    color: var(--color-muted);
+    background: transparent;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .mobile-nav-item.active,
+  .mobile-nav-item:focus-visible {
+    color: var(--color-primary-text);
+    background: var(--color-primary-soft);
+  }
+
+  .mobile-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: end;
+    padding: 12px;
+    padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 8px);
+    background: var(--color-backdrop);
+  }
+
+  .mobile-menu-sheet {
+    display: grid;
+    gap: 14px;
+    width: 100%;
+    max-height: calc(100svh - var(--mobile-header-height) - var(--mobile-nav-height) - 28px);
+    overflow: auto;
+    padding: 16px;
+    border: 1px solid var(--color-border-dialog);
+    border-radius: 14px;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-dialog);
+  }
+
+  .mobile-menu-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .mobile-menu-links {
+    display: grid;
+    gap: 6px;
+  }
+
+  .mobile-menu-links .nav-link,
+  .mobile-logout-button {
+    min-height: 46px;
+    color: var(--color-text);
+    background: var(--color-surface-muted);
+  }
+
+  .mobile-menu-links .nav-link.active,
+  .mobile-menu-links .nav-link:hover,
+  .mobile-logout-button:hover {
+    color: var(--color-primary-text);
+    background: var(--color-primary-soft);
+  }
+
+  .page {
+    gap: 14px;
+  }
+
+  .page h1 {
+    font-size: 24px;
+  }
+
+  .page-header {
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .actions > * {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .actions > .media-hidden-input {
+    width: 1px;
+  }
+
+  .gear-sort-control,
+  .gear-sort-control + .primary-button {
+    grid-column: 1 / -1;
+  }
+
+  .gear-sort-control select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .metric-grid,
+  .tools-result-grid,
+  .tools-equivalent-grid,
+  .health-chart-grid,
+  .gear-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .metric,
+  .panel {
+    padding: 13px;
+    border-radius: 10px;
+  }
+
+  .metric strong {
+    font-size: 20px;
+  }
+
+  .split-layout,
+  .filter-grid,
+  .tools-form-grid,
+  .date-range-grid,
+  .user-create-form,
+  .health-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-panel,
+  .provider-panel,
+  .display-panel,
+  .health-controls-panel,
+  .page-header,
+  .support-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .provider-controls,
+  .health-range-controls,
+  .health-sync-controls,
+  .theme-control,
+  .health-range-actions {
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .provider-controls > *,
+  .health-sync-controls > *,
+  .health-range-actions > * {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .search-panel {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .calendar-controls {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .calendar-month-label {
+    width: auto;
+    overflow: hidden;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .calendar-weekday-header,
+  .calendar-grid {
+    display: none;
+  }
+
+  .mobile-calendar-agenda {
+    display: grid;
+    gap: 8px;
+  }
+
+  .calendar-agenda-day {
+    display: grid;
+    gap: 8px;
+    padding: 11px;
+    border: 1px solid var(--color-border-muted);
+    border-radius: 9px;
+    background: var(--color-surface-muted);
+  }
+
+  .calendar-agenda-day-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .calendar-agenda-day-header strong {
+    color: var(--color-heading);
+  }
+
+  .calendar-agenda-day-header span {
+    color: var(--color-muted);
+    font-size: 12px;
+  }
+
+  .chart-area {
+    height: 240px;
+  }
+
+  .health-chart-area {
+    height: 190px;
+  }
+
+  .map-frame {
+    height: min(70svh, 360px);
+  }
+
+  .dialog-backdrop {
+    align-items: end;
+    padding: 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .filter-dialog,
+  .media-preview-dialog {
+    width: 100%;
+    max-height: calc(100svh - 16px - env(safe-area-inset-bottom));
+    border-radius: 14px;
+    padding: 16px;
+  }
+
+  .dialog-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dialog-actions .primary-button {
+    grid-column: 1 / -1;
+  }
+
+  .activity-table-desktop,
+  .health-table-desktop {
+    display: none;
+  }
+
+  .activity-card-list,
+  .health-card-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .activity-card,
+  .health-card {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+    padding: 13px;
+    border: 1px solid var(--color-border-muted);
+    border-radius: 10px;
+    color: var(--color-text);
+    background: var(--color-surface-muted);
+  }
+
+  .activity-card-header,
+  .activity-card-footer,
+  .health-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .activity-card-title {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .activity-card-title a {
+    overflow: hidden;
+    color: var(--color-primary-text);
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .activity-card-title > span,
+  .health-card-header > span {
+    color: var(--color-muted);
+    font-size: 12px;
+  }
+
+  .activity-card-metrics,
+  .health-card-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .health-card-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .activity-card-metrics span,
+  .health-card-metrics span {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+  }
+
+  .activity-card-metrics strong,
+  .health-card-metrics strong {
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .activity-card-metrics small,
+  .health-card-metrics small {
+    color: var(--color-muted);
+    font-size: 11px;
+  }
+
+  .activity-card-footer {
+    align-items: center;
+  }
+
+  .health-card {
+    border: 1px solid var(--color-border-muted);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .health-card.selected {
+    border-color: var(--color-primary-strong);
+    background: var(--color-primary-soft);
+  }
+
+  .health-card-header strong {
+    font-size: 14px;
+  }
+
+  .intervals-header,
+  .chart-header,
+  .route-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .chart-toggle-list {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .activity-analysis-tabs {
+    gap: 16px;
+    overflow-x: auto;
+  }
+
+  .activity-analysis-tabs button {
+    min-width: max-content;
+  }
+
+  .training-sheet-preview-grid-wrap,
+  .interval-table {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px;
+  }
+
+  .small-button,
+  .filter-chip,
+  .chart-toggle {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 520px) {
+  .gear-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 360px) {
+  .main {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .metric-grid,
+  .tools-result-grid,
+  .tools-equivalent-grid,
+  .health-chart-grid,
+  .gear-grid,
+  .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .health-card-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

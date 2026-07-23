@@ -15,6 +15,7 @@ import (
 const garminHealthDefaultBackfillDays = 90
 const garminHealthScheduledRefreshDays = 14
 const garminHealthMaxRangeDays = 730
+const healthDisplayDefaultDays = 7
 
 type GarminHealthSyncOptions struct {
 	From time.Time
@@ -122,6 +123,57 @@ func dateOnly(value time.Time) time.Time {
 	}
 	year, month, day := value.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}
+
+func healthChartPoints(metrics []DailyHealthMetric) []HealthChartPoint {
+	points := make([]HealthChartPoint, 0, len(metrics))
+	for _, metric := range metrics {
+		point := HealthChartPoint{
+			Date:               metric.Date,
+			Steps:              intFloatPtr(metric.Steps),
+			TotalCalories:      intFloatPtr(metric.TotalCaloriesKcal),
+			ActiveCalories:     intFloatPtr(metric.ActiveCaloriesKcal),
+			SleepHours:         intFloatPtrDivided(metric.SleepDurationS, 3600),
+			RestingHeartRate:   metric.RestingHeartRateBPM,
+			Stress:             metric.StressAvg,
+			BodyBatteryGained:  metric.BodyBatteryGained,
+			BodyBatteryDrained: metric.BodyBatteryDrained,
+			BodyBatteryHighest: metric.BodyBatteryMax,
+			HRV:                metric.HRVAvgMS,
+			Weight:             metric.WeightKG,
+		}
+		if point.TotalCalories != nil {
+			active := 0.0
+			if point.ActiveCalories != nil {
+				active = *point.ActiveCalories
+			}
+			remaining := max(0, *point.TotalCalories-active)
+			point.RemainingCalories = &remaining
+		}
+		if point.BodyBatteryDrained != nil {
+			loss := -*point.BodyBatteryDrained
+			point.BodyBatteryDrainedLoss = &loss
+		}
+		points = append(points, point)
+	}
+	return points
+}
+
+func intFloatPtr(value *int) *float64 {
+	if value == nil {
+		return nil
+	}
+	converted := float64(*value)
+	return &converted
+}
+
+func intFloatPtrDivided(value *int, divisor float64) *float64 {
+	converted := intFloatPtr(value)
+	if converted == nil || divisor == 0 {
+		return nil
+	}
+	result := *converted / divisor
+	return &result
 }
 
 func daysInclusive(from, to time.Time) int {

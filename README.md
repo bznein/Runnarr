@@ -18,6 +18,18 @@ The app listens on `http://localhost:37617` by default.
 
 The configured admin account is created automatically on first startup. Additional accounts are created from Settings by an administrator. Administrators can temporarily enter a read-only support view for another account; account data remains private and provider credentials are stored per user.
 
+## Mobile web and PWA
+
+The responsive web client is the mobile client. It can be installed as a PWA
+from a supported HTTPS deployment or localhost. The service worker caches only
+the application shell and static assets; authenticated API responses, activity
+media, maps, and provider data remain network-only.
+
+The Google Pixel 8 Pro in Chrome is the primary mobile acceptance profile, but
+the layout adapts to smaller phones, tablets, and desktop browsers. See the
+[web and PWA smoke-test checklist](docs/mobile-pwa-smoke-test.md) for browser,
+installability, responsive-layout, and cache checks.
+
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 
 For an HTTPS deployment behind Nginx Proxy Manager, see

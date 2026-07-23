@@ -32,6 +32,23 @@ func TestGarminHealthSyncRangeRejectsInvertedRange(t *testing.T) {
 	}
 }
 
+func TestHealthDisplayRangeDefaultsToLast7Days(t *testing.T) {
+	now := time.Date(2026, 7, 16, 18, 0, 0, 0, time.UTC)
+	from, to, err := healthDisplayRange(time.Time{}, time.Time{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := from.Format("2006-01-02"), "2026-07-10"; got != want {
+		t.Fatalf("from = %s, want %s", got, want)
+	}
+	if got, want := to.Format("2006-01-02"), "2026-07-16"; got != want {
+		t.Fatalf("to = %s, want %s", got, want)
+	}
+	if daysInclusive(from, to) != healthDisplayDefaultDays {
+		t.Fatalf("days = %d, want %d", daysInclusive(from, to), healthDisplayDefaultDays)
+	}
+}
+
 func TestNormalizeGarminHealthDay(t *testing.T) {
 	day := GarminBridgeHealthDay{
 		Date: "2026-07-16",

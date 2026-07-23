@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Moon, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -23,6 +23,7 @@ import type {
   ActivityTypeFilters as ActivityTypeFiltersValue,
   AppConfig,
   DailyHealthMetric,
+  HealthChartPoint,
   Gear,
   GearSummary,
   ImportFile,
@@ -82,23 +83,6 @@ type ClimbMapSegment = {
 type PaceRouteSegment = {
   points: RoutePoint[];
   color: string;
-};
-type HealthChartPoint = {
-  date: string;
-  label: string;
-  steps?: number;
-  totalCalories?: number;
-  activeCalories?: number;
-  remainingCalories?: number;
-  sleepHours?: number;
-  restingHeartRate?: number;
-  stress?: number;
-  bodyBatteryGained?: number;
-  bodyBatteryDrained?: number;
-  bodyBatteryDrainedLoss?: number;
-  bodyBatteryHighest?: number;
-  hrv?: number;
-  weight?: number;
 };
 
 const defaultActivitySort: ActivitySort = { sortBy: "date", sortOrder: "desc" };
@@ -186,6 +170,50 @@ function applyThemePreference(preference: ThemePreference) {
   root.dataset.theme = preference;
 }
 
+type PwaInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+function usePwaInstallPrompt() {
+  const [installPrompt, setInstallPrompt] = useState<PwaInstallPromptEvent>();
+  const [installed, setInstalled] = useState(false);
+
+  useEffect(() => {
+    const displayMode = window.matchMedia("(display-mode: standalone)");
+    const updateInstalled = () => setInstalled(displayMode.matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
+    const handleInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as PwaInstallPromptEvent);
+    };
+    const handleInstalled = () => {
+      setInstalled(true);
+      setInstallPrompt(undefined);
+    };
+
+    updateInstalled();
+    displayMode.addEventListener("change", updateInstalled);
+    window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      displayMode.removeEventListener("change", updateInstalled);
+      window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+
+  const install = async () => {
+    if (!installPrompt) {
+      return;
+    }
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(undefined);
+  };
+
+  return { canInstall: Boolean(installPrompt) && !installed, install };
+}
+
 function normalizeActivityTableColumns(columns?: string[]): ActivityTableColumnKey[] {
   if (!columns || columns.length === 0) {
     return defaultActivityTableColumns;
@@ -231,6 +259,7 @@ function useSaveUserPreferences(userID?: string) {
 
 export function App() {
   const [themePreference, setThemePreference] = useState<ThemePreference>("system");
+  const pwa = usePwaInstallPrompt();
   const queryClient = useQueryClient();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const effectiveUserID = session.data?.user?.id;
@@ -283,7 +312,7 @@ export function App() {
   };
 
   return (
-    <AuthenticatedApp session={session.data} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={savePreferences.error} />
+    <AuthenticatedApp session={session.data} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={savePreferences.error} pwa={pwa} />
   );
 }
 
@@ -291,12 +320,14 @@ function AuthenticatedApp({
   session,
   themePreference,
   onThemePreferenceChange,
-  themePreferenceError
+  themePreferenceError,
+  pwa
 }: {
   session?: Session;
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
   themePreferenceError?: Error | null;
+  pwa: { canInstall: boolean; install: () => Promise<void> };
 }) {
   const config = useQuery({ queryKey: ["config"], queryFn: api.config });
   const queryClient = useQueryClient();
@@ -338,6 +369,7 @@ function AuthenticatedApp({
         </div>
       </aside>
       <main className="main">
+        <MobileNavigation session={session} onLogout={() => logout.mutate()} loggingOut={logout.isPending} pwa={pwa} />
         {session?.supportMode && (
           <div className="support-banner">
             <span>Read-only support view: {session.user?.displayName || session.user?.username}</span>
@@ -361,6 +393,112 @@ function AuthenticatedApp({
         </Routes>
       </main>
     </div>
+  );
+}
+
+function MobileNavigation({
+  session,
+  onLogout,
+  loggingOut,
+  pwa
+}: {
+  session?: Session;
+  onLogout: () => void;
+  loggingOut: boolean;
+  pwa: { canInstall: boolean; install: () => Promise<void> };
+}) {
+  const location = useLocation();
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [location.pathname]);
+
+  const currentLabel = location.pathname.startsWith("/activities/")
+    ? "Activity"
+    : location.pathname.startsWith("/activities")
+      ? "Activities"
+      : location.pathname.startsWith("/calendar")
+        ? "Calendar"
+        : location.pathname.startsWith("/health")
+          ? "Health"
+          : location.pathname.startsWith("/tools")
+            ? "Tools"
+            : location.pathname.startsWith("/gear")
+              ? "Gear"
+              : location.pathname.startsWith("/settings")
+                ? "Settings"
+                : "Dashboard";
+
+  return (
+    <>
+      <header className="mobile-header">
+        <Link to="/" className="mobile-header-brand" aria-label="Runnarr dashboard">
+          <ActivityIcon size={21} />
+          <span>Runnarr</span>
+        </Link>
+        <span className="mobile-header-title">{currentLabel}</span>
+        <button className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" onClick={() => setMoreOpen(true)}>
+          <Menu size={19} />
+        </button>
+      </header>
+      <nav className="mobile-bottom-nav" aria-label="Primary navigation">
+        <NavLink to="/" className={({ isActive }) => `mobile-nav-item ${isActive ? "active" : ""}`} end>
+          <BarChart3 size={19} />
+          <span>Home</span>
+        </NavLink>
+        <NavLink to="/activities" className={({ isActive }) => `mobile-nav-item ${isActive ? "active" : ""}`}>
+          <MapIcon size={19} />
+          <span>Activities</span>
+        </NavLink>
+        <NavLink to="/calendar" className={({ isActive }) => `mobile-nav-item ${isActive ? "active" : ""}`}>
+          <CalendarDays size={19} />
+          <span>Calendar</span>
+        </NavLink>
+        <NavLink to="/health" className={({ isActive }) => `mobile-nav-item ${isActive ? "active" : ""}`}>
+          <HeartPulse size={19} />
+          <span>Health</span>
+        </NavLink>
+        <button className={`mobile-nav-item ${moreOpen ? "active" : ""}`} type="button" onClick={() => setMoreOpen(true)}>
+          <MoreHorizontal size={19} />
+          <span>More</span>
+        </button>
+      </nav>
+      {moreOpen && (
+        <div className="mobile-menu-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setMoreOpen(false);
+          }
+        }}>
+          <section className="mobile-menu-sheet" role="dialog" aria-modal="true" aria-label="More navigation">
+            <div className="mobile-menu-heading">
+              <div>
+                <div className="eyebrow">Navigation</div>
+                <strong>{session?.user?.displayName || session?.user?.username || "Runnarr"}</strong>
+              </div>
+              <button className="icon-button" type="button" aria-label="Close navigation" onClick={() => setMoreOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mobile-menu-links">
+              {pwa.canInstall && (
+                <button className="nav-button mobile-install-button" type="button" onClick={() => void pwa.install()}>
+                  <Download size={18} />
+                  <span>Install Runnarr</span>
+                </button>
+              )}
+              <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
+              <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
+              <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
+            </div>
+            <button className="nav-button mobile-logout-button" type="button" disabled={loggingOut} onClick={onLogout}>
+              <LogOut size={18} />
+              <span>{loggingOut ? "Logging out…" : "Log out"}</span>
+            </button>
+          </section>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -465,8 +603,9 @@ function LoginPage() {
 
 function Dashboard() {
   const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
+  const [period, setPeriod] = useState<"weekly" | "monthly" | "yearly">("weekly");
   const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
-  const summary = useQuery({ queryKey: ["summary", filters], queryFn: () => api.summary(filters) });
+  const summary = useQuery({ queryKey: ["summary", filters, period], queryFn: () => api.summary(filters, period) });
 
   if (summary.isLoading) {
     return <Page title="Dashboard"><LoadingRow /></Page>;
@@ -475,8 +614,11 @@ function Dashboard() {
     return <Page title="Dashboard"><EmptyState title="No summary available" /></Page>;
   }
 
-  const weekly = (summary.data.weeklyDistance ?? []).map((item) => ({
-    week: new Date(item.weekStart).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+  const buckets = (summary.data.distanceBuckets ?? summary.data.weeklyDistance ?? []).map((item) => ({
+    period: new Date("start" in item ? item.start : item.weekStart).toLocaleDateString(
+      undefined,
+      period === "yearly" ? { year: "numeric" } : { month: "short", day: "numeric" }
+    ),
     km: Number((item.distanceM / 1000).toFixed(1))
   }));
 
@@ -487,6 +629,13 @@ function Dashboard() {
         filters={filters}
         onChange={setFilters}
       />
+      <div className="segmented-control" aria-label="Dashboard time scale">
+        {(["weekly", "monthly", "yearly"] as const).map((value) => (
+          <button key={value} type="button" className={period === value ? "active" : ""} onClick={() => setPeriod(value)}>
+            {value === "weekly" ? "Weeks" : value === "monthly" ? "Months" : "Years"}
+          </button>
+        ))}
+      </div>
       <section className="metric-grid">
         <Metric label="Activities" value={summary.data.activityCount.toLocaleString()} icon={<ActivityIcon size={18} />} />
         <Metric label="Distance" value={formatDistance(summary.data.distanceM)} icon={<RouteIcon size={18} />} />
@@ -496,12 +645,12 @@ function Dashboard() {
 
       <section className="split-layout">
         <div className="panel">
-          <div className="panel-heading">Weekly distance</div>
+          <div className="panel-heading">{period === "weekly" ? "Weekly" : period === "monthly" ? "Monthly" : "Yearly"} distance</div>
           <div className="chart-area">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weekly}>
+              <BarChart data={buckets}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="week" />
+                <XAxis dataKey="period" />
                 <YAxis width={42} />
                 <Tooltip
                   contentStyle={chartTooltipContentStyle}
@@ -553,7 +702,10 @@ function HealthPage() {
   const metrics = health.data?.metrics ?? [];
   const latestMetric = latestHealthMetric(metrics);
   const selectedMetric = metrics.find((metric) => metric.date === selectedDate);
-  const chartData = healthChartData(metrics);
+  const chartData = (health.data?.chart ?? healthChartData(metrics)).map((point) => ({
+    ...point,
+    label: point.label ?? healthChartLabel(point.date)
+  }));
   const showLongRangeHealthLines = healthRangeDayCount(range) > healthBarChartMaxDays;
   const cardItems = healthMetricCards(latestMetric);
   const activePreset = healthRangePresets().find((preset) => healthRangesMatch(draftRange, healthRangeForLastDays(preset.days)));
@@ -1305,7 +1457,8 @@ function HealthMetricsTable({
   onSelect: (date: string) => void;
 }) {
   return (
-    <div className="table-wrap">
+    <>
+    <div className="table-wrap health-table-desktop">
       <table className="data-table health-table">
         <thead>
           <tr>
@@ -1341,6 +1494,28 @@ function HealthMetricsTable({
         </tbody>
       </table>
     </div>
+    <div className="health-card-list">
+      {[...metrics].reverse().map((metric) => (
+        <button
+          className={`health-card ${selectedDate === metric.date ? "selected" : ""}`}
+          type="button"
+          key={metric.date}
+          onClick={() => onSelect(metric.date)}
+        >
+          <span className="health-card-header">
+            <strong>{formatHealthDate(metric.date)}</strong>
+            <span>{selectedDate === metric.date ? "Selected" : "View details"}</span>
+          </span>
+          <span className="health-card-metrics">
+            <span><strong>{formatHealthInteger(metric.steps) || "—"}</strong><small>Steps</small></span>
+            <span><strong>{formatHealthDuration(metric.sleepDurationS) || "—"}</strong><small>Sleep</small></span>
+            <span><strong>{formatHealthBPM(metric.restingHeartRateBpm) || "—"}</strong><small>RHR</small></span>
+            <span><strong>{formatBodyBatteryGainDrain(metric) || "—"}</strong><small>Battery</small></span>
+          </span>
+        </button>
+      ))}
+    </div>
+    </>
   );
 }
 
@@ -1854,6 +2029,31 @@ function ActivityCalendarPage() {
             );
           })}
         </div>
+        <div className="mobile-calendar-agenda">
+          {monthCells.filter((entry): entry is NonNullable<typeof entry> => entry !== null).map((entry) => (
+            <div className="calendar-agenda-day" key={`agenda-${entry.date}`}>
+              <div className="calendar-agenda-day-header">
+                <strong>{formatCalendarAgendaDate(entry.date)}</strong>
+                <span>{entry.dayData?.activityCount ? `${entry.dayData.activityCount} activit${entry.dayData.activityCount === 1 ? "y" : "ies"}` : "No activities"}</span>
+              </div>
+              {entry.dayData && entry.dayData.activityCount > 0 ? (
+                <ul className="calendar-day-list">
+                  {entry.dayData.activities.map((activity) => (
+                    <li key={activity.id} className="calendar-day-activity">
+                      <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
+                      <span className="calendar-day-activity-meta">
+                        {activity.sportType}
+                        {activity.sportType && activity.movingTimeS > 0 && ` · ${formatDuration(activity.movingTimeS)}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="muted">Rest day</span>
+              )}
+            </div>
+          ))}
+        </div>
       </section>
     </Page>
   );
@@ -2257,7 +2457,8 @@ function ActivityTable({
   const columns = compact ? compactActivityTableColumns : (visibleColumns ?? defaultActivityTableColumns);
   const showColumn = (column: ActivityTableColumnKey) => columns.includes(column);
   return (
-    <div className="table-wrap">
+    <>
+    <div className="table-wrap activity-table-desktop">
       <table className="data-table activity-table">
         <thead>
           <tr>
@@ -2302,6 +2503,56 @@ function ActivityTable({
         </tbody>
       </table>
     </div>
+    <ActivityCardList activities={activities} compact={compact} onDelete={onDelete} deletingId={deletingId} />
+    </>
+  );
+}
+
+function ActivityCardList({
+  activities,
+  compact = false,
+  onDelete,
+  deletingId
+}: {
+  activities: Activity[];
+  compact?: boolean;
+  onDelete?: (activity: Activity) => void;
+  deletingId?: string;
+}) {
+  return (
+    <div className={`activity-card-list${compact ? " compact" : ""}`}>
+      {activities.map((activity) => (
+        <article className="activity-card" key={activity.id}>
+          <div className="activity-card-header">
+            <div className="activity-card-title">
+              <Link to={`/activities/${activity.id}`} title={activity.name}>{activity.name}</Link>
+              <span>{formatDate(activity.startTime)} · {activity.sportType}</span>
+            </div>
+            {onDelete && (
+              <button
+                className="icon-button danger"
+                type="button"
+                title="Delete activity"
+                aria-label={`Delete ${activity.name}`}
+                disabled={deletingId === activity.id}
+                onClick={() => onDelete(activity)}
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
+          <div className="activity-card-metrics">
+            <span><strong>{formatDistance(activity.distanceM)}</strong><small>Distance</small></span>
+            <span><strong>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</strong><small>Time</small></span>
+            {!compact && <span><strong>{formatCalories(activity.caloriesKcal) || "—"}</strong><small>Calories</small></span>}
+          </div>
+          <div className="activity-card-footer">
+            <GearChipList gear={activity.gear} compact />
+            <span className="source-pill">{activity.source}</span>
+          </div>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -2312,6 +2563,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const activityQueryKey = ["activity", id] as const;
   const [plannedMatchWindowDays, setPlannedMatchWindowDays] = useState(7);
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const activitySeries = useQuery({
+    queryKey: ["activity-series", id],
+    queryFn: () => api.activitySeries(id!, 1200),
+    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
+  });
   const plannedMatchCandidates = useQuery({
     queryKey: ["planned-match-candidates", id, plannedMatchWindowDays],
     queryFn: () => api.plannedMatchCandidates(id!, plannedMatchWindowDays),
@@ -2519,19 +2775,24 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }
 
   const confirmedItem = item;
+  const displayItem = { ...confirmedItem, samples: activitySeries.data?.samples ?? [] };
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
-  const routePoints = routeForActivity(confirmedItem);
-  const canExportGPX = canExportActivityGPX(confirmedItem);
-  const paceScale = paceScaleForActivity(confirmedItem, "pace");
-  const routePaceScale = paceScaleForActivity(confirmedItem, routeColorSource);
-  const paceRouteSegments = paceRouteSegmentsForActivity(confirmedItem, routePaceScale, routeColorSource);
-  const chartData = chartDataFor(confirmedItem.samples ?? [], paceScale);
+  const routePoints = routeForActivity(displayItem);
+  const canExportGPX = (activitySeries.data?.totalSamples ?? 0) > 1;
+  const paceScale = paceScaleForActivity(displayItem, "pace");
+  const routePaceScale = paceScaleForActivity(displayItem, routeColorSource);
+  const paceRouteSegments = paceRouteSegmentsForActivity(displayItem, routePaceScale, routeColorSource);
+  const chartData: ActivityChartPoint[] = activitySeries.data?.points ?? chartDataFor(displayItem.samples ?? [], paceScale);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
   const finalClimbs = effectiveClimbs;
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
-  const climbMapSegments = climbMapSegmentsFor(confirmedItem, finalClimbs);
-  const selectedClimbProfile = climbProfileFor(confirmedItem, selectedClimb);
+  const climbMapSegments = climbMapSegmentsFor(displayItem, finalClimbs);
+  const selectedClimbProfile = climbProfileFor(displayItem, selectedClimb);
+  const isClimbSensitivitySaved = climbSensitivity === configuredClimbSensitivity;
+  const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
+  const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
+  const canSaveClimbSensitivity = !isClimbSensitivitySaved;
   const feedbackAvailable = Boolean(plannedMatchCandidates.data?.matched?.feedbackCell?.trim());
 
   const handleSelectClimb = (climb: ActivityClimb) => {
@@ -2828,7 +3089,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {analysisTab === "stats" ? (
         <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
       ) : (
-        <ActivityIntervalsPanel activity={confirmedItem} />
+        <ActivityIntervalsPanel activity={displayItem} />
       )}
     </Page>
   );
@@ -5239,6 +5500,11 @@ function formatCalendarMonthLabel(month: CalendarMonth) {
 
 function formatCalendarDate(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function formatCalendarAgendaDate(value: string) {
+  const date = new Date(`${value}T12:00:00`);
+  return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
 function calendarMonthRange(month: CalendarMonth) {
