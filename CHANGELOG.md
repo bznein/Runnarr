@@ -49,11 +49,12 @@
 - Gear list and gear detail pages now support sorting by last used, first used, distance, percent-to-limit, and activity count.
 - Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
-- Added configurable server-side climb detection settings in Settings with preset profiles and manual tuning; activity climb detections now re-compute after saves.
+- Climb detection settings now live in Settings with persistent preset controls and a temporary per-activity sensitivity override; activity climb detections re-compute after saved changes.
 - Added a new Calendar view with a month-by-month activity grid, month navigation, and clickable activity links.
 
 ### Fixes
 
+- Fixed training-sheet writeback status lookups failing when PostgreSQL UUID columns were compared with text parameters.
 - Removed the inline theme bootstrap script so strict Content Security Policy no longer reports script violations on SPA routes such as Calendar.
 - Display preferences, activity-list columns, and gear sorting now persist per user instead of being shared through browser-local storage.
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
