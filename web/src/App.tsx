@@ -2729,7 +2729,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryKey: ["activity-climb-preview", id, climbSensitivityForPreview],
     queryFn: () => api.activityClimbPreview(id!, climbSensitivityForPreview),
     placeholderData: (previousData) => previousData,
-    enabled: Boolean(activity.data)
+    enabled: Boolean(activity.data) && supportsClimbSettings(activity.data?.activity.sportType ?? "")
   });
   useEffect(() => {
     if (!routeUsesGap) {
@@ -2799,6 +2799,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
 
   const confirmedItem = item;
   const displayItem = { ...confirmedItem, samples: activitySeries.data?.samples ?? [] };
+  const showClimbSensitivityControls = supportsClimbSettings(displayItem.sportType);
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
   const pinningMedia = mediaItems.find((media) => media.id === pinningMediaId);
@@ -3108,7 +3109,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         climbs={effectiveClimbs}
         selectedClimb={selectedClimb}
         profileData={selectedClimbProfile}
-        sensitivityControls={climbSensitivityControls}
+        sensitivityControls={showClimbSensitivityControls ? climbSensitivityControls : undefined}
         onSelect={handleSelectClimb}
       />
 
@@ -3322,6 +3323,14 @@ function intervalCategoryLabel(category: string, sportType: string) {
 
 function isRunningSport(sportType: string) {
   return /run|walk|hike/i.test(sportType);
+}
+
+function supportsClimbSettings(sportType: string) {
+  const normalized = sportType.trim().toLowerCase();
+  if (/(treadmill|swim|kayak)/i.test(normalized)) {
+    return false;
+  }
+  return /(run|walk|hike|cycl|bike|ride)/i.test(normalized);
 }
 
 function intervalStepLabel(interval: ActivityInterval, sportType: string) {
