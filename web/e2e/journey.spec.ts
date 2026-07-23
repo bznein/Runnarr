@@ -233,6 +233,7 @@ test.describe("local product journey", () => {
     await navigateTo(page, "Health", mobile);
     await expect(page.getByRole("heading", { name: "Health" })).toBeVisible();
     await expect(page.getByText("Daily metrics", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sync health", exact: true })).toHaveCount(0);
     await expect(page.locator(".metric-grid strong").filter({ hasText: "12,450" })).toBeVisible();
     if (mobile) {
       const healthCard = page.locator(".health-card-list:visible .health-card").filter({ hasText: "12,450" }).first();
@@ -257,6 +258,8 @@ test.describe("local product journey", () => {
 
     await navigateTo(page, "Settings", mobile);
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sync health", exact: true })).toBeVisible();
+    await expect(page.getByText("Health from", { exact: true })).toBeVisible();
     if (mobile) {
       await expect(page.locator(".mobile-header-title")).toHaveText("Settings");
       await expect(page.locator('input[type="file"][accept=".gpx,.tcx,.fit"]')).toBeVisible();

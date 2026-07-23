@@ -4,6 +4,7 @@
 
 ### Features
 
+- Health sync controls and activity/job status now live in Settings with the other sync controls.
 - Added Makefile targets for standard backend, frontend, and Playwright checks.
 - Health now shows Garmin sleep score in the summary cards, trend chart, and daily metrics table when available.
 - Activity photos can now be pinned or moved to a specific map location when EXIF GPS data is unavailable.
