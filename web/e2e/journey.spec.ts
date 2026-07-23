@@ -143,6 +143,21 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();
     const previousActivity = page.getByRole("button", { name: "Previous activity" });
     await expect(previousActivity).toBeEnabled();
+
+    let releaseNavigation = () => {};
+    const navigationGate = new Promise<void>((resolve) => {
+      releaseNavigation = resolve;
+    });
+    await page.route("**/api/activities/*/navigation**", async (route) => {
+      await navigationGate;
+      await route.continue();
+    });
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(previousActivity).toBeDisabled();
+    releaseNavigation();
+    await expect(previousActivity).toBeEnabled();
+    await page.unroute("**/api/activities/*/navigation**");
+
     await previousActivity.click();
     await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
     await page.getByRole("button", { name: "Next activity" }).click();

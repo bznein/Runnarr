@@ -40,6 +40,7 @@
 - Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.
 - Activity list columns can now be toggled, and long activity/gear names are clipped more aggressively to keep the list scannable.
 - Activity detail pages now provide previous/next arrows for browsing activities in the current list order.
+- Activity detail navigation now waits for refreshed neighbor data before allowing another move.
 - Activity list name, type, and date filters now share one filter dialog with a single selectable activity-type list.
 - Activity detail pages now support local-only notes that do not modify provider activities.
 - Activity detail pages can export a GPX track, with an option to include sensor extensions.

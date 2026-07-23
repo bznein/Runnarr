@@ -2931,7 +2931,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           <ActivityNavigation
             previousId={activityNavigation.data?.previousId}
             nextId={activityNavigation.data?.nextId}
-            loading={activityNavigation.isLoading}
+            loading={activityNavigation.isFetching}
             onNavigate={(nextID) => navigate(activityDetailPath(nextID, activityListSearch))}
           />
           <ActivityMediaUploadAction
