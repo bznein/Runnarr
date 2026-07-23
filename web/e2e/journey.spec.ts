@@ -144,6 +144,14 @@ test.describe("local product journey", () => {
     const previousActivity = page.getByRole("button", { name: "Previous activity" });
     await expect(previousActivity).toBeEnabled();
 
+    await previousActivity.click();
+    await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    const cyclingNextActivity = page.getByRole("button", { name: "Next activity" });
+    await expect(cyclingNextActivity).toBeEnabled();
+    await cyclingNextActivity.click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(previousActivity).toBeEnabled();
+
     let releaseNavigation = () => {};
     const navigationGate = new Promise<void>((resolve) => {
       releaseNavigation = resolve;
@@ -152,15 +160,14 @@ test.describe("local product journey", () => {
       await navigationGate;
       await route.continue();
     });
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(previousActivity).toBeDisabled();
-    releaseNavigation();
-    await expect(previousActivity).toBeEnabled();
-    await page.unroute("**/api/activities/*/navigation**");
-
     await previousActivity.click();
     await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
-    await page.getByRole("button", { name: "Next activity" }).click();
+    await expect(cyclingNextActivity).toBeDisabled();
+    releaseNavigation();
+    await expect(cyclingNextActivity).toBeEnabled();
+    await page.unroute("**/api/activities/*/navigation**");
+
+    await cyclingNextActivity.click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
     if (mobile) {
       await expect(page.locator(".mobile-header-title")).toHaveText("Activity");
