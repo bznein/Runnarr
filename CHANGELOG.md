@@ -4,6 +4,7 @@
 
 ### Features
 
+- Health now shows Garmin sleep score in the summary cards, trend chart, and daily metrics table when available.
 - Added explicit local and internet-facing deployment modes: local Docker and
   Vite startup stays loopback-only and password-based, while public mode uses
   HTTPS-only Google OIDC with an email allowlist, host-only secure sessions,

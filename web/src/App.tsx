@@ -91,6 +91,7 @@ type HealthChartPoint = {
   activeCalories?: number;
   remainingCalories?: number;
   sleepHours?: number;
+  sleepScore?: number;
   restingHeartRate?: number;
   stress?: number;
   bodyBatteryGained?: number;
@@ -666,6 +667,7 @@ function HealthPage() {
             <HealthBarChart title="Steps" data={chartData} dataKey="steps" color="#2f8f83" formatter={formatHealthInteger} axisFormatter={formatHealthAxisInteger} asLine={showLongRangeHealthLines} />
             <HealthCaloriesChart data={chartData} asLine={showLongRangeHealthLines} />
             <HealthBarChart title="Sleep" data={chartData} dataKey="sleepHours" color="#4664c9" formatter={(value) => `${value.toFixed(1)} h`} axisFormatter={formatHealthAxisHours} asLine={showLongRangeHealthLines} />
+            <HealthLineChart title="Sleep score" data={chartData} dataKey="sleepScore" color="#8b5e3c" formatter={(value) => Math.round(value).toLocaleString()} axisFormatter={formatHealthAxisInteger} />
             <HealthLineChart title="Resting heart rate" data={chartData} dataKey="restingHeartRate" color="#c84d4d" formatter={(value) => `${Math.round(value)} bpm`} axisFormatter={formatHealthAxisBPM} />
             <HealthLineChart title="Stress" data={chartData} dataKey="stress" color="#7a4eb2" formatter={(value) => Math.round(value).toLocaleString()} />
             <HealthBodyBatteryChart data={chartData} asLine={showLongRangeHealthLines} />
@@ -1313,6 +1315,7 @@ function HealthMetricsTable({
             <th>Steps</th>
             <th>Calories</th>
             <th>Sleep</th>
+            <th>Sleep score</th>
             <th>RHR</th>
             <th>Stress</th>
             <th>Body battery</th>
@@ -1331,6 +1334,7 @@ function HealthMetricsTable({
               <td>{formatHealthInteger(metric.steps)}</td>
               <td>{formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal)}</td>
               <td>{formatHealthDuration(metric.sleepDurationS)}</td>
+              <td>{formatHealthRounded(metric.sleepScore)}</td>
               <td>{formatHealthBPM(metric.restingHeartRateBpm)}</td>
               <td>{formatHealthRounded(metric.stressAvg)}</td>
               <td>{formatBodyBatteryGainDrain(metric)}</td>
@@ -5275,6 +5279,7 @@ function hasAnyHealthMetric(metric: DailyHealthMetric) {
     metric.activeCaloriesKcal,
     metric.restingHeartRateBpm,
     metric.sleepDurationS,
+    metric.sleepScore,
     metric.stressAvg,
     metric.bodyBatteryGained,
     metric.bodyBatteryDrained,
@@ -5297,6 +5302,7 @@ function healthChartData(metrics: DailyHealthMetric[]): HealthChartPoint[] {
       activeCalories,
       remainingCalories,
       sleepHours: isFiniteNumber(metric.sleepDurationS) ? metric.sleepDurationS / 3600 : undefined,
+      sleepScore: finiteValue(metric.sleepScore),
       restingHeartRate: finiteValue(metric.restingHeartRateBpm),
       stress: finiteValue(metric.stressAvg),
       bodyBatteryGained: finiteValue(metric.bodyBatteryGained),
@@ -5317,6 +5323,7 @@ function healthMetricCards(metric?: DailyHealthMetric) {
     { label: "Steps", value: formatHealthInteger(metric.steps), icon: <Footprints size={18} /> },
     { label: "Calories", value: formatHealthCalories(metric.totalCaloriesKcal ?? metric.activeCaloriesKcal), icon: <Flame size={18} /> },
     { label: "Sleep", value: formatHealthDuration(metric.sleepDurationS), icon: <Moon size={18} /> },
+    { label: "Sleep score", value: formatHealthRounded(metric.sleepScore), icon: <Moon size={18} /> },
     { label: "Resting HR", value: formatHealthBPM(metric.restingHeartRateBpm), icon: <HeartPulse size={18} /> },
     { label: "Body battery", value: formatBodyBatteryGainDrain(metric), icon: <BatteryCharging size={18} /> },
     { label: "HRV", value: formatHealthMS(metric.hrvAvgMs), icon: <ActivityIcon size={18} /> },
