@@ -11,6 +11,7 @@ import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
+import { chartDisplayDomain } from "./activityChartBounds";
 import type {
   Activity,
   ActivityClimb,
@@ -5824,7 +5825,7 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
                   yAxisId={series.key}
                   orientation={index === 0 ? "left" : "right"}
                   width={series.key === "paceSPKM" ? 58 : 46}
-                  domain={["auto", "auto"]}
+                  domain={chartDisplayDomain(data.map((item) => item[series.key])) ?? ["auto", "auto"]}
                   reversed={series.key === "paceSPKM"}
                   tickFormatter={(value) => formatChartTick(Number(value), series)}
                 />
