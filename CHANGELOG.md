@@ -56,6 +56,10 @@
 
 ### Fixes
 
+- Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
+- Hide the interval step-type selector when all intervals use the same step type.
+- Interval and lap cumulative times now follow Garmin’s recorded durations instead of wall-clock timestamps that include pauses; single-type interval views open expanded.
+- Pace formatting now carries rounded seconds into the next minute instead of displaying invalid values such as `4:60 /km`.
 - Paused Garmin timer intervals now remain visible in route geometry without contributing their walking speed to pace charts or pace-colored routes.
 - Health chart axes now reserve enough space for grouped values such as steps
   and show units for sleep, resting heart rate, and HRV.

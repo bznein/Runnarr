@@ -4,7 +4,7 @@ import json
 import math
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from garminconnect import Garmin
 
@@ -354,6 +354,44 @@ def normalize_interval(item, fallback_index, laps_by_index, repeat_counts):
     }
 
 
+def parse_iso_time(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def inferred_interval_lap_indexes(item, laps, interval_count):
+    if not isinstance(item, dict) or not laps:
+        return None
+
+    interval_start = parse_iso_time(parse_garmin_time(item.get("startTimeGMT") or item.get("startTimeLocal") or item.get("startTime")))
+    interval_end = parse_iso_time(parse_garmin_time(item.get("endTimeGMT") or item.get("endTimeLocal") or item.get("endTime")))
+    if interval_start is not None and interval_end is None:
+        duration = parse_number(item.get("elapsedDuration") or item.get("duration"))
+        if duration is not None and duration >= 0:
+            interval_end = interval_start + timedelta(seconds=duration)
+
+    if interval_start is not None and interval_end is not None:
+        matches = []
+        for lap in laps:
+            lap_start = parse_iso_time(lap.get("startTime"))
+            elapsed = parse_number(lap.get("elapsedTimeS"))
+            if lap_start is None or elapsed is None or elapsed < 0:
+                continue
+            lap_end = lap_start + timedelta(seconds=elapsed)
+            if lap_start < interval_end and lap_end > interval_start:
+                matches.append(lap["index"])
+        if matches:
+            return matches
+
+    if interval_count == 1:
+        return [lap["index"] for lap in laps]
+    return None
+
+
 def activity_workout_response(client, activity_id):
     errors = {}
     activity_payload = safe_activity_call(errors, "activity", lambda: client.get_activity(activity_id))
@@ -387,7 +425,19 @@ def activity_workout_response(client, activity_id):
         typed_items = []
     intervals = []
     for item in typed_items:
-        interval = normalize_interval(item, len(intervals), laps_by_index, repeat_counts)
+        inferred_lap_indexes = None
+        if isinstance(item, dict) and not item.get("lapIndexes"):
+            inferred_lap_indexes = inferred_interval_lap_indexes(item, laps, len(typed_items))
+        if inferred_lap_indexes is not None:
+            normalized_item = dict(item)
+            # Garmin's interval payload uses one-based lap indexes, while the
+            # normalized activity model uses zero-based indexes.
+            normalized_item["lapIndexes"] = [index + 1 for index in inferred_lap_indexes]
+            interval = normalize_interval(normalized_item, len(intervals), laps_by_index, repeat_counts)
+            if interval is not None:
+                interval["raw"] = item
+        else:
+            interval = normalize_interval(item, len(intervals), laps_by_index, repeat_counts)
         if interval is not None:
             intervals.append(interval)
     return {

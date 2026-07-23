@@ -9,7 +9,7 @@ import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
-import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
+import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import type {
   Activity,
@@ -2839,17 +2839,21 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
   const laps = activity.laps ?? [];
   const [filter, setFilter] = useState("all");
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const categories = Array.from(new Set(intervals.map((interval) => interval.category).filter(Boolean)));
+  const hasSingleStepType = categories.length === 1;
 
   useEffect(() => {
     setFilter("all");
-    setExpanded({});
-  }, [activity.id]);
+    setExpanded(hasSingleStepType ? intervals.reduce<Record<number, boolean>>((state, interval) => {
+      state[interval.index] = true;
+      return state;
+    }, {}) : {});
+  }, [activity.id, hasSingleStepType, intervals.length]);
 
   if (intervals.length === 0) {
     return <ActivityFlatLapTable activity={activity} />;
   }
 
-  const categories = Array.from(new Set(intervals.map((interval) => interval.category).filter(Boolean)));
   const filteredIntervals = filter === "all" ? intervals : intervals.filter((interval) => interval.category === filter);
   const lapsByIndex = new Map(laps.map((lap) => [lap.index, lap]));
   const showGap = intervals.some((interval) => interval.avgGradeAdjustedPaceSPKM !== undefined) || laps.some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
@@ -2866,15 +2870,17 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
           <div className="panel-heading">Intervals</div>
           {activity.workout?.name && <div className="muted">Workout: {activity.workout.name}</div>}
         </div>
-        <label className="compact-field" htmlFor="activity-interval-filter">
-          <span>Step Type</span>
-          <select id="activity-interval-filter" value={filter} onChange={(event) => setFilter(event.target.value)}>
-            <option value="all">All</option>
-            {categories.map((category) => (
-              <option key={category} value={category}>{intervalCategoryLabel(category, activity.sportType)}</option>
-            ))}
-          </select>
-        </label>
+        {categories.length > 1 && (
+          <label className="compact-field" htmlFor="activity-interval-filter">
+            <span>Step Type</span>
+            <select id="activity-interval-filter" value={filter} onChange={(event) => setFilter(event.target.value)}>
+              <option value="all">All</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>{intervalCategoryLabel(category, activity.sportType)}</option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <div className="table-wrap">
         <table className="data-table interval-table">
@@ -2899,7 +2905,8 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
           </thead>
           <tbody>
             {filteredIntervals.map((interval) => {
-              const intervalLaps = interval.lapIndexes?.map((index) => lapsByIndex.get(index)).filter((lap): lap is ActivityLap => Boolean(lap)) ?? [];
+              const intervalLapIndexes = intervalLapIndexesForDisplay(interval, intervals, laps);
+              const intervalLaps = intervalLapIndexes.map((index) => lapsByIndex.get(index)).filter((lap): lap is ActivityLap => Boolean(lap));
               const isExpanded = Boolean(expanded[interval.index]);
               const label = intervalStepLabel(interval, activity.sportType);
               return (
@@ -2920,9 +2927,9 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
                       <strong>{label}</strong>
                       {intervalTargetLabel(activity.workout, interval) && <span className="interval-target">{intervalTargetLabel(activity.workout, interval)}</span>}
                     </td>
-                    <td>{formatLapRange(interval.lapIndexes)}</td>
-                    <td>{formatDuration(interval.elapsedTimeS)}</td>
-                    <td>{formatDuration(intervalCumulativeTime(interval, intervals, activity.startTime))}</td>
+                    <td>{formatLapRange(intervalLapIndexes)}</td>
+                    <td>{formatDuration(intervalDisplayTimeS(interval))}</td>
+                    <td>{formatDuration(intervalCumulativeTime(interval, intervals))}</td>
                     <td>{formatDistance(interval.distanceM)}</td>
                     <td>{optionalPace(interval.avgPaceSPKM)}</td>
                     {showGap && <td>{optionalPace(interval.avgGradeAdjustedPaceSPKM)}</td>}
@@ -2939,8 +2946,8 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
                       <td />
                       <td>Lap {lap.index + 1}</td>
                       <td>{lap.index + 1}</td>
-                      <td>{formatDuration(lapMovingTimeS(lap, laps.length > 0 ? activity.samples ?? [] : []))}</td>
-                      <td>{formatDuration(lapCumulativeTime(lap, laps, activity.startTime))}</td>
+                      <td>{formatDuration(lapDisplayTimeS(lap, laps.length > 0 ? activity.samples ?? [] : []))}</td>
+                      <td>{formatDuration(lapCumulativeTime(lap, laps, activity.samples ?? []))}</td>
                       <td>{formatDistance(lap.distanceM)}</td>
                       <td>{optionalPace(lapPaceSPKM(lap, activity.samples ?? []))}</td>
                       {showGap && <td>{optionalPace(lap.avgGradeAdjustedPaceSPKM)}</td>}
@@ -2982,7 +2989,7 @@ function ActivityFlatLapTable({ activity }: { activity: Activity }) {
               <tr key={lap.index}>
                 <td>{lap.index + 1}</td>
                 <td>{formatDistance(lap.distanceM)}</td>
-                <td>{formatDuration(lapMovingTimeS(lap, activity.samples ?? []))}</td>
+                <td>{formatDuration(lapDisplayTimeS(lap, activity.samples ?? []))}</td>
                 <td>{optionalPace(lapPaceSPKM(lap, activity.samples ?? []))}</td>
                 {showGap && <td>{optionalPace(lap.avgGradeAdjustedPaceSPKM)}</td>}
                 {showElevation && <td>{optionalMeters(lap.elevationGainM)}</td>}
@@ -3027,27 +3034,55 @@ function formatLapRange(lapIndexes?: number[]) {
   return first === last ? String(first) : `${first}–${last}`;
 }
 
-function intervalCumulativeTime(interval: ActivityInterval, intervals: ActivityInterval[], activityStart: string) {
-  if (interval.endTime) {
-    const end = Date.parse(interval.endTime);
-    const start = Date.parse(activityStart);
-    if (Number.isFinite(end) && Number.isFinite(start) && end >= start) {
-      return Math.round((end - start) / 1000);
-    }
+function intervalLapIndexesForDisplay(interval: ActivityInterval, intervals: ActivityInterval[], laps: ActivityLap[]) {
+  if (interval.lapIndexes && interval.lapIndexes.length > 0) {
+    return interval.lapIndexes;
   }
-  const index = intervals.findIndex((candidate) => candidate.index === interval.index);
-  return intervals.slice(0, index + 1).reduce((total, candidate) => total + candidate.elapsedTimeS, 0);
+  if (intervals.length === 1) {
+    return laps.map((lap) => lap.index);
+  }
+  return [];
 }
 
-function lapCumulativeTime(lap: ActivityLap, laps: ActivityLap[], activityStart: string) {
-  if (lap.startTime) {
-    const end = Date.parse(lap.startTime) + lap.elapsedTimeS * 1000;
-    const start = Date.parse(activityStart);
-    if (Number.isFinite(end) && Number.isFinite(start) && end >= start) {
-      return Math.round((end - start) / 1000);
+function intervalCumulativeTime(interval: ActivityInterval, intervals: ActivityInterval[]) {
+  const index = intervals.findIndex((candidate) => candidate.index === interval.index);
+  return Math.round(intervals.slice(0, index + 1).reduce((total, candidate) => total + intervalDisplayTimeS(candidate), 0));
+}
+
+function lapCumulativeTime(lap: ActivityLap, laps: ActivityLap[], samples: ActivitySample[]) {
+  return Math.round(laps
+    .filter((candidate) => candidate.index <= lap.index)
+    .reduce((total, candidate) => total + lapDisplayTimeS(candidate, samples), 0));
+}
+
+function intervalDisplayTimeS(interval: ActivityInterval) {
+  const duration = rawDurationS(interval.raw);
+  if (duration !== undefined) {
+    return duration;
+  }
+  return interval.movingTimeS > 0 ? interval.movingTimeS : interval.elapsedTimeS;
+}
+
+function lapDisplayTimeS(lap: ActivityLap, samples: ActivitySample[]) {
+  const duration = rawDurationS(lap.raw);
+  if (duration !== undefined) {
+    return duration;
+  }
+  return lapMovingTimeS(lap, samples);
+}
+
+function rawDurationS(raw?: Record<string, unknown>) {
+  const value = raw?.duration;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
     }
   }
-  return laps.filter((candidate) => candidate.index <= lap.index).reduce((total, candidate) => total + candidate.elapsedTimeS, 0);
+  return undefined;
 }
 
 function intervalTargetLabel(workout: Activity["workout"], interval: ActivityInterval) {
@@ -6232,9 +6267,7 @@ function formatChartTick(value: number, series: ActivityChartSeries) {
     return "";
   }
   if (series.key === "paceSPKM") {
-    const minutes = Math.floor(value / 60);
-    const seconds = Math.round(value % 60);
-    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+    return formatPaceMinutesSeconds(value);
   }
   return String(Math.round(value));
 }
@@ -6486,9 +6519,10 @@ function difficultyClass(value: string) {
 }
 
 function formatDuration(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+  const roundedSeconds = Math.round(totalSeconds);
+  const hours = Math.floor(roundedSeconds / 3600);
+  const minutes = Math.floor((roundedSeconds % 3600) / 60);
+  const seconds = roundedSeconds % 60;
   if (hours > 0) {
     return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
@@ -6552,9 +6586,7 @@ function formatPace(secondsPerKm?: number) {
   if (!secondsPerKm || !Number.isFinite(secondsPerKm)) {
     return "-";
   }
-  const minutes = Math.floor(secondsPerKm / 60);
-  const seconds = Math.round(secondsPerKm % 60);
-  return `${minutes}:${String(seconds).padStart(2, "0")} /km`;
+  return `${formatPaceMinutesSeconds(secondsPerKm)} /km`;
 }
 
 function formatBPM(value?: number) {
