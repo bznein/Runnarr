@@ -1662,13 +1662,13 @@ function GearDistanceBlock({ gear }: { gear: Gear }) {
   );
 }
 
-function GearChipList({ gear, compact = false }: { gear?: GearSummary[]; compact?: boolean }) {
+function GearChipList({ gear, compact = false, className }: { gear?: GearSummary[]; compact?: boolean; className?: string }) {
   const items = gear ?? [];
   if (items.length === 0) {
     return null;
   }
   return (
-    <div className={`gear-chip-list${compact ? " compact" : ""}`}>
+    <div className={`gear-chip-list${compact ? " compact" : ""}${className ? ` ${className}` : ""}`}>
       {items.map((item) => (
         <Link className={`gear-chip${item.retired ? " retired" : ""}`} key={item.id} to={`/gear/${item.id}`} title={gearDisplayLabel(item)}>
           <Footprints size={13} />
@@ -2777,7 +2777,14 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
   const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
   const canSaveClimbSensitivity = !isClimbSensitivitySaved;
-  const feedbackAvailable = Boolean(plannedMatchCandidates.data?.matched?.feedbackCell?.trim());
+  const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
+  const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
+  const writeback = plannedMatchCandidates.data?.writeback;
+  const canRetryWriteback = Boolean(writeback && [
+    writeback.summaryStatus,
+    writeback.intervalsStatus,
+    writeback.feedbackStatus
+  ].some((status) => status === "failed" || status === "canceled" || status === "completed_with_conflicts"));
 
   const handleSelectClimb = (climb: ActivityClimb) => {
     setSelectedClimbIndex((current) => current === climb.index ? undefined : climb.index);
@@ -2804,9 +2811,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   };
   const openMatchDialog = (candidateId?: string) => {
     const nextCandidateId = candidateId ?? plannedMatchCandidates.data?.suggestedId ?? plannedMatchCandidates.data?.candidates[0]?.id;
-    if (!nextCandidateId) {
-      return;
-    }
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
     setMatchPreview(undefined);
@@ -2885,6 +2889,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   return (
     <Page
       title={confirmedItem.name}
+      titleAccessory={<GearChipList gear={item.gear} className="activity-title-gear" />}
       eyebrow={`${confirmedItem.sportType} · ${formatDate(confirmedItem.startTime)}`}
       actions={
         <>
@@ -2893,13 +2898,25 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             uploading={uploadMedia.isPending}
             onFilesSelected={handleMediaFilesSelected}
           />
+          {isRunningSport(item.sportType) && (
+            <ActivityPlannedMatchAction
+              matched={Boolean(matchedPlannedActivity)}
+              matchedName={matchedPlannedActivity?.name}
+              loading={plannedMatchCandidates.isLoading}
+              working={previewPlannedActivity.isPending || applyPlannedActivity.isPending || unmatchPlannedActivity.isPending}
+              onMatch={() => openMatchDialog()}
+              onUnmatch={() => unmatchPlannedActivity.mutate()}
+            />
+          )}
           <ActivityDetailActions
             activity={item}
             open={actionsOpen}
             deleting={deleteActivity.isPending}
             canExportGPX={canExportGPX}
-            canUnmatchPlanned={Boolean(plannedMatchCandidates.data?.matched)}
-            unmatching={unmatchPlannedActivity.isPending}
+            canOpenCheckIn={Boolean(matchedPlannedActivity)}
+            feedbackAvailable={feedbackAvailable}
+            canRetryWriteback={canRetryWriteback}
+            retryingWriteback={retryWriteback.isPending}
             onToggle={() => setActionsOpen((current) => !current)}
             onRename={() => {
               renameActivity.reset();
@@ -2915,10 +2932,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
               setExportOpen(true);
               setActionsOpen(false);
             }}
-            onUnmatchPlanned={() => {
+            onCheckIn={() => {
+              updateActivityReflection.reset();
+              setCheckInOpen(true);
               setActionsOpen(false);
-              unmatchPlannedActivity.mutate();
             }}
+            onRetryWriteback={() => retryWriteback.mutate()}
             onDelete={handleDelete}
           />
         </>
@@ -2975,24 +2994,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onClose={() => setExportOpen(false)}
         />
       )}
-      <PlannedActivityMatchPanel
-        data={plannedMatchCandidates.data}
-        loading={plannedMatchCandidates.isLoading}
-        error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error ?? updateActivityReflection.error ?? unmatchPlannedActivity.error ?? retryWriteback.error}
-        matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending || updateActivityReflection.isPending}
-        retrying={retryWriteback.isPending}
-        feedbackAvailable={feedbackAvailable}
-        canLoadMore={plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)}
-        windowDays={plannedMatchWindowDays}
-        onMatchHint={openMatchDialog}
-        onOpenMatch={() => openMatchDialog()}
-        onLoadMore={() => setPlannedMatchWindowDays(30)}
-        onOpenCheckIn={() => {
-          updateActivityReflection.reset();
-          setCheckInOpen(true);
-        }}
-        onRetry={() => retryWriteback.mutate()}
-      />
+      {plannedMatchCandidates.error && <div className="error">{plannedMatchCandidates.error instanceof Error ? plannedMatchCandidates.error.message : "Could not load planned activity matches"}</div>}
+      {unmatchPlannedActivity.error && <div className="error">{unmatchPlannedActivity.error instanceof Error ? unmatchPlannedActivity.error.message : "Could not unmatch planned run"}</div>}
+      {retryWriteback.error && <div className="error">{retryWriteback.error instanceof Error ? retryWriteback.error.message : "Could not retry sheet write-back"}</div>}
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
@@ -3013,14 +3017,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         }}
         onDelete={handleDeleteNotes}
       />
-
-
-      {(item.gear ?? []).length > 0 && (
-        <section className="panel gear-activity-panel">
-          <div className="panel-heading">Gear</div>
-          <GearChipList gear={item.gear} />
-        </section>
-      )}
 
       {mediaItems.length > 0 ? (
         <ActivityMediaPanel
@@ -3417,130 +3413,6 @@ function optionalWatts(value?: number) {
   return value !== undefined ? `${Math.round(value).toLocaleString()} W` : "";
 }
 
-function PlannedActivityMatchPanel({
-  data,
-  loading,
-  error,
-  matching,
-  retrying,
-  feedbackAvailable,
-  canLoadMore,
-  windowDays,
-  onMatchHint,
-  onOpenMatch,
-  onOpenCheckIn,
-  onLoadMore,
-  onRetry
-}: {
-  data?: PlannedActivityMatchResponse;
-  loading: boolean;
-  error: unknown;
-  matching: boolean;
-  retrying: boolean;
-  feedbackAvailable: boolean;
-  canLoadMore: boolean;
-  windowDays: number;
-  onMatchHint: (plannedActivityId: string) => void;
-  onOpenMatch: () => void;
-  onOpenCheckIn: () => void;
-  onLoadMore: () => void;
-  onRetry: () => void;
-}) {
-  const [expanded, setExpanded] = useState(!Boolean(data?.matched));
-  const matched = Boolean(data?.matched);
-
-  useEffect(() => {
-    setExpanded(!matched);
-  }, [matched]);
-
-  if (loading) return null;
-  if (error) return <div className="error">{error instanceof Error ? error.message : "Could not load planned activity matches"}</div>;
-  if (!data) return null;
-  if (!data.matched && data.candidates.length === 0 && !canLoadMore && windowDays === 7) return null;
-  if (data.matched) {
-    return (
-      <section className="panel planned-match-panel">
-        <div className="notes-panel-header">
-          <button
-            className="panel-collapse-toggle"
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <ChevronDown size={17} aria-hidden="true" />
-            <div>
-            <div className="panel-heading">Matched planned run</div>
-            <strong>{data.matched.name}</strong>
-            </div>
-          </button>
-          <button className="secondary-button small-button" type="button" onClick={onOpenCheckIn}>
-            {feedbackAvailable ? "RPE & feedback" : "RPE"}
-          </button>
-        </div>
-        {expanded && (
-          <div className="planned-match-panel-content">
-            {data.matched.notes && <p className="muted">{data.matched.notes}</p>}
-            {data.writeback && (
-              <div className="writeback-status">
-                <p className="muted">Sheet write-back</p>
-                <div>Summary: {writebackStatusLabel(data.writeback.summaryStatus)}</div>
-                {data.writeback.summaryError && <div className="muted">{data.writeback.summaryError}</div>}
-                <div>Structured intervals: {writebackStatusLabel(data.writeback.intervalsStatus)}</div>
-                {data.writeback.intervalsError && <div className="muted">{data.writeback.intervalsError}</div>}
-                <div>How it felt/go: {writebackStatusLabel(data.writeback.feedbackStatus)}</div>
-                {data.writeback.feedbackError && <div className="muted">{data.writeback.feedbackError}</div>}
-                {data.writeback.jobId && data.writeback.jobStatus === "running" && <SyncJobCancelButton job={{ id: data.writeback.jobId, status: data.writeback.jobStatus, cancelRequestedAt: data.writeback.cancelRequestedAt }} compact />}
-                {(data.writeback.summaryStatus === "failed" || data.writeback.summaryStatus === "canceled" || data.writeback.summaryStatus === "completed_with_conflicts" || data.writeback.intervalsStatus === "failed" || data.writeback.intervalsStatus === "canceled" || data.writeback.intervalsStatus === "completed_with_conflicts" || data.writeback.feedbackStatus === "failed" || data.writeback.feedbackStatus === "canceled" || data.writeback.feedbackStatus === "completed_with_conflicts") && (
-                  <button className="secondary-button small-button" type="button" disabled={retrying} onClick={onRetry}>
-                    {retrying ? "Retrying..." : "Retry write-back"}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-    );
-  }
-  const hintedCandidate = data.candidates[0];
-  return (
-    <section className="panel planned-match-panel">
-      <div className="notes-panel-header">
-        <button
-          className="panel-collapse-toggle"
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          <ChevronDown size={17} aria-hidden="true" />
-          <div>
-            <div className="panel-heading">{hintedCandidate ? "Suggested planned run" : "Find planned run"}</div>
-            {hintedCandidate ? <strong>{hintedCandidate.name}</strong> : <span className="muted">No planned run was found within {windowDays} days.</span>}
-          </div>
-        </button>
-        {hintedCandidate && (
-          <div className="notes-actions">
-            <button className="primary-button small-button" type="button" disabled={matching} onClick={() => onMatchHint(hintedCandidate.id)}>
-              {matching ? "Matching..." : "Match"}
-            </button>
-            {(data.candidates.length > 1 || canLoadMore) && (
-              <button className="secondary-button small-button" type="button" disabled={matching} onClick={onOpenMatch}>
-                Other options
-              </button>
-            )}
-          </div>
-        )}
-        {!hintedCandidate && canLoadMore && (
-          <button className="secondary-button small-button" type="button" onClick={onLoadMore}>
-            Load more plans
-          </button>
-        )}
-      </div>
-      {expanded && hintedCandidate?.notes && <p className="muted">{hintedCandidate.notes}</p>}
-    </section>
-  );
-}
-
 function PlannedActivityMatchDialog({
   data,
   selectedCandidateId,
@@ -3882,31 +3754,6 @@ function trainingSheetPreviewStatusLabel(status: "write" | "conflict" | "unchang
   }
 }
 
-function writebackStatusLabel(status: string) {
-  switch (status) {
-    case "completed":
-      return "written";
-    case "completed_with_conflicts":
-      return "existing values preserved";
-    case "completed_with_warnings":
-      return "written with warnings";
-    case "skipped":
-      return "skipped; review needed";
-    case "not_provided":
-      return "not provided";
-    case "not_applicable":
-      return "not applicable";
-    case "running":
-      return "writing...";
-    case "canceled":
-      return "canceled";
-    case "failed":
-      return "failed";
-    default:
-      return status;
-  }
-}
-
 function ActivityNotesPanel({
   notes,
   saving,
@@ -4162,6 +4009,36 @@ function ActivityExportGPXDialog({
   );
 }
 
+function ActivityPlannedMatchAction({
+  matched,
+  matchedName,
+  loading,
+  working,
+  onMatch,
+  onUnmatch
+}: {
+  matched: boolean;
+  matchedName?: string;
+  loading: boolean;
+  working: boolean;
+  onMatch: () => void;
+  onUnmatch: () => void;
+}) {
+  const label = working ? (matched ? "Unmatching" : "Matching") : (matched ? "Unmatch" : "Match");
+  return (
+    <button
+      className="secondary-button"
+      type="button"
+      title={matched ? `Unmatch ${matchedName ?? "planned run"}` : "Match with a planned run"}
+      disabled={loading || working}
+      onClick={matched ? onUnmatch : onMatch}
+    >
+      {matched && <RotateCcw size={16} />}
+      {label}
+    </button>
+  );
+}
+
 function ActivityMediaUploadAction({
   inputKey,
   uploading,
@@ -4380,26 +4257,32 @@ function ActivityDetailActions({
   open,
   deleting,
   canExportGPX,
-  canUnmatchPlanned,
-  unmatching,
+  canOpenCheckIn,
+  feedbackAvailable,
+  canRetryWriteback,
+  retryingWriteback,
   onToggle,
   onRename,
   onNotes,
   onExportGPX,
-  onUnmatchPlanned,
+  onCheckIn,
+  onRetryWriteback,
   onDelete
 }: {
   activity: Activity;
   open: boolean;
   deleting: boolean;
   canExportGPX: boolean;
-  canUnmatchPlanned: boolean;
-  unmatching: boolean;
+  canOpenCheckIn: boolean;
+  feedbackAvailable: boolean;
+  canRetryWriteback: boolean;
+  retryingWriteback: boolean;
   onToggle: () => void;
   onRename: () => void;
   onNotes: () => void;
   onExportGPX: () => void;
-  onUnmatchPlanned: () => void;
+  onCheckIn: () => void;
+  onRetryWriteback: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -4417,6 +4300,12 @@ function ActivityDetailActions({
             <StickyNote size={16} />
             {(activity.notes ?? "").trim() ? "Edit note" : "Add note"}
           </button>
+          {canOpenCheckIn && (
+            <button className="action-menu-item" type="button" role="menuitem" onClick={onCheckIn}>
+              <Timer size={16} />
+              {feedbackAvailable ? "RPE & feedback" : "RPE"}
+            </button>
+          )}
           <button className="action-menu-item" type="button" role="menuitem" disabled={!canExportGPX} onClick={onExportGPX}>
             <Download size={16} />
             Export GPX
@@ -4427,10 +4316,10 @@ function ActivityDetailActions({
               Open original
             </a>
           )}
-          {canUnmatchPlanned && (
-            <button className="action-menu-item" type="button" role="menuitem" disabled={unmatching} onClick={onUnmatchPlanned}>
-              <RotateCcw size={16} />
-              {unmatching ? "Unmatching..." : "Unmatch planned run"}
+          {canRetryWriteback && (
+            <button className="action-menu-item" type="button" role="menuitem" disabled={retryingWriteback} onClick={onRetryWriteback}>
+              <RefreshCw size={16} />
+              {retryingWriteback ? "Retrying..." : "Retry write-back"}
             </button>
           )}
           <button className="action-menu-item danger" type="button" role="menuitem" disabled={deleting} onClick={onDelete}>
@@ -5743,13 +5632,16 @@ function formatHealthDuration(totalSeconds?: number) {
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
-function Page({ title, eyebrow, actions, children }: { title: string; eyebrow?: string; actions?: ReactNode; children: ReactNode }) {
+function Page({ title, titleAccessory, eyebrow, actions, children }: { title: string; titleAccessory?: ReactNode; eyebrow?: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <div className="page">
       <header className="page-header">
-        <div>
+        <div className="page-title">
           {eyebrow && <div className="eyebrow">{eyebrow}</div>}
-          <h1>{title}</h1>
+          <div className="page-title-row">
+            <h1>{title}</h1>
+            {titleAccessory}
+          </div>
         </div>
         {actions && <div className="actions">{actions}</div>}
       </header>

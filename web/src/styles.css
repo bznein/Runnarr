@@ -340,6 +340,17 @@ textarea {
   gap: 16px;
 }
 
+.page-title {
+  min-width: 0;
+}
+
+.page-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
 .page h1 {
   margin: 0;
   font-size: 30px;
@@ -1113,41 +1124,6 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.panel-collapse-toggle {
-  display: flex;
-  flex: 1;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  color: inherit;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.panel-collapse-toggle > svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-  color: var(--color-muted);
-  transition: transform 140ms ease;
-}
-
-.panel-collapse-toggle[aria-expanded="true"] > svg {
-  transform: rotate(180deg);
-}
-
-.planned-match-panel-content {
-  display: grid;
-  gap: 12px;
-}
-
-.planned-match-panel {
-  background: var(--color-surface-muted);
-  box-shadow: none;
 }
 
 .notes-body {
@@ -1946,6 +1922,20 @@ textarea {
   max-width: 100%;
 }
 
+.activity-title-gear {
+  flex: 0 1 auto;
+  max-width: 100%;
+  gap: 4px;
+}
+
+.activity-title-gear .gear-chip {
+  min-height: 24px;
+  max-width: min(260px, 100%);
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .gear-chip.retired {
   color: var(--color-muted-strong);
   background: var(--color-surface-subtle);
@@ -1958,19 +1948,11 @@ textarea {
   white-space: nowrap;
 }
 
-.gear-activity-panel,
 .gear-detail-panel {
   display: grid;
   gap: 14px;
 }
 
-.gear-activity-panel {
-  padding: 14px 16px;
-  background: var(--color-surface-muted);
-  box-shadow: none;
-}
-
-.gear-activity-panel .panel-heading,
 .gear-detail-panel .panel-heading {
   margin-bottom: 0;
 }
