@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -541,7 +542,6 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 	defer rows.Close()
 
 	activityByDay := map[string][]CalendarActivity{}
-	orderedDays := make([]string, 0)
 	for rows.Next() {
 		var day time.Time
 		var item CalendarActivity
@@ -549,14 +549,30 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 			return ActivityCalendar{}, err
 		}
 		dayKey := day.Format("2006-01-02")
-		if _, seen := activityByDay[dayKey]; !seen {
-			orderedDays = append(orderedDays, dayKey)
-		}
 		activityByDay[dayKey] = append(activityByDay[dayKey], item)
 	}
 	if err := rows.Err(); err != nil {
 		return ActivityCalendar{}, err
 	}
+
+	healthMetrics, err := s.ListDailyHealthMetrics(ctx, garminProvider, filters.DateFrom, filters.DateTo)
+	if err != nil {
+		return ActivityCalendar{}, err
+	}
+	healthByDay := make(map[string]bool, len(healthMetrics))
+	for _, metric := range healthMetrics {
+		healthByDay[metric.Date] = true
+	}
+	orderedDays := make([]string, 0, len(activityByDay)+len(healthByDay))
+	for day := range activityByDay {
+		orderedDays = append(orderedDays, day)
+	}
+	for day := range healthByDay {
+		if _, seen := activityByDay[day]; !seen {
+			orderedDays = append(orderedDays, day)
+		}
+	}
+	sort.Strings(orderedDays)
 
 	calendar := ActivityCalendar{
 		MonthStart: formatCalendarMonthDate(filters.DateFrom),
@@ -564,14 +580,72 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 		Days:       make([]CalendarDay, 0, len(orderedDays)),
 	}
 	for _, day := range orderedDays {
+		activities := activityByDay[day]
+		if activities == nil {
+			activities = make([]CalendarActivity, 0)
+		}
 		calendar.Days = append(calendar.Days, CalendarDay{
 			Date:          day,
-			ActivityCount: len(activityByDay[day]),
-			Activities:    activityByDay[day],
+			ActivityCount: len(activities),
+			HasHealthData: healthByDay[day],
+			Activities:    activities,
 		})
 	}
 
 	return calendar, nil
+}
+
+func (s *Store) CalendarDay(ctx context.Context, date time.Time) (CalendarDayView, error) {
+	filters := ActivityFilters{
+		DateFrom:             date,
+		DateTo:               date,
+		IncludeTrainingSheet: true,
+	}
+	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
+	rows, err := s.db.Query(ctx, `
+		select
+			id::text,
+			source,
+			coalesce(nullif(local_name, ''), name),
+			start_time,
+			sport_type,
+			coalesce(distance_m, 0),
+			coalesce(moving_time_s, 0)
+		from activities
+		`+where+`
+		order by start_time
+	`, args...)
+	if err != nil {
+		return CalendarDayView{}, err
+	}
+	defer rows.Close()
+
+	activities := make([]CalendarActivity, 0)
+	for rows.Next() {
+		var activity CalendarActivity
+		if err := rows.Scan(&activity.ID, &activity.Source, &activity.Name, &activity.StartTime, &activity.SportType, &activity.DistanceM, &activity.MovingTimeS); err != nil {
+			return CalendarDayView{}, err
+		}
+		activities = append(activities, activity)
+	}
+	if err := rows.Err(); err != nil {
+		return CalendarDayView{}, err
+	}
+
+	healthMetrics, err := s.ListDailyHealthMetrics(ctx, garminProvider, date, date)
+	if err != nil {
+		return CalendarDayView{}, err
+	}
+	var health *DailyHealthMetric
+	if len(healthMetrics) > 0 {
+		health = &healthMetrics[0]
+	}
+
+	return CalendarDayView{
+		Date:       date.Format("2006-01-02"),
+		Health:     health,
+		Activities: activities,
+	}, nil
 }
 
 func normalizeActivityPage(limit, offset int) (int, int) {

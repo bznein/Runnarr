@@ -5,6 +5,7 @@ import type {
   ActivitySeries,
   ActivityMedia,
   ActivityCalendar,
+  CalendarDayView,
   ActivityTypeFilters,
   GoogleSheetsStatus,
   PlannedActivity,
@@ -167,6 +168,7 @@ export const api = {
     return request<SummaryStats>(`/api/stats/summary?${params.toString()}`);
   },
   activityCalendar: (filters?: ActivityTypeFilters) => request<ActivityCalendar>(`/api/stats/calendar?${activityFilterQuery(filters)}`),
+  calendarDay: (date: string) => request<CalendarDayView>(`/api/stats/calendar/day?date=${encodeURIComponent(date)}`),
   healthDaily: (range?: HealthRange) => {
     const query = healthRangeQuery(range);
     return request<{ from?: string; to?: string; metrics: DailyHealthMetric[] | null; chart?: HealthChartPoint[] }>(`/api/health/daily${query ? `?${query}` : ""}`);

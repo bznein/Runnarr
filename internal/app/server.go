@@ -135,6 +135,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/stats/calendar", s.handleCalendar)
+			r.Get("/stats/calendar/day", s.handleCalendarDay)
 			r.Get("/health/daily", s.handleDailyHealthMetrics)
 			r.Get("/gears", s.handleListGears)
 			r.Get("/gears/{id}", s.handleGetGear)
@@ -722,6 +723,21 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, calendar)
+}
+
+func (s *Server) handleCalendarDay(w http.ResponseWriter, r *http.Request) {
+	date, err := calendarDayDateFromQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	day, err := s.store.CalendarDay(r.Context(), date)
+	if err != nil {
+		s.logger.Error("calendar day", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load calendar day")
+		return
+	}
+	writeJSON(w, http.StatusOK, day)
 }
 
 func (s *Server) handleDailyHealthMetrics(w http.ResponseWriter, r *http.Request) {
@@ -1373,6 +1389,17 @@ func calendarDateRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, errors.New("calendar range cannot exceed 370 days")
 	}
 	return dateFrom, dateTo, nil
+}
+
+func calendarDayDateFromQuery(r *http.Request) (time.Time, error) {
+	date, err := parseOptionalAPIDate(r.URL.Query().Get("date"), "date")
+	if err != nil {
+		return time.Time{}, err
+	}
+	if date.IsZero() {
+		return time.Time{}, errors.New("date is required")
+	}
+	return date, nil
 }
 
 func activityFiltersFromQuery(r *http.Request) ActivityFilters {

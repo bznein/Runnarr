@@ -258,6 +258,16 @@ test.describe("local product journey", () => {
       await expect(page.locator(".mobile-header-title")).toHaveText("Calendar");
     }
 
+    const todayDayLink = page.locator(".calendar-day-link:visible").filter({ hasText: String(new Date().getDate()) }).first();
+    await expect(todayDayLink).toBeVisible();
+    await todayDayLink.click();
+    await expect(page.getByRole("heading", { name: "Day view" })).toBeVisible();
+    await expect(page.getByText("Daily Garmin metrics", { exact: true })).toBeVisible();
+    await expect(page.locator(".metric-grid strong").filter({ hasText: "12,450" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "E2E Pool Swim", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Back to calendar", exact: true }).click();
+    await expect(page.getByText("Monthly activity calendar", { exact: true })).toBeVisible();
+
     await navigateTo(page, "Health", mobile);
     await expect(page.getByRole("heading", { name: "Health" })).toBeVisible();
     await expect(page.getByText(/^Data for /)).toBeVisible();
