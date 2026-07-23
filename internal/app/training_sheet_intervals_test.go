@@ -35,6 +35,18 @@ func TestWorkoutTableForDayParsesExactAndAggregateRows(t *testing.T) {
 	}
 }
 
+func TestWorkoutTableColumnsRecognizesElevationColumns(t *testing.T) {
+	columns := workoutTableColumns([]string{"", "Avg Pace", "Avg HR", "HR MAX", "Elev Gain", "Elevation Loss"})
+	if columns[trainingSheetMetricElevationGain] != "E" || columns[trainingSheetMetricElevationLoss] != "F" {
+		t.Fatalf("elevation columns = %#v, want gain E and loss F", columns)
+	}
+
+	combined := workoutTableColumns([]string{"", "Avg Pace", "Elevation Gain/Loss"})
+	if combined[trainingSheetMetricElevation] != "C" {
+		t.Fatalf("combined elevation column = %#v, want C", combined)
+	}
+}
+
 func TestPlannedActivitiesFromTabStoresWorkoutTableMetadata(t *testing.T) {
 	tab := googleSheetTab{ID: "123", Title: "05-07", Values: [][]string{
 		{"", "Mon", "Tues", "Wed"},
@@ -69,10 +81,12 @@ func TestWorkoutTableRowGroupParsesDateFormattedRanges(t *testing.T) {
 func TestIntervalUpdatesForRecordsUsesWeightedAggregatesAndRepNumbers(t *testing.T) {
 	table := &trainingSheetWorkoutTable{
 		Columns: map[string]string{
-			trainingSheetMetricAvgPace:  "B",
-			trainingSheetMetricAvgHeart: "C",
-			trainingSheetMetricMaxHeart: "D",
-			trainingSheetMetricRepeatNo: "E",
+			trainingSheetMetricAvgPace:       "B",
+			trainingSheetMetricAvgHeart:      "C",
+			trainingSheetMetricMaxHeart:      "D",
+			trainingSheetMetricRepeatNo:      "E",
+			trainingSheetMetricElevationGain: "F",
+			trainingSheetMetricElevationLoss: "G",
 		},
 		Rows: []trainingSheetWorkoutTableRow{
 			{Row: 5, Label: "3min rep avg", Kind: trainingSheetRowAverage, Group: "duration:3m"},
@@ -83,17 +97,19 @@ func TestIntervalUpdatesForRecordsUsesWeightedAggregatesAndRepNumbers(t *testing
 	paceOne, paceTwo := 180.0, 200.0
 	heartOne, heartTwo := 150.0, 160.0
 	maxOne, maxTwo := 170.0, 175.0
+	gainOne, gainTwo := 10.0, 5.0
+	lossOne, lossTwo := 4.0, 6.0
 	records := []trainingSheetWorkoutRecord{
-		{DurationS: 180, MovingTimeS: 180, DistanceM: 1000, AvgPaceSPKM: &paceOne, AvgHeartRate: &heartOne, MaxHeartRate: &maxOne, RepeatNumber: 1},
-		{DurationS: 180, MovingTimeS: 180, DistanceM: 900, AvgPaceSPKM: &paceTwo, AvgHeartRate: &heartTwo, MaxHeartRate: &maxTwo, RepeatNumber: 2},
+		{DurationS: 180, MovingTimeS: 180, DistanceM: 1000, AvgPaceSPKM: &paceOne, AvgHeartRate: &heartOne, MaxHeartRate: &maxOne, ElevationGainM: &gainOne, ElevationLossM: &lossOne, RepeatNumber: 1},
+		{DurationS: 180, MovingTimeS: 180, DistanceM: 900, AvgPaceSPKM: &paceTwo, AvgHeartRate: &heartTwo, MaxHeartRate: &maxTwo, ElevationGainM: &gainTwo, ElevationLossM: &lossTwo, RepeatNumber: 2},
 	}
 
 	updates, err := intervalUpdatesForRecords("Week", table, records)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(updates) != 11 {
-		t.Fatalf("update count = %d, want 11", len(updates))
+	if len(updates) != 17 {
+		t.Fatalf("update count = %d, want 17", len(updates))
 	}
 	if value := updateValue(updates, "'Week'!B5"); value != "'3:09" {
 		t.Fatalf("weighted pace = %#v", value)
@@ -104,11 +120,56 @@ func TestIntervalUpdatesForRecordsUsesWeightedAggregatesAndRepNumbers(t *testing
 	if value := updateValue(updates, "'Week'!D5"); value != "'175" {
 		t.Fatalf("aggregate max heart rate = %#v", value)
 	}
+	if value := updateValue(updates, "'Week'!F5"); value != "'15" {
+		t.Fatalf("aggregate elevation gain = %#v", value)
+	}
+	if value := updateValue(updates, "'Week'!G5"); value != "'10" {
+		t.Fatalf("aggregate elevation loss = %#v", value)
+	}
+	if value := updateValue(updates, "'Week'!F6"); value != "'10" || updateValue(updates, "'Week'!G6") != "'4" {
+		t.Fatalf("fastest elevation = %#v / %#v", value, updateValue(updates, "'Week'!G6"))
+	}
+	if value := updateValue(updates, "'Week'!F7"); value != "'5" || updateValue(updates, "'Week'!G7") != "'6" {
+		t.Fatalf("slowest elevation = %#v / %#v", value, updateValue(updates, "'Week'!G7"))
+	}
 	if value := updateValue(updates, "'Week'!E6"); value != 1 {
 		t.Fatalf("fastest repetition = %#v", value)
 	}
 	if value := updateValue(updates, "'Week'!E7"); value != 2 {
 		t.Fatalf("slowest repetition = %#v", value)
+	}
+}
+
+func TestStructuredWorkoutRecordsFallsBackToLapElevation(t *testing.T) {
+	gainOne, gainTwo := 4.0, 6.0
+	lossOne, lossTwo := 2.0, 3.0
+	activity := Activity{
+		Workout:   &ActivityWorkout{Provider: garminProvider},
+		Intervals: []ActivityInterval{{Category: "active", LapIndexes: []int{0, 1}}},
+		Laps: []ActivityLap{
+			{ElevationGainM: &gainOne, ElevationLossM: &lossOne},
+			{ElevationGainM: &gainTwo, ElevationLossM: &lossTwo},
+		},
+	}
+
+	records := structuredWorkoutRecords(activity, false)
+	if len(records) != 1 || records[0].ElevationGainM == nil || *records[0].ElevationGainM != 10 || records[0].ElevationLossM == nil || *records[0].ElevationLossM != 5 {
+		t.Fatalf("records = %#v, want one record with 10m gain and 5m loss", records)
+	}
+}
+
+func TestIntervalUpdatesForRecordsWritesCombinedElevationColumn(t *testing.T) {
+	table := &trainingSheetWorkoutTable{
+		Columns: map[string]string{trainingSheetMetricElevation: "E"},
+		Rows:    []trainingSheetWorkoutTableRow{{Row: 3, Label: "5min rep 1", Kind: trainingSheetRowExact, Group: "duration:5m"}},
+	}
+	gain, loss := 12.4, 3.6
+	updates, err := intervalUpdatesForRecords("Week", table, []trainingSheetWorkoutRecord{{DurationS: 300, ElevationGainM: &gain, ElevationLossM: &loss}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value := updateValue(updates, "'Week'!E3"); value != "'+12/-4" {
+		t.Fatalf("combined elevation = %#v, want '+12/-4", value)
 	}
 }
 

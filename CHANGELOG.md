@@ -27,6 +27,7 @@
 - Training-sheet feedback write-back now refreshes the feedback cell with the latest saved reflection, queues updates that arrive during another sheet job, and repairs HR cells that were interpreted as time values by the workbook format.
 - Planned activity matching now offers a read-only training-sheet change preview with explicit Apply, conflict visibility, and stale-sheet revalidation before writeback.
 - Training-sheet match previews now render a focused, sheet-like live grid with proposed values in place, formatting when available, and selectable current/proposed cell details.
+- Training-sheet workout splits now write elevation gain and loss when the sheet provides matching columns, including combined elevation columns.
 - Planned activity matching now offers nearby pending plans, date-based suggestions, and feedback controls based on each plan's requested sheet section.
 - Activity and lap pace now prefer provider timer/average-speed data, exclude recorded pauses, and use moving-time fallbacks for write-back and display.
 - Garmin structured workouts now preserve workout steps, interval categories, targets, and grouped lap metrics; activity details provide a filterable, expandable Intervals view with a flat-lap fallback.

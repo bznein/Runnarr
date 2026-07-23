@@ -10,14 +10,17 @@ import (
 )
 
 const (
-	trainingSheetMetricAvgPace  = "avgPace"
-	trainingSheetMetricAvgHeart = "avgHeartRate"
-	trainingSheetMetricMaxHeart = "maxHeartRate"
-	trainingSheetMetricRepeatNo = "repeatNumber"
-	trainingSheetRowExact       = "exact"
-	trainingSheetRowAverage     = "average"
-	trainingSheetRowFastest     = "fastest"
-	trainingSheetRowSlowest     = "slowest"
+	trainingSheetMetricAvgPace       = "avgPace"
+	trainingSheetMetricAvgHeart      = "avgHeartRate"
+	trainingSheetMetricMaxHeart      = "maxHeartRate"
+	trainingSheetMetricRepeatNo      = "repeatNumber"
+	trainingSheetMetricElevation     = "elevation"
+	trainingSheetMetricElevationGain = "elevationGain"
+	trainingSheetMetricElevationLoss = "elevationLoss"
+	trainingSheetRowExact            = "exact"
+	trainingSheetRowAverage          = "average"
+	trainingSheetRowFastest          = "fastest"
+	trainingSheetRowSlowest          = "slowest"
 )
 
 type trainingSheetWorkoutTable struct {
@@ -142,9 +145,16 @@ func workoutTableColumns(row []string) map[string]string {
 			columns[trainingSheetMetricMaxHeart] = spreadsheetColumn(index + 1)
 		case "rep no", "repeat no", "repetition no":
 			columns[trainingSheetMetricRepeatNo] = spreadsheetColumn(index + 1)
+		case "elevation", "elev", "elevation gain/loss", "elev gain/loss", "elevation gain loss", "elev gain loss":
+			columns[trainingSheetMetricElevation] = spreadsheetColumn(index + 1)
+		case "elevation gain", "elev gain", "elevation ascent", "elev ascent", "ascent", "gain":
+			columns[trainingSheetMetricElevationGain] = spreadsheetColumn(index + 1)
+		case "elevation loss", "elev loss", "elevation descent", "elev descent", "descent", "loss":
+			columns[trainingSheetMetricElevationLoss] = spreadsheetColumn(index + 1)
 		}
 	}
-	if columns[trainingSheetMetricAvgPace] == "" && columns[trainingSheetMetricAvgHeart] == "" && columns[trainingSheetMetricMaxHeart] == "" {
+	if columns[trainingSheetMetricAvgPace] == "" && columns[trainingSheetMetricAvgHeart] == "" && columns[trainingSheetMetricMaxHeart] == "" &&
+		columns[trainingSheetMetricElevation] == "" && columns[trainingSheetMetricElevationGain] == "" && columns[trainingSheetMetricElevationLoss] == "" {
 		return nil
 	}
 	return columns
@@ -282,14 +292,16 @@ func containsInt(values []int, target int) bool {
 }
 
 type trainingSheetWorkoutRecord struct {
-	DurationS    int
-	MovingTimeS  int
-	DistanceM    float64
-	AvgPaceSPKM  *float64
-	AvgHeartRate *float64
-	MaxHeartRate *float64
-	StepIndex    *int
-	RepeatNumber int
+	DurationS      int
+	MovingTimeS    int
+	DistanceM      float64
+	AvgPaceSPKM    *float64
+	AvgHeartRate   *float64
+	MaxHeartRate   *float64
+	ElevationGainM *float64
+	ElevationLossM *float64
+	StepIndex      *int
+	RepeatNumber   int
 }
 
 func structuredWorkoutRecords(activity Activity, expandLaps bool) []trainingSheetWorkoutRecord {
@@ -314,20 +326,53 @@ func structuredWorkoutRecords(activity Activity, expandLaps bool) []trainingShee
 				records = append(records, trainingSheetWorkoutRecord{
 					DurationS: lapDuration(lap), MovingTimeS: lap.MovingTimeS, DistanceM: lap.DistanceM,
 					AvgPaceSPKM: lap.AvgPaceSPKM, AvgHeartRate: lap.AvgHeartRate, MaxHeartRate: lap.MaxHeartRate,
+					ElevationGainM: lap.ElevationGainM, ElevationLossM: lap.ElevationLossM,
 					StepIndex:    interval.WorkoutStepIndex,
 					RepeatNumber: intValue(repeat),
 				})
 			}
 			continue
 		}
+		elevationGain, elevationLoss := intervalElevation(interval, activity.Laps)
 		records = append(records, trainingSheetWorkoutRecord{
 			DurationS: intervalDuration(interval), MovingTimeS: interval.MovingTimeS, DistanceM: interval.DistanceM,
 			AvgPaceSPKM: interval.AvgPaceSPKM, AvgHeartRate: interval.AvgHeartRate, MaxHeartRate: interval.MaxHeartRate,
+			ElevationGainM: elevationGain, ElevationLossM: elevationLoss,
 			StepIndex:    interval.WorkoutStepIndex,
 			RepeatNumber: intValue(interval.WorkoutRepeatIndex),
 		})
 	}
 	return records
+}
+
+func intervalElevation(interval ActivityInterval, laps []ActivityLap) (*float64, *float64) {
+	gain, loss := interval.ElevationGainM, interval.ElevationLossM
+	if gain != nil && loss != nil {
+		return gain, loss
+	}
+	var lapGain, lapLoss float64
+	var hasLapGain, hasLapLoss bool
+	for _, lapIndex := range interval.LapIndexes {
+		if lapIndex < 0 || lapIndex >= len(laps) {
+			continue
+		}
+		lap := laps[lapIndex]
+		if lap.ElevationGainM != nil {
+			lapGain += *lap.ElevationGainM
+			hasLapGain = true
+		}
+		if lap.ElevationLossM != nil {
+			lapLoss += *lap.ElevationLossM
+			hasLapLoss = true
+		}
+	}
+	if gain == nil && hasLapGain {
+		gain = &lapGain
+	}
+	if loss == nil && hasLapLoss {
+		loss = &lapLoss
+	}
+	return gain, loss
 }
 
 func intervalDuration(interval ActivityInterval) int {
@@ -543,10 +588,30 @@ func workoutRecordUpdates(sheetTitle string, table *trainingSheetWorkoutTable, r
 	if record.MaxHeartRate != nil {
 		add(table.Columns[trainingSheetMetricMaxHeart], sheetIntegerText(*record.MaxHeartRate))
 	}
+	if record.ElevationGainM != nil {
+		add(table.Columns[trainingSheetMetricElevationGain], sheetIntegerText(*record.ElevationGainM))
+	}
+	if record.ElevationLossM != nil {
+		add(table.Columns[trainingSheetMetricElevationLoss], sheetIntegerText(*record.ElevationLossM))
+	}
+	if record.ElevationGainM != nil || record.ElevationLossM != nil {
+		add(table.Columns[trainingSheetMetricElevation], sheetElevationText(record.ElevationGainM, record.ElevationLossM))
+	}
 	if record.RepeatNumber > 0 && (row.Kind == trainingSheetRowFastest || row.Kind == trainingSheetRowSlowest) {
 		add(table.Columns[trainingSheetMetricRepeatNo], record.RepeatNumber)
 	}
 	return updates
+}
+
+func sheetElevationText(gain, loss *float64) string {
+	parts := make([]string, 0, 2)
+	if gain != nil {
+		parts = append(parts, "+"+strconv.Itoa(int(math.Round(*gain))))
+	}
+	if loss != nil {
+		parts = append(parts, "-"+strconv.Itoa(int(math.Round(*loss))))
+	}
+	return "'" + strings.Join(parts, "/")
 }
 
 func sheetIntegerText(value float64) string {
@@ -571,6 +636,8 @@ func aggregateWorkoutRecords(records []trainingSheetWorkoutRecord) (trainingShee
 	result := trainingSheetWorkoutRecord{}
 	var paceWeighted, paceWeight, movingTime, distance float64
 	var heartWeighted, heartWeight float64
+	var elevationGain, elevationLoss float64
+	var hasElevationGain, hasElevationLoss bool
 	for _, record := range records {
 		weight := record.MovingTimeS
 		if weight <= 0 {
@@ -593,6 +660,14 @@ func aggregateWorkoutRecords(records []trainingSheetWorkoutRecord) (trainingShee
 			value := *record.MaxHeartRate
 			result.MaxHeartRate = &value
 		}
+		if record.ElevationGainM != nil {
+			elevationGain += *record.ElevationGainM
+			hasElevationGain = true
+		}
+		if record.ElevationLossM != nil {
+			elevationLoss += *record.ElevationLossM
+			hasElevationLoss = true
+		}
 	}
 	if movingTime > 0 && distance > 0 {
 		pace := movingTime / distance * 1000
@@ -605,7 +680,14 @@ func aggregateWorkoutRecords(records []trainingSheetWorkoutRecord) (trainingShee
 		heart := heartWeighted / heartWeight
 		result.AvgHeartRate = &heart
 	}
-	if result.AvgPaceSPKM == nil && result.AvgHeartRate == nil && result.MaxHeartRate == nil {
+	if hasElevationGain {
+		result.ElevationGainM = &elevationGain
+	}
+	if hasElevationLoss {
+		result.ElevationLossM = &elevationLoss
+	}
+	if result.AvgPaceSPKM == nil && result.AvgHeartRate == nil && result.MaxHeartRate == nil &&
+		result.ElevationGainM == nil && result.ElevationLossM == nil {
 		return trainingSheetWorkoutRecord{}, fmt.Errorf("no available metrics")
 	}
 	return result, nil
