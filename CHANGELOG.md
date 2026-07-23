@@ -64,6 +64,7 @@
 
 ### Fixes
 
+- Activity detail charts now recover when the available metrics change.
 - Health summary cards now show the actual metric date and remain pinned to today's data while chart ranges change.
 - Planned-run suggestions and matching now only apply to running activities.
 - RPE sliders now use effort-based colors from easy through maximum effort.
