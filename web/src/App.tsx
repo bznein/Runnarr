@@ -675,28 +675,12 @@ function Dashboard() {
 function HealthPage() {
   const [range, setRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
   const [draftRange, setDraftRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
-  const [syncFrom, setSyncFrom] = useState(range.from);
   const [selectedDate, setSelectedDate] = useState("");
-  const queryClient = useQueryClient();
-  const garminStatus = useQuery({ queryKey: ["garmin-status"], queryFn: api.garminStatus });
-  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
-  const latestHealthJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin" && job.kind.startsWith("health"));
-  const anyGarminSyncRunning = (jobs.data?.jobs ?? []).some((job) => job.provider === "garmin" && job.status === "running");
-  const healthSyncRunning = latestHealthJob?.status === "running";
   const dayDetailRef = useRef<HTMLDivElement | null>(null);
   const health = useQuery({
     queryKey: ["health-daily", range],
     queryFn: () => api.healthDaily(range),
-    refetchInterval: healthSyncRunning ? 5000 : false
-  });
-  const garminHealthSync = useMutation({
-    mutationFn: api.garminHealthSync,
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
-        queryClient.invalidateQueries({ queryKey: ["health-daily"] })
-      ]);
-    }
+    refetchInterval: false
   });
   const metrics = health.data?.metrics ?? [];
   const latestMetric = latestHealthMetric(metrics);
@@ -710,7 +694,6 @@ function HealthPage() {
   const activePreset = healthRangePresets().find((preset) => healthRangesMatch(draftRange, healthRangeForLastDays(preset.days)));
   const draftRangeChanged = !healthRangesMatch(draftRange, range);
   const draftRangeValid = healthRangeDayCount(draftRange) > 0;
-  const syncDisabled = !garminStatus.data?.connected || garminHealthSync.isPending || anyGarminSyncRunning;
   const applyHealthRange = (nextRange: HealthDateRange) => {
     setRange(nextRange);
     setDraftRange(nextRange);
@@ -769,25 +752,8 @@ function HealthPage() {
             </button>
           </div>
         </div>
-        <div className="health-sync-controls">
-          <label className="compact-field">
-            <span>Sync from</span>
-            <input type="date" value={syncFrom} max={localDateString()} onChange={(event) => setSyncFrom(event.target.value)} />
-          </label>
-          <button
-            className="primary-button"
-            type="button"
-            disabled={syncDisabled}
-            onClick={() => garminHealthSync.mutate({ from: syncFrom || undefined, to: localDateString() })}
-          >
-            <RefreshCw size={16} />
-            {healthSyncRunning ? "Syncing" : "Sync health"}
-          </button>
-        </div>
       </section>
 
-      <SyncProgressCard job={latestHealthJob} />
-      {garminHealthSync.error && <div className="error">{garminHealthSync.error instanceof Error ? garminHealthSync.error.message : "Garmin health sync failed"}</div>}
       {health.error && <div className="error">{health.error instanceof Error ? health.error.message : "Could not load health metrics"}</div>}
 
       {cardItems.length > 0 && (
@@ -800,14 +766,7 @@ function HealthPage() {
       {!health.isLoading && metrics.length === 0 && (
         <EmptyState
           title="No health metrics found"
-          action={garminStatus.data?.connected ? (
-            <button className="secondary-button" type="button" disabled={syncDisabled} onClick={() => garminHealthSync.mutate({ from: syncFrom || undefined, to: localDateString() })}>
-              <RefreshCw size={16} />
-              Sync health
-            </button>
-          ) : (
-            <Link className="secondary-button" to="/settings">Connect Garmin</Link>
-          )}
+          action={<Link className="secondary-button" to="/settings">Open settings</Link>}
         />
       )}
 
@@ -4656,14 +4615,17 @@ function SettingsPage({
   const [garminPassword, setGarminPassword] = useState("");
   const [garminMFACode, setGarminMFACode] = useState("");
   const [garminOldest, setGarminOldest] = useState(() => localDateString());
+  const [healthSyncFrom, setHealthSyncFrom] = useState("");
   const [garminAllData, setGarminAllData] = useState(false);
   const garminJobs = jobs.data?.jobs ?? [];
+  const latestHealthJob = garminJobs.find((job) => job.provider === "garmin" && isHealthSyncJob(job));
   const latestGearJob = garminJobs.find((job) => job.provider === "garmin" && isGearSyncJob(job));
-  const latestGarminJob = garminJobs.find((job) => job.provider === "garmin" && !isGearSyncJob(job)) ?? latestGearJob;
+  const latestGarminJob = garminJobs.find((job) => job.provider === "garmin" && !isGearSyncJob(job) && !isHealthSyncJob(job));
   const anyGarminSyncRunning = garminJobs.some((job) => job.provider === "garmin" && job.status === "running");
   const garminSyncRunning = latestGarminJob?.status === "running";
+  const healthSyncRunning = latestHealthJob?.status === "running";
   const gearSyncRunning = latestGearJob?.status === "running";
-  const visibleSyncJobs = [latestGarminJob, latestGearJob]
+  const visibleSyncJobs = [latestHealthJob, latestGarminJob, latestGearJob]
     .filter((job): job is SyncJob => Boolean(job))
     .filter((job, index, list) => list.findIndex((item) => item.id === job.id) === index);
 
@@ -4698,6 +4660,15 @@ function SettingsPage({
         queryClient.invalidateQueries({ queryKey: ["gear"] }),
         queryClient.invalidateQueries({ queryKey: ["activities"] }),
         queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
+  const garminHealthSync = useMutation({
+    mutationFn: api.garminHealthSync,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["health-daily"] })
       ]);
     }
   });
@@ -4773,9 +4744,17 @@ function SettingsPage({
             <span>Oldest</span>
             <input type="date" value={garminOldest} max={localDateString()} disabled={garminAllData} onChange={(event) => setGarminOldest(event.target.value)} />
           </label>
+          <label className="compact-field">
+            <span>Health from</span>
+            <input type="date" value={healthSyncFrom} max={localDateString()} onChange={(event) => setHealthSyncFrom(event.target.value)} />
+          </label>
           <button className="primary-button" type="button" disabled={!garminStatus.data?.connected || garminSync.isPending || anyGarminSyncRunning} onClick={() => garminSync.mutate({ oldest: garminAllData ? undefined : garminOldest, allData: garminAllData })}>
             <RefreshCw size={16} />
             {garminSyncRunning ? "Syncing" : "Sync"}
+          </button>
+          <button className="secondary-button" type="button" disabled={!garminStatus.data?.connected || garminHealthSync.isPending || anyGarminSyncRunning} onClick={() => garminHealthSync.mutate({ from: healthSyncFrom || undefined, to: localDateString() })}>
+            <RefreshCw size={16} />
+            {healthSyncRunning ? "Syncing health" : "Sync health"}
           </button>
           <button className="secondary-button" type="button" disabled={!garminStatus.data?.connected || garminGearSync.isPending || anyGarminSyncRunning} onClick={() => garminGearSync.mutate()}>
             <Footprints size={16} />
@@ -4786,6 +4765,7 @@ function SettingsPage({
       {visibleSyncJobs.map((job) => <SyncProgressCard key={job.id} job={job} />)}
       {garminConnect.error && <div className="error">{garminConnect.error instanceof Error ? garminConnect.error.message : "Garmin connection failed"}</div>}
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
+      {garminHealthSync.error && <div className="error">{garminHealthSync.error instanceof Error ? garminHealthSync.error.message : "Garmin health sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
       <TrainingSheetSettings />
       <ClimbDetectionSettingsSection />

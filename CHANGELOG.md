@@ -4,6 +4,7 @@
 
 ### Features
 
+- Health sync controls and activity/job status now live in Settings with the other sync controls.
 - Health now shows Garmin sleep score in the summary cards, trend chart, and daily metrics table when available.
 - Activity photos can now be pinned or moved to a specific map location when EXIF GPS data is unavailable.
 - Added a responsive mobile web shell with mobile navigation, mobile activity and health cards, calendar agenda rendering, safe-area handling, and an installable PWA shell that keeps authenticated data network-only.
