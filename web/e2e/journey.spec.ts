@@ -166,6 +166,49 @@ test.describe("local product journey", () => {
     expect(download.suggestedFilename()).toMatch(/\.gpx$/);
   });
 
+  test("pins an activity photo to a map location", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const projectName = testInfo.project.name;
+    const name = activityName(projectName);
+    await login(page, mobile);
+    await ensureActivityImported(page, projectName, mobile);
+
+    await visibleActivityLink(page, name, mobile).click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64"
+    );
+    const filename = `e2e-pinned-photo-${projectSlug(projectName)}.png`;
+    await page.locator('input[type="file"][accept="image/jpeg,image/png"]').setInputFiles({
+      name: filename,
+      mimeType: "image/png",
+      buffer: png
+    });
+
+    const mediaPreview = page.locator(".media-preview-dialog");
+    await page.getByRole("button", { name: `Open ${filename}` }).click();
+    await expect(mediaPreview).toBeVisible();
+    await mediaPreview.getByRole("button", { name: /Pin to map|Move pin/ }).click();
+    await expect(page.getByText("Click the map to place this photo.", { exact: true })).toBeVisible();
+
+    const map = page.locator(".route-map:visible");
+    await expect(map).toBeVisible();
+    await map.scrollIntoViewIfNeeded();
+    const patchPromise = page.waitForResponse((response) =>
+      response.url().includes("/media/") && response.request().method() === "PATCH" && response.ok()
+    );
+    await map.click({ position: { x: 80, y: 80 } });
+    await patchPromise;
+    await expect(mediaPreview).toBeHidden();
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await page.getByRole("button", { name: `Open ${filename}` }).click();
+    await expect(page.locator(".media-preview-dialog")).toContainText("GPS");
+  });
+
   test("covers calendar, health, gear, tools, and settings", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);

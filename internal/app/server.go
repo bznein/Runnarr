@@ -128,6 +128,7 @@ func (s *Server) Routes() http.Handler {
 			r.Patch("/activities/{id}", s.handleRenameActivity)
 			r.Delete("/activities/{id}", s.handleDeleteActivity)
 			r.Post("/activities/{id}/media", s.handleUploadActivityMedia)
+			r.Patch("/activities/{id}/media/{mediaId}", s.handleUpdateActivityMedia)
 			r.Delete("/activities/{id}/media/{mediaId}", s.handleDeleteActivityMedia)
 			r.Get("/activity-media/{mediaId}/original", s.handleServeOriginalMedia)
 			r.Get("/activity-media/{mediaId}/thumbnail", s.handleServeThumbnailMedia)
@@ -554,6 +555,32 @@ func (s *Server) handleDeleteActivityMedia(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, DeleteActivityMediaResult{Deleted: true})
+}
+
+func (s *Server) handleUpdateActivityMedia(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Latitude  *float64 `json:"latitude"`
+		Longitude *float64 `json:"longitude"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := validateMediaLocation(body.Latitude, body.Longitude); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	media, err := s.store.UpdateActivityMediaLocation(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "mediaId"), body.Latitude, body.Longitude)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "media not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("update activity media location", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not update media location")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"media": media})
 }
 
 func (s *Server) handleServeOriginalMedia(w http.ResponseWriter, r *http.Request) {
@@ -1580,7 +1607,8 @@ func isMediaClientError(err error) bool {
 	return errors.Is(err, ErrEmptyMediaFile) ||
 		errors.Is(err, ErrMediaFileTooLarge) ||
 		errors.Is(err, ErrUnsupportedMediaType) ||
-		errors.Is(err, ErrMediaImageTooLarge)
+		errors.Is(err, ErrMediaImageTooLarge) ||
+		errors.Is(err, ErrInvalidMediaLocation)
 }
 
 func parseQueryBool(value string) bool {
