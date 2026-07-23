@@ -170,6 +170,7 @@ test.describe("local product journey", () => {
     await swimmingActivity.click();
 
     await expect(page.getByRole("heading", { name: "E2E Pool Swim" })).toBeVisible();
+    await expect(page.locator(".climbs-panel")).toHaveCount(0);
     await expect(page.locator(".climb-sensitivity-details")).toHaveCount(0);
   });
 

@@ -2729,7 +2729,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryKey: ["activity-climb-preview", id, climbSensitivityForPreview],
     queryFn: () => api.activityClimbPreview(id!, climbSensitivityForPreview),
     placeholderData: (previousData) => previousData,
-    enabled: Boolean(activity.data) && supportsClimbSettings(activity.data?.activity.sportType ?? "")
+    enabled: Boolean(activity.data) && supportsClimbAnalysis(activity.data?.activity.sportType ?? "")
   });
   useEffect(() => {
     if (!routeUsesGap) {
@@ -2799,7 +2799,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
 
   const confirmedItem = item;
   const displayItem = { ...confirmedItem, samples: activitySeries.data?.samples ?? [] };
-  const showClimbSensitivityControls = supportsClimbSettings(displayItem.sportType);
+  const showClimbAnalysis = supportsClimbAnalysis(displayItem.sportType);
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
   const pinningMedia = mediaItems.find((media) => media.id === pinningMediaId);
@@ -2810,7 +2810,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const paceRouteSegments = paceRouteSegmentsForActivity(displayItem, routePaceScale, routeColorSource);
   const chartData: ActivityChartPoint[] = activitySeries.data?.points ?? chartDataFor(displayItem.samples ?? [], paceScale);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
-  const finalClimbs = effectiveClimbs;
+  const finalClimbs = showClimbAnalysis ? effectiveClimbs : [];
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
   const climbMapSegments = climbMapSegmentsFor(displayItem, finalClimbs);
   const selectedClimbProfile = climbProfileFor(displayItem, selectedClimb);
@@ -3105,13 +3105,15 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         </section>
       )}
 
-      <ActivityClimbsPanel
-        climbs={effectiveClimbs}
-        selectedClimb={selectedClimb}
-        profileData={selectedClimbProfile}
-        sensitivityControls={showClimbSensitivityControls ? climbSensitivityControls : undefined}
-        onSelect={handleSelectClimb}
-      />
+      {showClimbAnalysis && (
+        <ActivityClimbsPanel
+          climbs={effectiveClimbs}
+          selectedClimb={selectedClimb}
+          profileData={selectedClimbProfile}
+          sensitivityControls={climbSensitivityControls}
+          onSelect={handleSelectClimb}
+        />
+      )}
 
       <div className="activity-analysis-tabs" role="tablist" aria-label="Activity analysis">
         <button
@@ -3325,7 +3327,7 @@ function isRunningSport(sportType: string) {
   return /run|walk|hike/i.test(sportType);
 }
 
-function supportsClimbSettings(sportType: string) {
+function supportsClimbAnalysis(sportType: string) {
   const normalized = sportType.trim().toLowerCase();
   if (/(treadmill|swim|kayak)/i.test(normalized)) {
     return false;
