@@ -75,6 +75,24 @@ The public override removes both the app and Postgres host-port mappings.
 Postgres remains reachable only on the private Compose network; the app is
 the only service attached to the NPM network.
 
+## Cloudflare configuration and strict CSP
+
+Runnarr intentionally keeps a strict Content-Security-Policy. Its
+`script-src` allows only scripts served by Runnarr itself; do not add
+`unsafe-inline` to make third-party proxy behavior appear to work.
+
+If Cloudflare proxies the public hostname, disable Cloudflare JavaScript
+Detections for that hostname. JavaScript Detections injects an inline
+bootstrap response under `/cdn-cgi/challenge-platform/`, which the Runnarr
+CSP correctly blocks. A Cloudflare WAF or bot rule that depends on the
+JavaScript Detection result must also be disabled or replaced with a control
+that does not inject a script into Runnarr HTML responses.
+
+After changing the Cloudflare setting, check the browser console while
+visiting `/login`, `/calendar`, the normal SPA routes, and the Google OIDC
+callback flow. There should be no CSP violations from Cloudflare, and the
+Runnarr bundle must continue to load without any `unsafe-inline` exception.
+
 ## Secrets and operations
 
 For Docker secret mounts or another file-backed secret store, set any of the

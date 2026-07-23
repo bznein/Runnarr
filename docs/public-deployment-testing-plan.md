@@ -16,6 +16,8 @@ The rollout is complete only when all of the following are true:
 - A backup has been restored successfully in an isolated environment.
 - The normal local-only Compose workflow still works without public-mode
   settings.
+- If Cloudflare proxies the hostname, JavaScript Detections is disabled for
+  Runnarr and the browser console has no Cloudflare CSP violations.
 
 ## 1. Preflight
 
@@ -147,6 +149,17 @@ the real hostname for `runnarr.example.com`.
   `app:8080`.
 - The certificate name, renewal process, DNS record, and proxy error pages are
   all correct.
+
+### Content Security Policy and Cloudflare
+
+- Confirm the application response keeps `script-src 'self'` and does not add
+  `unsafe-inline`.
+- With Cloudflare enabled, confirm JavaScript Detections is disabled for the
+  Runnarr hostname. Its injected `/cdn-cgi/challenge-platform/` bootstrap is
+  incompatible with the application's strict CSP.
+- Open `/login`, `/calendar`, another normal SPA route, and the Google OIDC
+  callback flow while watching the browser console. No Cloudflare-injected
+  CSP violation should appear, and the Runnarr bundle should load normally.
 
 ### Authentication and sessions
 
