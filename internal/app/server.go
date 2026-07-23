@@ -374,7 +374,7 @@ func (s *Server) handleActivityClimbsPreview(w http.ResponseWriter, r *http.Requ
 	}
 
 	payload := climbPreviewPayload{
-		Climbs: detectActivityClimbsWithSettings(activity.Samples, climbDetectionSettingsForSensitivity(body.Sensitivity)),
+		Climbs: detectActivityClimbsForSport(activity.SportType, activity.Samples, climbDetectionSettingsForSensitivity(body.Sensitivity)),
 	}
 	writeJSON(w, http.StatusOK, payload)
 }
