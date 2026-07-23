@@ -254,7 +254,8 @@ func (s *Store) ListDailyHealthMetrics(ctx context.Context, provider string, fro
 			hrv_status,
 			weight_kg,
 			body_fat_pct,
-			raw,
+			-- Raw Garmin payloads are retained for diagnostics, but are not needed by the range view.
+			null::jsonb as raw,
 			created_at,
 			updated_at
 		from daily_health_metrics
