@@ -1164,6 +1164,8 @@ func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummarySt
 	var stats SummaryStats
 	stats.Recent = make([]Activity, 0)
 	stats.WeeklyDistance = make([]WeeklyBucket, 0)
+	stats.DistanceBuckets = make([]SummaryBucket, 0)
+	stats.SummaryPeriod = normalizeSummaryPeriod(filters.SummaryPeriod)
 	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
 	if err := s.db.QueryRow(ctx, `
 		select count(*), coalesce(sum(distance_m), 0), coalesce(sum(moving_time_s), 0), coalesce(sum(elevation_gain_m), 0)
@@ -1182,27 +1184,42 @@ func (s *Store) Summary(ctx context.Context, filters ActivityFilters) (SummarySt
 		return stats, err
 	}
 
+	bucketTrunc, bucketWindow := summaryBucketSQL(stats.SummaryPeriod)
 	weeklyConditions, weeklyArgs := activityFilterConditionsForUser(filters, 1, scopedUserID(ctx))
-	weeklyConditions = append([]string{`start_time >= now() - interval '12 weeks'`}, weeklyConditions...)
+	weeklyConditions = append([]string{`start_time >= now() - ` + bucketWindow}, weeklyConditions...)
 	weeklyRows, err := s.db.Query(ctx, `
-		select date_trunc('week', start_time)::timestamptz as week_start, coalesce(sum(distance_m), 0)
+		select date_trunc('`+bucketTrunc+`', start_time)::timestamptz as bucket_start, coalesce(sum(distance_m), 0)
 		from activities
 		where `+strings.Join(weeklyConditions, " and ")+`
-		group by week_start
-		order by week_start
+		group by bucket_start
+		order by bucket_start
 	`, weeklyArgs...)
 	if err != nil {
 		return stats, err
 	}
 	defer weeklyRows.Close()
 	for weeklyRows.Next() {
-		var bucket WeeklyBucket
-		if err := weeklyRows.Scan(&bucket.WeekStart, &bucket.DistanceM); err != nil {
+		var bucket SummaryBucket
+		if err := weeklyRows.Scan(&bucket.Start, &bucket.DistanceM); err != nil {
 			return stats, err
 		}
-		stats.WeeklyDistance = append(stats.WeeklyDistance, bucket)
+		stats.DistanceBuckets = append(stats.DistanceBuckets, bucket)
+		if stats.SummaryPeriod == "weekly" {
+			stats.WeeklyDistance = append(stats.WeeklyDistance, WeeklyBucket{WeekStart: bucket.Start, DistanceM: bucket.DistanceM})
+		}
 	}
 	return stats, weeklyRows.Err()
+}
+
+func summaryBucketSQL(period string) (string, string) {
+	switch normalizeSummaryPeriod(period) {
+	case "monthly":
+		return "month", "interval '12 months'"
+	case "yearly":
+		return "year", "interval '5 years'"
+	default:
+		return "week", "interval '12 weeks'"
+	}
 }
 
 func (s *Store) ListSportTypes(ctx context.Context) ([]string, error) {

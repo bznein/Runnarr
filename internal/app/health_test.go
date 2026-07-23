@@ -32,6 +32,23 @@ func TestGarminHealthSyncRangeRejectsInvertedRange(t *testing.T) {
 	}
 }
 
+func TestHealthDisplayRangeDefaultsToLast7Days(t *testing.T) {
+	now := time.Date(2026, 7, 16, 18, 0, 0, 0, time.UTC)
+	from, to, err := healthDisplayRange(time.Time{}, time.Time{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := from.Format("2006-01-02"), "2026-07-10"; got != want {
+		t.Fatalf("from = %s, want %s", got, want)
+	}
+	if got, want := to.Format("2006-01-02"), "2026-07-16"; got != want {
+		t.Fatalf("to = %s, want %s", got, want)
+	}
+	if daysInclusive(from, to) != healthDisplayDefaultDays {
+		t.Fatalf("days = %d, want %d", daysInclusive(from, to), healthDisplayDefaultDays)
+	}
+}
+
 func TestNormalizeGarminHealthDay(t *testing.T) {
 	day := GarminBridgeHealthDay{
 		Date: "2026-07-16",
@@ -115,6 +132,14 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 	assertFloatPtr(t, "body fat", metric.BodyFatPct, 14.2)
 	if metric.Provider != garminProvider || metric.Date != "2026-07-16" {
 		t.Fatalf("provider/date = %s/%s", metric.Provider, metric.Date)
+	}
+}
+
+func TestHealthChartPointsIncludeSleepScore(t *testing.T) {
+	score := 84.0
+	points := healthChartPoints([]DailyHealthMetric{{Date: "2026-07-16", SleepScore: &score}})
+	if len(points) != 1 || points[0].SleepScore == nil || *points[0].SleepScore != score {
+		t.Fatalf("sleep score chart point = %#v, want %v", points, score)
 	}
 }
 

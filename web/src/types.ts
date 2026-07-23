@@ -244,6 +244,27 @@ export type ActivitySample = {
   speedMPS?: number;
 };
 
+export type ActivitySeries = {
+  samples: ActivitySample[];
+  points: ActivitySeriesPoint[];
+  totalSamples: number;
+  sampled: boolean;
+};
+
+export type ActivitySeriesPoint = {
+  index: number;
+  label: string;
+  distanceM?: number;
+  latitude?: number;
+  longitude?: number;
+  elevationM?: number;
+  heartRate?: number;
+  paceSPKM?: number;
+  rawPaceSPKM?: number;
+  power?: number;
+  cadence?: number;
+};
+
 export type ActivityLap = {
   index: number;
   startTime?: string;
@@ -468,6 +489,8 @@ export type SummaryStats = {
   elevationGainM: number;
   recent: Activity[] | null;
   weeklyDistance: Array<{ weekStart: string; distanceM: number }> | null;
+  distanceBuckets?: Array<{ start: string; distanceM: number }> | null;
+  summaryPeriod?: "weekly" | "monthly" | "yearly";
 };
 
 export type ImportFile = {
@@ -552,4 +575,23 @@ export type DailyHealthMetric = {
   raw?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type HealthChartPoint = {
+  date: string;
+  label?: string;
+  steps?: number;
+  totalCalories?: number;
+  activeCalories?: number;
+  remainingCalories?: number;
+  sleepHours?: number;
+  sleepScore?: number;
+  restingHeartRate?: number;
+  stress?: number;
+  bodyBatteryGained?: number;
+  bodyBatteryDrained?: number;
+  bodyBatteryDrainedLoss?: number;
+  bodyBatteryHighest?: number;
+  hrv?: number;
+  weight?: number;
 };

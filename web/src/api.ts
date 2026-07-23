@@ -2,6 +2,7 @@ import type {
   Activity,
   ActivityClimbPreviewResponse,
   ActivityListPage,
+  ActivitySeries,
   ActivityMedia,
   ActivityCalendar,
   ActivityTypeFilters,
@@ -13,6 +14,7 @@ import type {
   AppConfig,
   ClimbDetectionSettingsUpdate,
   DailyHealthMetric,
+  HealthChartPoint,
   DeleteActivityMediaResult,
   DeleteActivityResult,
   GarminStatus,
@@ -159,11 +161,15 @@ export const api = {
     body: JSON.stringify(body)
   }),
   config: () => request<AppConfig>("/api/config"),
-  summary: (filters?: ActivityTypeFilters) => request<SummaryStats>(`/api/stats/summary?${activityFilterQuery(filters)}`),
+  summary: (filters?: ActivityTypeFilters, period: "weekly" | "monthly" | "yearly" = "weekly") => {
+    const params = new URLSearchParams(activityFilterQuery(filters));
+    params.set("period", period);
+    return request<SummaryStats>(`/api/stats/summary?${params.toString()}`);
+  },
   activityCalendar: (filters?: ActivityTypeFilters) => request<ActivityCalendar>(`/api/stats/calendar?${activityFilterQuery(filters)}`),
   healthDaily: (range?: HealthRange) => {
     const query = healthRangeQuery(range);
-    return request<{ metrics: DailyHealthMetric[] | null }>(`/api/health/daily${query ? `?${query}` : ""}`);
+    return request<{ from?: string; to?: string; metrics: DailyHealthMetric[] | null; chart?: HealthChartPoint[] }>(`/api/health/daily${query ? `?${query}` : ""}`);
   },
   toolsPace: (body: ToolsPaceRequest) => request<ToolsPaceResponse>("/api/tools/pace", {
     method: "POST",
@@ -187,6 +193,7 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  activitySeries: (id: string, maxPoints = 1200) => request<ActivitySeries>(`/api/activities/${encodeURIComponent(id)}/series?maxPoints=${maxPoints}`),
   gears: () => request<GearListResponse>("/api/gears"),
   gear: (id: string) => request<GearDetailResponse>(`/api/gears/${id}`),
   renameActivity: (id: string, name: string) =>

@@ -21,6 +21,8 @@ This file defines the default operating rules for coding agents working in this 
 - Frontend build: `cd web && npm run build`
 - Full stack rebuild/restart: `docker compose up --build -d`
 - Compose smoke check: `curl -fsS http://localhost:37617/api/session`
+- GitHub operations: `gh` is installed and available for PR, check, issue, and Actions queries.
+- New features and behavior changes should add or update E2E coverage whenever feasible.
 
 Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in the current environment.
 
@@ -29,6 +31,7 @@ Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in t
 - Do not commit, push, or open a pull request unless the user explicitly asks.
 - Unless explicitly told otherwise, open pull requests against `main`.
 - For unrelated new work, fetch the latest `origin/main` and create a fresh branch from it.
+- Before opening a pull request, fetch the latest `origin/main`, update the branch from it, resolve any merge conflicts, run the relevant checks, and only then push/open the PR. If the PR later becomes conflicted, resolve the conflict before pushing again or handing it off.
 - Keep unrelated local/user changes intact. Do not revert or overwrite work you did not make.
 - Update `CHANGELOG.md` for user-facing changes and release-relevant fixes.
 - Update `docs/PRD.md` when product scope, requirements, or roadmap decisions change.
