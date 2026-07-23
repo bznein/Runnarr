@@ -8,6 +8,7 @@ import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
+import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
 import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import type {
@@ -662,13 +663,13 @@ function HealthPage() {
       {metrics.length > 0 && (
         <>
           <section className="health-chart-grid">
-            <HealthBarChart title="Steps" data={chartData} dataKey="steps" color="#2f8f83" formatter={formatHealthInteger} asLine={showLongRangeHealthLines} />
+            <HealthBarChart title="Steps" data={chartData} dataKey="steps" color="#2f8f83" formatter={formatHealthInteger} axisFormatter={formatHealthAxisInteger} asLine={showLongRangeHealthLines} />
             <HealthCaloriesChart data={chartData} asLine={showLongRangeHealthLines} />
-            <HealthBarChart title="Sleep" data={chartData} dataKey="sleepHours" color="#4664c9" formatter={(value) => `${value.toFixed(1)} h`} asLine={showLongRangeHealthLines} />
-            <HealthLineChart title="Resting heart rate" data={chartData} dataKey="restingHeartRate" color="#c84d4d" formatter={(value) => `${Math.round(value)} bpm`} />
+            <HealthBarChart title="Sleep" data={chartData} dataKey="sleepHours" color="#4664c9" formatter={(value) => `${value.toFixed(1)} h`} axisFormatter={formatHealthAxisHours} asLine={showLongRangeHealthLines} />
+            <HealthLineChart title="Resting heart rate" data={chartData} dataKey="restingHeartRate" color="#c84d4d" formatter={(value) => `${Math.round(value)} bpm`} axisFormatter={formatHealthAxisBPM} />
             <HealthLineChart title="Stress" data={chartData} dataKey="stress" color="#7a4eb2" formatter={(value) => Math.round(value).toLocaleString()} />
             <HealthBodyBatteryChart data={chartData} asLine={showLongRangeHealthLines} />
-            <HealthLineChart title="HRV" data={chartData} dataKey="hrv" color="#6f8f2f" formatter={(value) => `${Math.round(value)} ms`} />
+            <HealthLineChart title="HRV" data={chartData} dataKey="hrv" color="#6f8f2f" formatter={(value) => `${Math.round(value)} ms`} axisFormatter={formatHealthAxisMS} />
             <HealthWeightChart data={chartData} />
           </section>
 
@@ -918,6 +919,7 @@ function HealthBarChart({
   dataKey,
   color,
   formatter,
+  axisFormatter = formatHealthAxisInteger,
   asLine = false
 }: {
   title: string;
@@ -925,6 +927,7 @@ function HealthBarChart({
   dataKey: keyof HealthChartPoint;
   color: string;
   formatter: (value: number) => string;
+  axisFormatter?: (value: number) => string;
   asLine?: boolean;
 }) {
   if (!data.some((item) => isFiniteNumber(item[dataKey]))) {
@@ -939,7 +942,7 @@ function HealthBarChart({
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" minTickGap={18} />
-              <YAxis width={42} />
+              <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={axisFormatter} />
               <Tooltip
                 contentStyle={chartTooltipContentStyle}
                 labelStyle={chartTooltipLabelStyle}
@@ -960,7 +963,7 @@ function HealthBarChart({
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="label" />
-            <YAxis width={42} />
+            <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={axisFormatter} />
             <Tooltip
               contentStyle={chartTooltipContentStyle}
               labelStyle={chartTooltipLabelStyle}
@@ -994,7 +997,7 @@ function HealthCaloriesChart({ data, asLine = false }: { data: HealthChartPoint[
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" minTickGap={18} />
-              <YAxis width={42} />
+              <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={formatHealthAxisInteger} />
               <Tooltip
                 contentStyle={chartTooltipContentStyle}
                 labelStyle={chartTooltipLabelStyle}
@@ -1016,7 +1019,7 @@ function HealthCaloriesChart({ data, asLine = false }: { data: HealthChartPoint[
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="label" />
-            <YAxis width={42} />
+            <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={formatHealthAxisInteger} />
             <Tooltip
               contentStyle={chartTooltipContentStyle}
               labelStyle={chartTooltipLabelStyle}
@@ -1055,13 +1058,15 @@ function HealthLineChart({
   data,
   dataKey,
   color,
-  formatter
+  formatter,
+  axisFormatter = formatHealthAxisInteger
 }: {
   title: string;
   data: HealthChartPoint[];
   dataKey: keyof HealthChartPoint;
   color: string;
   formatter: (value: number) => string;
+  axisFormatter?: (value: number) => string;
 }) {
   if (!data.some((item) => isFiniteNumber(item[dataKey]))) {
     return null;
@@ -1074,7 +1079,7 @@ function HealthLineChart({
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="label" />
-            <YAxis width={42} />
+            <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={axisFormatter} />
             <Tooltip
               contentStyle={chartTooltipContentStyle}
               labelStyle={chartTooltipLabelStyle}
