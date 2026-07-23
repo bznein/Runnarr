@@ -1145,6 +1145,11 @@ textarea {
   gap: 12px;
 }
 
+.planned-match-panel {
+  background: var(--color-surface-muted);
+  box-shadow: none;
+}
+
 .notes-body {
   max-width: 78ch;
   color: var(--color-muted-strong);
@@ -1957,6 +1962,12 @@ textarea {
 .gear-detail-panel {
   display: grid;
   gap: 14px;
+}
+
+.gear-activity-panel {
+  padding: 14px 16px;
+  background: var(--color-surface-muted);
+  box-shadow: none;
 }
 
 .gear-activity-panel .panel-heading,
