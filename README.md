@@ -2,7 +2,10 @@
 
 Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Garmin Connect and local activity files, then presents a private dashboard with activity history, maps, and charts. Multiple local accounts can use one deployment while keeping activity, health, provider, gear, and planning data private to each account.
 
-The v1 scope is intentionally focused: import, normalize, browse, map, and chart. Deep training analysis and race planning remain future scope; local account management is included for trusted household deployments.
+The v1 scope covers the existing private activity, health, calendar, gear, tools,
+planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
+Courses, printable pace bands, basic/expert mode, Garmin write-back, encrypted
+support mode, and a permanent staging environment remain post-v1 work.
 
 ## Quick Start
 

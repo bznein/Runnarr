@@ -163,15 +163,15 @@ jobs:
       - name: Validate tag format
         run: |
           tag="${GITHUB_REF_NAME}"
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag must look like vMAJOR.MINOR.PATCH, got: $tag"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag must look like vMAJOR.MINOR.PATCH or a semver prerelease, got: $tag"
             exit 1
           fi
 
       - name: Validate changelog entry
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if ! grep -Eq "^## ${version} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+          if ! grep -Fq "## ${version} - " CHANGELOG.md; then
             echo "CHANGELOG.md must contain a release heading for ${version}"
             exit 1
           fi

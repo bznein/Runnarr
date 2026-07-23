@@ -8,7 +8,7 @@ This file defines the default operating rules for coding agents working in this 
 - Backend code is Go under `cmd/` and `internal/app/`.
 - Frontend code is React/Vite under `web/`.
 - PostgreSQL migrations live in `internal/app/migrations/` and run at startup.
-- `docs/PRD.md` is the product source of truth.
+- `README.md` describes the product boundary; GitHub issues record product decisions and release scope.
 - `CHANGELOG.md` tracks user-facing and release-relevant changes.
 
 ## Standard Commands
@@ -35,8 +35,7 @@ Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in t
 - Format pull request descriptions with real Markdown and include a GitHub closing keyword such as `Closes #123` for the issue being addressed.
 - Keep unrelated local/user changes intact. Do not revert or overwrite work you did not make.
 - Update `CHANGELOG.md` for user-facing changes and release-relevant fixes.
-- Update `docs/PRD.md` when product scope, requirements, or roadmap decisions change.
-- Keep PRD-only or product-direction changes in a separate commit when they are not part of the implementation.
+- Update `README.md` when the high-level product boundary changes.
 - Before asking the user to test, verify the relevant build/runtime checks; do not automatically rebuild or restart a running container.
 - Do not restart or rebuild while a Garmin sync is running unless the user confirms the sync is complete or explicitly says the restart is safe.
 - Never rebuild or restart any running container after implementation is complete unless the user explicitly authorizes that operation in the current request. This includes public-facing instances; do not infer permission from a need to deploy or from a local Compose workflow.
