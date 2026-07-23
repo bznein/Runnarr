@@ -92,8 +92,8 @@ const healthBarChartMaxDays = 30;
 const defaultClimbSensitivity = 50;
 const vdotDistancePresets: Array<{ id: string; label: string; distanceKm: string }> = [
   { id: "marathon", label: "Marathon", distanceKm: "42.195" },
-  { id: "half-marathon", label: "HM", distanceKm: "21.0975" },
-  { id: "10m", label: "10M", distanceKm: "16.0934" },
+  { id: "half-marathon", label: "HM", distanceKm: "21.098" },
+  { id: "10m", label: "10M", distanceKm: "16.093" },
   { id: "10k", label: "10K", distanceKm: "10" },
   { id: "5k", label: "5K", distanceKm: "5" }
 ];
