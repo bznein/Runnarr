@@ -63,6 +63,7 @@
 
 ### Fixes
 
+- Hide per-activity climb sensitivity controls for activity types such as swimming, kayaking, and treadmill runs where climbs are not meaningful.
 - Document the Cloudflare JavaScript Detections setting required to preserve Runnarr's strict CSP.
 - Round VDOT distance presets to the precision accepted by the calculator input.
 - Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
