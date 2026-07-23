@@ -164,15 +164,10 @@ test.describe("local product journey", () => {
     await page.getByRole("dialog", { name: "Export GPX" }).getByRole("button", { name: "Download" }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/\.gpx$/);
-  });
-
-  test("hides climb sensitivity for activities without meaningful climbs", async ({ page }, testInfo) => {
-    const mobile = isMobileProject(testInfo.project.name);
-    await login(page, mobile);
     await page.goto("/activities");
-    const activity = visibleActivityLink(page, "E2E Pool Swim", mobile);
-    await expect(activity).toBeVisible();
-    await activity.click();
+    const swimmingActivity = visibleActivityLink(page, "E2E Pool Swim", mobile);
+    await expect(swimmingActivity).toBeVisible();
+    await swimmingActivity.click();
 
     await expect(page.getByRole("heading", { name: "E2E Pool Swim" })).toBeVisible();
     await expect(page.locator(".climb-sensitivity-details")).toHaveCount(0);
