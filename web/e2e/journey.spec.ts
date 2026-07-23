@@ -177,7 +177,7 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name })).toBeVisible();
 
     const png = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8AAQv8BD/kD/YURmXYAAAAASUVORK5CYII=",
       "base64"
     );
     const filename = `e2e-pinned-photo-${projectSlug(projectName)}.png`;
