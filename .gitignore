@@ -7,3 +7,5 @@ web/node_modules/
 coverage/
 *.log
 *.xlsx
+web/playwright-report/
+web/test-results/
