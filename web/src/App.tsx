@@ -12,7 +12,7 @@ import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, 
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
-import { climbPerformanceFor, gapPaceForSample } from "./climbPerformance";
+import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
 import type {
   Activity,
@@ -2748,8 +2748,17 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
   const climbMapSegments = climbMapSegmentsFor(displayItem, finalClimbs);
   const selectedClimbProfile = climbProfileFor(displayItem, selectedClimb);
+  const climbPerformanceSamples = samplesForClimbPerformance(confirmedItem.samples, activitySeries.data?.samples);
   const climbPerformanceByIndex = Object.fromEntries(
-    finalClimbs.map((climb) => [climb.index, climbPerformanceFor(confirmedItem.samples ?? [], confirmedItem.laps ?? [], climb)])
+    finalClimbs.map((climb) => {
+      const fallback: ClimbPerformance = climb.paceSPKM === undefined || climb.gapSPKM === undefined
+        ? climbPerformanceFor(climbPerformanceSamples, confirmedItem.laps ?? [], climb)
+        : {};
+      return [climb.index, {
+        paceSPKM: climb.paceSPKM ?? fallback.paceSPKM,
+        gapSPKM: climb.gapSPKM ?? fallback.gapSPKM
+      }];
+    })
   ) as Record<number, ClimbPerformance>;
   const selectedClimbPerformance = selectedClimb ? climbPerformanceByIndex[selectedClimb.index] : undefined;
   const isClimbSensitivitySaved = climbSensitivity === configuredClimbSensitivity;

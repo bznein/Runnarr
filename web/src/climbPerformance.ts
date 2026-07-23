@@ -5,6 +5,13 @@ export type ClimbPerformance = {
   gapSPKM?: number;
 };
 
+export function samplesForClimbPerformance(fullSamples?: ActivitySample[], seriesSamples?: ActivitySample[]): ActivitySample[] {
+  if (fullSamples && fullSamples.length > 0) {
+    return fullSamples;
+  }
+  return seriesSamples ?? [];
+}
+
 export function climbPerformanceFor(samples: ActivitySample[], laps: ActivityLap[], climb: ActivityClimb): ClimbPerformance {
   return {
     paceSPKM: paceForClimbSamples(samples, climb),

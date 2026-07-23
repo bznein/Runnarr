@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { climbPerformanceFor, gapForClimbLaps, paceForClimbSamples } from "./climbPerformance";
+import { climbPerformanceFor, gapForClimbLaps, paceForClimbSamples, samplesForClimbPerformance } from "./climbPerformance";
 import type { ActivityClimb, ActivityLap, ActivitySample } from "./types";
 
 const climb: ActivityClimb = {
@@ -27,6 +27,11 @@ function samples(): ActivitySample[] {
 describe("climb performance", () => {
   it("computes climb pace from moving sample distance and time", () => {
     expect(paceForClimbSamples(samples(), climb)).toBeCloseTo(300);
+  });
+
+  it("uses bounded series samples when the activity detail omits raw samples", () => {
+    const availableSamples = samplesForClimbPerformance(undefined, samples());
+    expect(paceForClimbSamples(availableSamples, climb)).toBeCloseTo(300);
   });
 
   it("weights GAP by the lap distance that overlaps the climb", () => {
