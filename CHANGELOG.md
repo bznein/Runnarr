@@ -62,6 +62,7 @@
 
 ### Fixes
 
+- RPE sliders now use effort-based colors from easy through maximum effort.
 - Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
 - Hide the interval step-type selector when all intervals use the same step type.
 - Interval and lap cumulative times now follow Garmin’s recorded durations instead of wall-clock timestamps that include pauses; single-type interval views open expanded.

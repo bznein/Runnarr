@@ -2350,6 +2350,23 @@ textarea {
   width: 100%;
 }
 
+.rpe-slider {
+  width: 100%;
+  accent-color: var(--color-primary);
+}
+
+.rpe-slider--moderate {
+  accent-color: var(--color-warning-bright);
+}
+
+.rpe-slider--hard {
+  accent-color: var(--color-warning-strong);
+}
+
+.rpe-slider--max {
+  accent-color: var(--color-danger);
+}
+
 .climb-sensitivity-preset-row {
   display: flex;
   flex-wrap: wrap;
