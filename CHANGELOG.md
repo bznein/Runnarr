@@ -4,6 +4,8 @@
 
 ### Features
 
+- Health sync controls and activity/job status now live in Settings with the other sync controls.
+- Added Makefile targets for standard backend, frontend, and Playwright checks.
 - Health now shows Garmin sleep score in the summary cards, trend chart, and daily metrics table when available.
 - Activity photos can now be pinned or moved to a specific map location when EXIF GPS data is unavailable.
 - Added a responsive mobile web shell with mobile navigation, mobile activity and health cards, calendar agenda rendering, safe-area handling, and an installable PWA shell that keeps authenticated data network-only.
@@ -63,6 +65,9 @@
 ### Fixes
 
 - Planned-run suggestions and matching now only apply to running activities.
+- RPE sliders now use effort-based colors from easy through maximum effort.
+- Hide per-activity climb sensitivity controls for activity types such as swimming, kayaking, and treadmill runs where climbs are not meaningful.
+- Document the Cloudflare JavaScript Detections setting required to preserve Runnarr's strict CSP.
 - Round VDOT distance presets to the precision accepted by the calculator input.
 - Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
 - Hide the interval step-type selector when all intervals use the same step type.

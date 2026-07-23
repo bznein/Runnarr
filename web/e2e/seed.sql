@@ -36,6 +36,23 @@ on conflict (user_id, provider, metric_date) do update set
     weight_kg = excluded.weight_kg,
     body_fat_pct = excluded.body_fat_pct;
 
+insert into activities(
+    user_id, source, source_id, name, sport_type, start_time,
+    distance_m, moving_time_s, elapsed_time_s, raw
+)
+select id, 'e2e', 'e2e-pool-swim', 'E2E Pool Swim', 'Swimming',
+    current_date + time '07:00', 1500, 1800, 1900, '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    start_time = excluded.start_time,
+    distance_m = excluded.distance_m,
+    moving_time_s = excluded.moving_time_s,
+    elapsed_time_s = excluded.elapsed_time_s,
+    raw = excluded.raw;
+
 insert into gears(
     user_id, provider, provider_gear_id, name, gear_type, brand, model,
     retired, total_distance_m, max_distance_m, first_used_at, last_used_at,
