@@ -147,7 +147,7 @@ The default deployment still works for one person, but local account management 
 - Each supported activity type should be reviewed for which metrics are meaningful to show, hide, or rename, including distance, pace/speed, elevation, cadence, power, laps, intervals, heart rate, and route maps.
 - Activity detail should hide elevation charts for activity types where elevation is not meaningful, such as swimming, strength training, indoor workouts, and similar non-route activities.
 - Activity detail should detect meaningful climbs from distance/elevation samples and summarize each climb with distance, ascent, average grade, average pace, Grade Adjusted Pace (GAP) where available, difficulty, and map/profile highlighting.
-- Climb detection thresholds should start with sensible defaults and may later become user-configurable settings.
+- Climb detection thresholds should start with sensible defaults, be configurable in Settings, and support a temporary activity-detail sensitivity override for inspection.
 - Activity laps imported from providers should preserve provider interval metadata where available, including Garmin workout step or lap category fields if exposed by the source data.
 - Activity detail should allow filtering laps/intervals by provider category, such as warm-up, active interval, recovery, cool-down, and other provider-defined labels when available.
 - Garmin activities with an associated structured workout should preserve the provider workout definition, repeat structure, step targets, grouped interval summaries, and the lap indexes contributing to each interval.

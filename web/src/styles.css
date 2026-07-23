@@ -2203,8 +2203,75 @@ textarea {
   gap: 16px;
 }
 
+.climb-settings-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.climb-settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.climb-settings-header .panel-heading {
+  margin-bottom: 6px;
+}
+
+.climb-settings-content {
+  display: grid;
+  gap: 10px;
+  max-width: 640px;
+}
+
 .climb-sensitivity-panel-controls {
   margin-bottom: 12px;
+}
+
+.climb-sensitivity-details {
+  border-top: 1px solid var(--color-border-muted);
+}
+
+.climb-sensitivity-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  padding: 6px 0;
+  color: var(--color-muted-strong);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.climb-sensitivity-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.climb-sensitivity-details summary::before {
+  content: "›";
+  margin-right: -4px;
+  color: var(--color-muted);
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.climb-sensitivity-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.climb-sensitivity-details summary strong {
+  margin-left: auto;
+  color: var(--color-heading);
+}
+
+.climb-sensitivity-details .climb-sensitivity-controls {
+  padding: 4px 0 2px;
 }
 
 .climb-sensitivity-controls {
@@ -2759,6 +2826,7 @@ textarea {
   .upload-panel,
   .provider-panel,
   .display-panel,
+  .climb-settings-header,
   .health-controls-panel,
   .page-header {
     align-items: flex-start;

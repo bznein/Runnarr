@@ -2448,21 +2448,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     placeholderData: (previousData) => previousData,
     enabled: Boolean(activity.data)
   });
-  const saveClimbSensitivity = useMutation({
-    mutationFn: (sensitivity: number) => api.updateClimbDetectionSettings({ sensitivity }),
-    onSuccess: async (updatedConfig) => {
-      const nextSensitivity = updatedConfig.climbDetection.sensitivity;
-      setClimbSensitivityDraft(nextSensitivity);
-      setClimbSensitivityPreview(nextSensitivity);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["config"] }),
-        queryClient.invalidateQueries({ queryKey: ["activity", id] }),
-        queryClient.invalidateQueries({ queryKey: ["activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["summary"] })
-      ]);
-    }
-  });
-
   useEffect(() => {
     if (!routeUsesGap) {
       setRouteColorSource("pace");
@@ -2537,15 +2522,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const paceRouteSegments = paceRouteSegmentsForActivity(confirmedItem, routePaceScale, routeColorSource);
   const chartData = chartDataFor(confirmedItem.samples ?? [], paceScale);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
-  const climbs = confirmedItem.climbs ?? [];
   const finalClimbs = effectiveClimbs;
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
   const climbMapSegments = climbMapSegmentsFor(confirmedItem, finalClimbs);
   const selectedClimbProfile = climbProfileFor(confirmedItem, selectedClimb);
-  const isClimbSensitivitySaved = climbSensitivity === configuredClimbSensitivity;
-  const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
-  const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
-  const canSaveClimbSensitivity = !isClimbSensitivitySaved;
   const feedbackAvailable = Boolean(plannedMatchCandidates.data?.matched?.feedbackCell?.trim());
 
   const handleSelectClimb = (climb: ActivityClimb) => {
@@ -2607,66 +2587,33 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const handleClimbSensitivityChange = (value: number) => {
     setClimbSensitivityDraft(clampClimbSensitivity(value));
   };
-  const selectClimbSensitivityPreset = (presetId: string) => {
-    const preset = climbSensitivityPresets.find((candidate) => candidate.id === presetId);
-    if (preset) {
-      handleClimbSensitivityChange(preset.value);
-    }
-  };
-  const restoreClimbSensitivityDefaults = () => {
-    setClimbSensitivityDraft(defaultClimbSensitivity);
-  };
-  const saveClimbSensitivitySetting = () => {
-    if (!canSaveClimbSensitivity) {
-      return;
-    }
-    saveClimbSensitivity.mutate(climbSensitivity);
-  };
   const climbSensitivityControls = (
-    <div className="climb-sensitivity-controls" role="region" aria-label="Climb sensitivity controls">
-      <div className="climb-sensitivity-range">
-        <span>Sensitivity</span>
+    <details className="climb-sensitivity-details">
+      <summary>
+        <span>Adjust sensitivity</span>
         <strong>{climbSensitivity}</strong>
+      </summary>
+      <div className="climb-sensitivity-controls" role="region" aria-label="Temporary climb sensitivity controls">
+        <div className="climb-sensitivity-range">
+          <span>Temporary for this activity</span>
+          <strong>{climbSensitivity}</strong>
+        </div>
+        <input
+          className="climb-sensitivity-slider"
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={climbSensitivity}
+          aria-label="Climb sensitivity"
+          onChange={(event) => handleClimbSensitivityChange(Number(event.target.value))}
+        />
+        <div className="climb-sensitivity-preset-row">
+          <span className="muted">Changes apply only while this activity is open.</span>
+          {isPreviewPending && <span className="muted">Recalculating…</span>}
+        </div>
       </div>
-      <input
-        className="climb-sensitivity-slider"
-        type="range"
-        min={0}
-        max={100}
-        step={1}
-        value={climbSensitivity}
-        aria-label="Climb sensitivity"
-        onChange={(event) => handleClimbSensitivityChange(Number(event.target.value))}
-      />
-      <div className="climb-sensitivity-preset-row">
-        <span className="climb-sensitivity-preset-label muted">{activeClimbPresetLabel}</span>
-        <span className="muted">{climbSensitivity}</span>
-        {isPreviewPending && <span className="muted">Recalculating…</span>}
-      </div>
-      <div className="climb-sensitivity-presets">
-        {climbSensitivityPresets.map((preset) => (
-          <button
-            key={preset.id}
-            type="button"
-            className={`secondary-button small-button ${activeClimbPreset === preset.id ? "active" : ""}`}
-            aria-pressed={activeClimbPreset === preset.id}
-            onClick={() => selectClimbSensitivityPreset(preset.id)}
-          >
-            {preset.label}
-          </button>
-        ))}
-      </div>
-      <div className="climb-sensitivity-actions">
-        <button className="secondary-button small-button" type="button" disabled={climbSensitivity === defaultClimbSensitivity || isPreviewPending} onClick={restoreClimbSensitivityDefaults}>
-          Restore defaults
-        </button>
-        <button className="primary-button small-button" type="button" disabled={!canSaveClimbSensitivity || saveClimbSensitivity.isPending || isPreviewPending} onClick={saveClimbSensitivitySetting}>
-          {saveClimbSensitivity.isPending ? "Saving..." : "Save permanently"}
-        </button>
-      </div>
-      {saveClimbSensitivity.error && <div className="error">{saveClimbSensitivity.error instanceof Error ? saveClimbSensitivity.error.message : "Could not save climb sensitivity"}</div>}
-      {saveClimbSensitivity.isSuccess && <div className="muted">Climb sensitivity saved.</div>}
-    </div>
+    </details>
   );
 
   return (
@@ -4443,6 +4390,7 @@ function SettingsPage({
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
       <TrainingSheetSettings />
+      <ClimbDetectionSettingsSection />
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} error={themePreferenceError} />
       <UserManagement />
       <section id="import" className="panel upload-panel">
@@ -4464,6 +4412,105 @@ function SettingsPage({
         importsLoading={imports.isLoading}
       />
     </Page>
+  );
+}
+
+function ClimbDetectionSettingsSection() {
+  const queryClient = useQueryClient();
+  const config = useQuery({ queryKey: ["config"], queryFn: api.config });
+  const configuredSensitivity = config.data?.climbDetection?.sensitivity ?? defaultClimbSensitivity;
+  const [draftSensitivity, setDraftSensitivity] = useState(configuredSensitivity);
+  const sensitivity = clampClimbSensitivity(draftSensitivity);
+  const activePreset = climbSensitivityPresetForValue(sensitivity);
+  const activePresetLabel = climbSensitivityPresetLabel(sensitivity);
+
+  useEffect(() => {
+    if (config.data?.climbDetection) {
+      setDraftSensitivity(config.data.climbDetection.sensitivity);
+    }
+  }, [config.data?.climbDetection?.sensitivity]);
+
+  const save = useMutation({
+    mutationFn: (nextSensitivity: number) => api.updateClimbDetectionSettings({ sensitivity: nextSensitivity }),
+    onSuccess: async (updatedConfig) => {
+      setDraftSensitivity(updatedConfig.climbDetection.sensitivity);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["config"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity"] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
+
+  const updateDraft = (nextSensitivity: number) => {
+    save.reset();
+    setDraftSensitivity(clampClimbSensitivity(nextSensitivity));
+  };
+
+  return (
+    <section className="panel climb-settings-panel">
+      <div className="climb-settings-header">
+        <div>
+          <div className="panel-heading">Climb detection</div>
+          <p className="muted">Choose the default sensitivity used when detecting climbs across activities.</p>
+        </div>
+        <span className="climb-sensitivity-preset-label muted">{activePresetLabel}</span>
+      </div>
+      <div className="climb-settings-content">
+        <div className="climb-sensitivity-range">
+          <span>Sensitivity</span>
+          <strong>{sensitivity}</strong>
+        </div>
+        <input
+          className="climb-sensitivity-slider"
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={sensitivity}
+          aria-label="Default climb sensitivity"
+          disabled={!config.data}
+          onChange={(event) => updateDraft(Number(event.target.value))}
+        />
+        <div className="climb-sensitivity-presets">
+          {climbSensitivityPresets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={`secondary-button small-button ${activePreset === preset.id ? "active" : ""}`}
+              aria-pressed={activePreset === preset.id}
+              disabled={!config.data}
+              onClick={() => updateDraft(preset.value)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="climb-sensitivity-actions">
+          <button
+            className="secondary-button small-button"
+            type="button"
+            disabled={!config.data || sensitivity === defaultClimbSensitivity || save.isPending}
+            onClick={() => updateDraft(defaultClimbSensitivity)}
+          >
+            Restore defaults
+          </button>
+          <button
+            className="primary-button small-button"
+            type="button"
+            disabled={!config.data || sensitivity === configuredSensitivity || save.isPending}
+            onClick={() => save.mutate(sensitivity)}
+          >
+            {save.isPending ? "Saving..." : "Save permanently"}
+          </button>
+        </div>
+        {config.isLoading && <div className="muted">Loading climb detection settings…</div>}
+        {config.error && <div className="error">{config.error instanceof Error ? config.error.message : "Could not load climb detection settings"}</div>}
+        {save.error && <div className="error">{save.error instanceof Error ? save.error.message : "Could not save climb detection settings"}</div>}
+        {save.isSuccess && <div className="muted">Climb detection settings saved.</div>}
+      </div>
+    </section>
   );
 }
 
