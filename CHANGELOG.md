@@ -85,6 +85,7 @@
 - Fixed training-sheet writeback status lookups failing when PostgreSQL UUID columns were compared with text parameters.
 - Removed the inline theme bootstrap script so strict Content Security Policy no longer reports script violations on SPA routes such as Calendar.
 - Display preferences, activity-list columns, and gear sorting now persist per user instead of being shared through browser-local storage.
+- Theme selection now resets cleanly between accounts and no longer applies stale browser-local preferences while the signed-in account is loading.
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.
 - Health dashboard date edits no longer reload data until the edited range is applied.
 - `scripts/dev.sh` now selects and reports the actual Vite port it starts on (with optional `RUNNARR_FRONTEND_PORT`), which prevents logging stale localhost:5173 URLs when ports are already taken and avoids loading the wrong frontend instance that causes `/api/...` 404s.

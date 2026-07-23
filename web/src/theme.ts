@@ -1,8 +1,16 @@
-try {
-  const preference = window.localStorage.getItem("runnarr-theme-preference");
-  if (preference === "light" || preference === "dark") {
-    document.documentElement.dataset.theme = preference;
+export type ThemePreference = "system" | "light" | "dark";
+
+export function parseThemePreference(value: unknown): ThemePreference {
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+
+export function applyThemePreference(
+  preference: ThemePreference,
+  root: Pick<HTMLElement, "dataset"> = document.documentElement
+) {
+  if (preference === "system") {
+    delete root.dataset.theme;
+    return;
   }
-} catch {
-  // Ignore storage errors and let CSS follow the system preference.
+  root.dataset.theme = preference;
 }

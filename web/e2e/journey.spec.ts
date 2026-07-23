@@ -302,6 +302,16 @@ test.describe("local product journey", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
+      page.getByRole("group", { name: "Theme preference" }).getByRole("button", { name: "Light" }).click()
+    ]);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
+      page.getByRole("group", { name: "Theme preference" }).getByRole("button", { name: "System" }).click()
+    ]);
+    await expect(page.locator("html")).not.toHaveAttribute("data-theme");
   });
 
   test("keeps navigation and key controls usable on mobile", async ({ page }, testInfo) => {

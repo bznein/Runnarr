@@ -12,6 +12,8 @@ import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, 
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
+import { applyThemePreference, parseThemePreference } from "./theme";
+import type { ThemePreference } from "./theme";
 import type {
   Activity,
   ActivityClimb,
@@ -44,7 +46,6 @@ type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
 type HealthDateRange = { from: string; to: string };
 type GearSortBy = "first_used" | "last_used" | "activity_count" | "distance" | "distance_percent";
-type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityAnalysisTab = "stats" | "intervals";
@@ -161,15 +162,6 @@ const activityChartSeries: ActivityChartSeries[] = [
   { key: "cadence", label: "Cadence", color: "#7a4eb2", defaultVisible: false, format: (value) => `${Math.round(value)} spm` }
 ];
 
-function applyThemePreference(preference: ThemePreference) {
-  const root = document.documentElement;
-  if (preference === "system") {
-    delete root.dataset.theme;
-    return;
-  }
-  root.dataset.theme = preference;
-}
-
 type PwaInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -275,7 +267,7 @@ export function App() {
   }, [themePreference]);
 
   useEffect(() => {
-    setThemePreference(preferences.data?.themePreference ?? "system");
+    setThemePreference(parseThemePreference(preferences.data?.themePreference));
   }, [effectiveUserID, preferences.data?.themePreference]);
 
   useEffect(() => {
