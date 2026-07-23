@@ -11,6 +11,7 @@ import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
+import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import type {
   Activity,
   ActivityClimb,
@@ -5773,13 +5774,22 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
   const defaultVisible = availableSeries.filter((series) => series.defaultVisible).map((series) => series.key);
   const initialVisible = defaultVisible.length > 0 ? defaultVisible : availableSeries.slice(0, 1).map((series) => series.key);
   const [visibleSeries, setVisibleSeries] = useState<ActivityChartSeriesKey[]>(initialVisible);
-  const activeSeries = availableSeries.filter((series) => visibleSeries.includes(series.key));
+  const availableKeys = availableSeries.map((series) => series.key);
+  const effectiveVisibleSeries = reconcileVisibleActivitySeries(visibleSeries, availableKeys, initialVisible);
+  const activeSeries = availableSeries.filter((series) => effectiveVisibleSeries.includes(series.key));
+  useEffect(() => {
+    setVisibleSeries((current) => {
+      const next = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      return next.length === current.length && next.every((key, index) => key === current[index]) ? current : next;
+    });
+  }, [availableKeys.join(","), initialVisible.join(",")]);
   const toggleSeries = (key: ActivityChartSeriesKey) => {
     setVisibleSeries((current) => {
-      if (current.includes(key)) {
-        return current.length === 1 ? current : current.filter((item) => item !== key);
+      const selected = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      if (selected.includes(key)) {
+        return selected.length === 1 ? selected : selected.filter((item) => item !== key);
       }
-      return [...current, key];
+      return [...selected, key];
     });
   };
 
