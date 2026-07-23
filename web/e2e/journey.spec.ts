@@ -240,6 +240,9 @@ test.describe("local product journey", () => {
 
     await navigateTo(page, "Health", mobile);
     await expect(page.getByRole("heading", { name: "Health" })).toBeVisible();
+    await expect(page.getByText(/^Data for /)).toBeVisible();
+    await expect(page.getByText("Data for Today", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".health-summary .health-controls-panel")).toBeVisible();
     await expect(page.getByText("Daily metrics", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sync health", exact: true })).toHaveCount(0);
     await expect(page.locator(".metric-grid strong").filter({ hasText: "12,450" })).toBeVisible();
