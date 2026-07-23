@@ -8,7 +8,8 @@ import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
-import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
+import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
+import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import type {
   Activity,
@@ -30,6 +31,7 @@ import type {
   TrainingSheetWritebackPreview,
   Session,
   SyncJob,
+  TrainingSheetPreviewChange,
   TrainingSheetPreviewCell,
   ToolsPaceResponse,
   ToolsVdotResponse,
@@ -45,7 +47,7 @@ type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityAnalysisTab = "stats" | "intervals";
-type PlannedMatchDraft = { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean };
+type PlannedMatchDraft = { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean; overrides?: Record<string, string> };
 type ActivityChartPoint = {
   index: number;
   label: string;
@@ -813,13 +815,13 @@ function HealthPage() {
       {metrics.length > 0 && (
         <>
           <section className="health-chart-grid">
-            <HealthBarChart title="Steps" data={chartData} dataKey="steps" color="#2f8f83" formatter={formatHealthInteger} asLine={showLongRangeHealthLines} />
+            <HealthBarChart title="Steps" data={chartData} dataKey="steps" color="#2f8f83" formatter={formatHealthInteger} axisFormatter={formatHealthAxisInteger} asLine={showLongRangeHealthLines} />
             <HealthCaloriesChart data={chartData} asLine={showLongRangeHealthLines} />
-            <HealthBarChart title="Sleep" data={chartData} dataKey="sleepHours" color="#4664c9" formatter={(value) => `${value.toFixed(1)} h`} asLine={showLongRangeHealthLines} />
-            <HealthLineChart title="Resting heart rate" data={chartData} dataKey="restingHeartRate" color="#c84d4d" formatter={(value) => `${Math.round(value)} bpm`} />
+            <HealthBarChart title="Sleep" data={chartData} dataKey="sleepHours" color="#4664c9" formatter={(value) => `${value.toFixed(1)} h`} axisFormatter={formatHealthAxisHours} asLine={showLongRangeHealthLines} />
+            <HealthLineChart title="Resting heart rate" data={chartData} dataKey="restingHeartRate" color="#c84d4d" formatter={(value) => `${Math.round(value)} bpm`} axisFormatter={formatHealthAxisBPM} />
             <HealthLineChart title="Stress" data={chartData} dataKey="stress" color="#7a4eb2" formatter={(value) => Math.round(value).toLocaleString()} />
             <HealthBodyBatteryChart data={chartData} asLine={showLongRangeHealthLines} />
-            <HealthLineChart title="HRV" data={chartData} dataKey="hrv" color="#6f8f2f" formatter={(value) => `${Math.round(value)} ms`} />
+            <HealthLineChart title="HRV" data={chartData} dataKey="hrv" color="#6f8f2f" formatter={(value) => `${Math.round(value)} ms`} axisFormatter={formatHealthAxisMS} />
             <HealthWeightChart data={chartData} />
           </section>
 
@@ -1069,6 +1071,7 @@ function HealthBarChart({
   dataKey,
   color,
   formatter,
+  axisFormatter = formatHealthAxisInteger,
   asLine = false
 }: {
   title: string;
@@ -1076,6 +1079,7 @@ function HealthBarChart({
   dataKey: keyof HealthChartPoint;
   color: string;
   formatter: (value: number) => string;
+  axisFormatter?: (value: number) => string;
   asLine?: boolean;
 }) {
   if (!data.some((item) => isFiniteNumber(item[dataKey]))) {
@@ -1090,7 +1094,7 @@ function HealthBarChart({
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" minTickGap={18} />
-              <YAxis width={42} />
+              <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={axisFormatter} />
               <Tooltip
                 contentStyle={chartTooltipContentStyle}
                 labelStyle={chartTooltipLabelStyle}
@@ -1111,7 +1115,7 @@ function HealthBarChart({
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="label" />
-            <YAxis width={42} />
+            <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={axisFormatter} />
             <Tooltip
               contentStyle={chartTooltipContentStyle}
               labelStyle={chartTooltipLabelStyle}
@@ -1145,7 +1149,7 @@ function HealthCaloriesChart({ data, asLine = false }: { data: HealthChartPoint[
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="label" minTickGap={18} />
-              <YAxis width={42} />
+              <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={formatHealthAxisInteger} />
               <Tooltip
                 contentStyle={chartTooltipContentStyle}
                 labelStyle={chartTooltipLabelStyle}
@@ -1167,7 +1171,7 @@ function HealthCaloriesChart({ data, asLine = false }: { data: HealthChartPoint[
           <BarChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="label" />
-            <YAxis width={42} />
+            <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={formatHealthAxisInteger} />
             <Tooltip
               contentStyle={chartTooltipContentStyle}
               labelStyle={chartTooltipLabelStyle}
@@ -1206,13 +1210,15 @@ function HealthLineChart({
   data,
   dataKey,
   color,
-  formatter
+  formatter,
+  axisFormatter = formatHealthAxisInteger
 }: {
   title: string;
   data: HealthChartPoint[];
   dataKey: keyof HealthChartPoint;
   color: string;
   formatter: (value: number) => string;
+  axisFormatter?: (value: number) => string;
 }) {
   if (!data.some((item) => isFiniteNumber(item[dataKey]))) {
     return null;
@@ -1225,7 +1231,7 @@ function HealthLineChart({
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="label" />
-            <YAxis width={42} />
+            <YAxis width={HEALTH_CHART_Y_AXIS_WIDTH} tickFormatter={axisFormatter} />
             <Tooltip
               contentStyle={chartTooltipContentStyle}
               labelStyle={chartTooltipLabelStyle}
@@ -2704,21 +2710,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     placeholderData: (previousData) => previousData,
     enabled: Boolean(activity.data)
   });
-  const saveClimbSensitivity = useMutation({
-    mutationFn: (sensitivity: number) => api.updateClimbDetectionSettings({ sensitivity }),
-    onSuccess: async (updatedConfig) => {
-      const nextSensitivity = updatedConfig.climbDetection.sensitivity;
-      setClimbSensitivityDraft(nextSensitivity);
-      setClimbSensitivityPreview(nextSensitivity);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["config"] }),
-        queryClient.invalidateQueries({ queryKey: ["activity", id] }),
-        queryClient.invalidateQueries({ queryKey: ["activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["summary"] })
-      ]);
-    }
-  });
-
   useEffect(() => {
     if (!routeUsesGap) {
       setRouteColorSource("pace");
@@ -2794,7 +2785,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const paceRouteSegments = paceRouteSegmentsForActivity(displayItem, routePaceScale, routeColorSource);
   const chartData: ActivityChartPoint[] = activitySeries.data?.points ?? chartDataFor(displayItem.samples ?? [], paceScale);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
-  const climbs = confirmedItem.climbs ?? [];
   const finalClimbs = effectiveClimbs;
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
   const climbMapSegments = climbMapSegmentsFor(displayItem, finalClimbs);
@@ -2864,66 +2854,33 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const handleClimbSensitivityChange = (value: number) => {
     setClimbSensitivityDraft(clampClimbSensitivity(value));
   };
-  const selectClimbSensitivityPreset = (presetId: string) => {
-    const preset = climbSensitivityPresets.find((candidate) => candidate.id === presetId);
-    if (preset) {
-      handleClimbSensitivityChange(preset.value);
-    }
-  };
-  const restoreClimbSensitivityDefaults = () => {
-    setClimbSensitivityDraft(defaultClimbSensitivity);
-  };
-  const saveClimbSensitivitySetting = () => {
-    if (!canSaveClimbSensitivity) {
-      return;
-    }
-    saveClimbSensitivity.mutate(climbSensitivity);
-  };
   const climbSensitivityControls = (
-    <div className="climb-sensitivity-controls" role="region" aria-label="Climb sensitivity controls">
-      <div className="climb-sensitivity-range">
-        <span>Sensitivity</span>
+    <details className="climb-sensitivity-details">
+      <summary>
+        <span>Adjust sensitivity</span>
         <strong>{climbSensitivity}</strong>
+      </summary>
+      <div className="climb-sensitivity-controls" role="region" aria-label="Temporary climb sensitivity controls">
+        <div className="climb-sensitivity-range">
+          <span>Temporary for this activity</span>
+          <strong>{climbSensitivity}</strong>
+        </div>
+        <input
+          className="climb-sensitivity-slider"
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={climbSensitivity}
+          aria-label="Climb sensitivity"
+          onChange={(event) => handleClimbSensitivityChange(Number(event.target.value))}
+        />
+        <div className="climb-sensitivity-preset-row">
+          <span className="muted">Changes apply only while this activity is open.</span>
+          {isPreviewPending && <span className="muted">Recalculating…</span>}
+        </div>
       </div>
-      <input
-        className="climb-sensitivity-slider"
-        type="range"
-        min={0}
-        max={100}
-        step={1}
-        value={climbSensitivity}
-        aria-label="Climb sensitivity"
-        onChange={(event) => handleClimbSensitivityChange(Number(event.target.value))}
-      />
-      <div className="climb-sensitivity-preset-row">
-        <span className="climb-sensitivity-preset-label muted">{activeClimbPresetLabel}</span>
-        <span className="muted">{climbSensitivity}</span>
-        {isPreviewPending && <span className="muted">Recalculating…</span>}
-      </div>
-      <div className="climb-sensitivity-presets">
-        {climbSensitivityPresets.map((preset) => (
-          <button
-            key={preset.id}
-            type="button"
-            className={`secondary-button small-button ${activeClimbPreset === preset.id ? "active" : ""}`}
-            aria-pressed={activeClimbPreset === preset.id}
-            onClick={() => selectClimbSensitivityPreset(preset.id)}
-          >
-            {preset.label}
-          </button>
-        ))}
-      </div>
-      <div className="climb-sensitivity-actions">
-        <button className="secondary-button small-button" type="button" disabled={climbSensitivity === defaultClimbSensitivity || isPreviewPending} onClick={restoreClimbSensitivityDefaults}>
-          Restore defaults
-        </button>
-        <button className="primary-button small-button" type="button" disabled={!canSaveClimbSensitivity || saveClimbSensitivity.isPending || isPreviewPending} onClick={saveClimbSensitivitySetting}>
-          {saveClimbSensitivity.isPending ? "Saving..." : "Save permanently"}
-        </button>
-      </div>
-      {saveClimbSensitivity.error && <div className="error">{saveClimbSensitivity.error instanceof Error ? saveClimbSensitivity.error.message : "Could not save climb sensitivity"}</div>}
-      {saveClimbSensitivity.isSuccess && <div className="muted">Climb sensitivity saved.</div>}
-    </div>
+    </details>
   );
 
   return (
@@ -3143,17 +3100,21 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
   const laps = activity.laps ?? [];
   const [filter, setFilter] = useState("all");
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const categories = Array.from(new Set(intervals.map((interval) => interval.category).filter(Boolean)));
+  const hasSingleStepType = categories.length === 1;
 
   useEffect(() => {
     setFilter("all");
-    setExpanded({});
-  }, [activity.id]);
+    setExpanded(hasSingleStepType ? intervals.reduce<Record<number, boolean>>((state, interval) => {
+      state[interval.index] = true;
+      return state;
+    }, {}) : {});
+  }, [activity.id, hasSingleStepType, intervals.length]);
 
   if (intervals.length === 0) {
     return <ActivityFlatLapTable activity={activity} />;
   }
 
-  const categories = Array.from(new Set(intervals.map((interval) => interval.category).filter(Boolean)));
   const filteredIntervals = filter === "all" ? intervals : intervals.filter((interval) => interval.category === filter);
   const lapsByIndex = new Map(laps.map((lap) => [lap.index, lap]));
   const showGap = intervals.some((interval) => interval.avgGradeAdjustedPaceSPKM !== undefined) || laps.some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
@@ -3170,15 +3131,17 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
           <div className="panel-heading">Intervals</div>
           {activity.workout?.name && <div className="muted">Workout: {activity.workout.name}</div>}
         </div>
-        <label className="compact-field" htmlFor="activity-interval-filter">
-          <span>Step Type</span>
-          <select id="activity-interval-filter" value={filter} onChange={(event) => setFilter(event.target.value)}>
-            <option value="all">All</option>
-            {categories.map((category) => (
-              <option key={category} value={category}>{intervalCategoryLabel(category, activity.sportType)}</option>
-            ))}
-          </select>
-        </label>
+        {categories.length > 1 && (
+          <label className="compact-field" htmlFor="activity-interval-filter">
+            <span>Step Type</span>
+            <select id="activity-interval-filter" value={filter} onChange={(event) => setFilter(event.target.value)}>
+              <option value="all">All</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>{intervalCategoryLabel(category, activity.sportType)}</option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <div className="table-wrap">
         <table className="data-table interval-table">
@@ -3203,7 +3166,8 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
           </thead>
           <tbody>
             {filteredIntervals.map((interval) => {
-              const intervalLaps = interval.lapIndexes?.map((index) => lapsByIndex.get(index)).filter((lap): lap is ActivityLap => Boolean(lap)) ?? [];
+              const intervalLapIndexes = intervalLapIndexesForDisplay(interval, intervals, laps);
+              const intervalLaps = intervalLapIndexes.map((index) => lapsByIndex.get(index)).filter((lap): lap is ActivityLap => Boolean(lap));
               const isExpanded = Boolean(expanded[interval.index]);
               const label = intervalStepLabel(interval, activity.sportType);
               return (
@@ -3224,9 +3188,9 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
                       <strong>{label}</strong>
                       {intervalTargetLabel(activity.workout, interval) && <span className="interval-target">{intervalTargetLabel(activity.workout, interval)}</span>}
                     </td>
-                    <td>{formatLapRange(interval.lapIndexes)}</td>
-                    <td>{formatDuration(interval.elapsedTimeS)}</td>
-                    <td>{formatDuration(intervalCumulativeTime(interval, intervals, activity.startTime))}</td>
+                    <td>{formatLapRange(intervalLapIndexes)}</td>
+                    <td>{formatDuration(intervalDisplayTimeS(interval))}</td>
+                    <td>{formatDuration(intervalCumulativeTime(interval, intervals))}</td>
                     <td>{formatDistance(interval.distanceM)}</td>
                     <td>{optionalPace(interval.avgPaceSPKM)}</td>
                     {showGap && <td>{optionalPace(interval.avgGradeAdjustedPaceSPKM)}</td>}
@@ -3243,8 +3207,8 @@ function ActivityIntervalsPanel({ activity }: { activity: Activity }) {
                       <td />
                       <td>Lap {lap.index + 1}</td>
                       <td>{lap.index + 1}</td>
-                      <td>{formatDuration(lapMovingTimeS(lap, laps.length > 0 ? activity.samples ?? [] : []))}</td>
-                      <td>{formatDuration(lapCumulativeTime(lap, laps, activity.startTime))}</td>
+                      <td>{formatDuration(lapDisplayTimeS(lap, laps.length > 0 ? activity.samples ?? [] : []))}</td>
+                      <td>{formatDuration(lapCumulativeTime(lap, laps, activity.samples ?? []))}</td>
                       <td>{formatDistance(lap.distanceM)}</td>
                       <td>{optionalPace(lapPaceSPKM(lap, activity.samples ?? []))}</td>
                       {showGap && <td>{optionalPace(lap.avgGradeAdjustedPaceSPKM)}</td>}
@@ -3286,7 +3250,7 @@ function ActivityFlatLapTable({ activity }: { activity: Activity }) {
               <tr key={lap.index}>
                 <td>{lap.index + 1}</td>
                 <td>{formatDistance(lap.distanceM)}</td>
-                <td>{formatDuration(lapMovingTimeS(lap, activity.samples ?? []))}</td>
+                <td>{formatDuration(lapDisplayTimeS(lap, activity.samples ?? []))}</td>
                 <td>{optionalPace(lapPaceSPKM(lap, activity.samples ?? []))}</td>
                 {showGap && <td>{optionalPace(lap.avgGradeAdjustedPaceSPKM)}</td>}
                 {showElevation && <td>{optionalMeters(lap.elevationGainM)}</td>}
@@ -3331,27 +3295,55 @@ function formatLapRange(lapIndexes?: number[]) {
   return first === last ? String(first) : `${first}–${last}`;
 }
 
-function intervalCumulativeTime(interval: ActivityInterval, intervals: ActivityInterval[], activityStart: string) {
-  if (interval.endTime) {
-    const end = Date.parse(interval.endTime);
-    const start = Date.parse(activityStart);
-    if (Number.isFinite(end) && Number.isFinite(start) && end >= start) {
-      return Math.round((end - start) / 1000);
-    }
+function intervalLapIndexesForDisplay(interval: ActivityInterval, intervals: ActivityInterval[], laps: ActivityLap[]) {
+  if (interval.lapIndexes && interval.lapIndexes.length > 0) {
+    return interval.lapIndexes;
   }
-  const index = intervals.findIndex((candidate) => candidate.index === interval.index);
-  return intervals.slice(0, index + 1).reduce((total, candidate) => total + candidate.elapsedTimeS, 0);
+  if (intervals.length === 1) {
+    return laps.map((lap) => lap.index);
+  }
+  return [];
 }
 
-function lapCumulativeTime(lap: ActivityLap, laps: ActivityLap[], activityStart: string) {
-  if (lap.startTime) {
-    const end = Date.parse(lap.startTime) + lap.elapsedTimeS * 1000;
-    const start = Date.parse(activityStart);
-    if (Number.isFinite(end) && Number.isFinite(start) && end >= start) {
-      return Math.round((end - start) / 1000);
+function intervalCumulativeTime(interval: ActivityInterval, intervals: ActivityInterval[]) {
+  const index = intervals.findIndex((candidate) => candidate.index === interval.index);
+  return Math.round(intervals.slice(0, index + 1).reduce((total, candidate) => total + intervalDisplayTimeS(candidate), 0));
+}
+
+function lapCumulativeTime(lap: ActivityLap, laps: ActivityLap[], samples: ActivitySample[]) {
+  return Math.round(laps
+    .filter((candidate) => candidate.index <= lap.index)
+    .reduce((total, candidate) => total + lapDisplayTimeS(candidate, samples), 0));
+}
+
+function intervalDisplayTimeS(interval: ActivityInterval) {
+  const duration = rawDurationS(interval.raw);
+  if (duration !== undefined) {
+    return duration;
+  }
+  return interval.movingTimeS > 0 ? interval.movingTimeS : interval.elapsedTimeS;
+}
+
+function lapDisplayTimeS(lap: ActivityLap, samples: ActivitySample[]) {
+  const duration = rawDurationS(lap.raw);
+  if (duration !== undefined) {
+    return duration;
+  }
+  return lapMovingTimeS(lap, samples);
+}
+
+function rawDurationS(raw?: Record<string, unknown>) {
+  const value = raw?.duration;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
     }
   }
-  return laps.filter((candidate) => candidate.index <= lap.index).reduce((total, candidate) => total + candidate.elapsedTimeS, 0);
+  return undefined;
 }
 
 function intervalTargetLabel(workout: Activity["workout"], interval: ActivityInterval) {
@@ -3562,7 +3554,8 @@ function PlannedActivityMatchDialog({
 }) {
   const [feedback, setFeedback] = useState("");
   const [rpe, setRPE] = useState(5);
-  const [rpeTouched, setRPETouched] = useState(false);
+  const [rpeTouched, setRPETouched] = useState(true);
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
   const trimmedFeedback = feedback.trim();
   const valid = Array.from(trimmedFeedback).length <= 5000;
   const selectedCandidate = data.candidates.find((candidate) => candidate.id === selectedCandidateId);
@@ -3571,15 +3564,22 @@ function PlannedActivityMatchDialog({
     plannedActivityId: selectedCandidateId ?? "",
     feedback: feedbackAvailable ? trimmedFeedback : undefined,
     rpe: rpeTouched ? rpe : null,
-    rpeSet: rpeTouched
+    rpeSet: rpeTouched,
+    overrides: Object.keys(overrides).length > 0 ? overrides : undefined
   });
 
   useEffect(() => {
     setFeedback("");
     setRPE(5);
-    setRPETouched(false);
+    setRPETouched(true);
+    setOverrides({});
     onPreviewReset();
   }, [selectedCandidateId]);
+
+  const resetPreview = () => {
+    setOverrides({});
+    onPreviewReset();
+  };
 
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -3647,14 +3647,14 @@ function PlannedActivityMatchDialog({
                 onChange={(event) => {
                   setRPE(Number(event.target.value));
                   setRPETouched(true);
-                  onPreviewReset();
+                  resetPreview();
                 }}
               />
             </label>
             {feedbackAvailable && (
               <label className="field">
                 <span>How did it feel/go?</span>
-                <textarea className="notes-textarea" maxLength={5000} rows={6} value={feedback} onChange={(event) => { setFeedback(event.target.value); onPreviewReset(); }} />
+                <textarea className="notes-textarea" maxLength={5000} rows={6} value={feedback} onChange={(event) => { setFeedback(event.target.value); resetPreview(); }} />
               </label>
             )}
             {!feedbackAvailable && selectedCandidate && (
@@ -3666,7 +3666,7 @@ function PlannedActivityMatchDialog({
             )}
           </>
         )}
-        {preview && <TrainingSheetPreviewPanel preview={preview} />}
+        {preview && <TrainingSheetPreviewPanel preview={preview} overrides={overrides} onOverrideChange={(ref, value) => setOverrides((current) => ({ ...current, [ref]: value }))} />}
         {!valid && <div className="row-error">Feedback must be 5000 characters or fewer.</div>}
         {error instanceof Error && <div className="error">{error.message}</div>}
         <div className="dialog-actions">
@@ -3674,7 +3674,7 @@ function PlannedActivityMatchDialog({
             <button className="secondary-button" type="button" disabled={matching} onClick={onLoadMore}>Load more plans</button>
           )}
           {preview && (
-            <button className="secondary-button" type="button" disabled={matching} onClick={onPreviewReset}>Edit</button>
+            <button className="secondary-button" type="button" disabled={matching} onClick={resetPreview}>Edit</button>
           )}
           <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>
           <button className="primary-button" type="submit" disabled={matching || !selectedCandidateId || !valid}>
@@ -3686,10 +3686,14 @@ function PlannedActivityMatchDialog({
   );
 }
 
-function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebackPreview }) {
+function TrainingSheetPreviewPanel({ preview, overrides, onOverrideChange }: { preview: TrainingSheetWritebackPreview; overrides: Record<string, string>; onOverrideChange: (ref: string, value: string) => void }) {
   const [selectedRef, setSelectedRef] = useState<string>();
   const grid = preview.grid;
   const selectedCell = grid?.rows.flatMap((row) => row.cells).find((cell) => cell.ref === selectedRef);
+  const effectiveSelectedCell = selectedCell ? trainingSheetPreviewCellWithOverride(selectedCell, overrides) : undefined;
+  const effectiveChanges = preview.changes.map((change) => trainingSheetPreviewChangeWithOverride(change, overrides));
+  const writeCount = effectiveChanges.filter((change) => change.status === "write" || change.status === "manual").length;
+  const conflictCount = effectiveChanges.filter((change) => change.status === "conflict").length;
 
   useEffect(() => {
     setSelectedRef(undefined);
@@ -3705,13 +3709,15 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
         {preview.sheetUrl && <a href={preview.sheetUrl} target="_blank" rel="noreferrer">Open sheet</a>}
       </div>
       <div className="muted">
-        {preview.writeCount} cell{preview.writeCount === 1 ? "" : "s"} will be written{preview.conflictCount > 0 ? ` · ${preview.conflictCount} existing value${preview.conflictCount === 1 ? "" : "s"} preserved` : ""}
+        {writeCount} cell{writeCount === 1 ? "" : "s"} will be written{conflictCount > 0 ? ` · ${conflictCount} existing value${conflictCount === 1 ? "" : "s"} preserved` : ""}
       </div>
       <div className="training-sheet-preview-legend" aria-label="Preview legend">
         <span><i className="training-sheet-preview-swatch write" /> Will write</span>
         <span><i className="training-sheet-preview-swatch conflict" /> Existing value preserved</span>
+        <span><i className="training-sheet-preview-swatch manual" /> Manual override</span>
       </div>
-      {preview.warnings?.map((warning) => <div className="row-error" key={warning}>{warning}</div>)}
+      <div className="muted">Click a proposed cell to edit its value. Edited conflicts will replace the existing sheet value.</div>
+      {preview.warnings?.map((warning) => <div className="training-sheet-preview-warning" key={warning}>{warning}</div>)}
       {grid?.rows.length ? (
         <>
           <div className="training-sheet-preview-grid-wrap">
@@ -3731,11 +3737,12 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
                   <tr key={row.index} style={row.heightPx ? { height: `${row.heightPx}px` } : undefined}>
                     <th className="training-sheet-grid-row-number" scope="row">{row.index}</th>
                     {row.cells.map((cell) => {
+                      const displayCell = trainingSheetPreviewCellWithOverride(cell, overrides);
                       const selected = cell.ref === selectedRef;
                       return (
                         <td
                           key={cell.ref}
-                          className={`training-sheet-grid-cell-container ${cell.status} ${selected ? "selected" : ""}`}
+                          className={`training-sheet-grid-cell-container ${displayCell.status} ${selected ? "selected" : ""}`}
                           rowSpan={cell.rowSpan}
                           colSpan={cell.columnSpan}
                         >
@@ -3743,11 +3750,11 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
                             className="training-sheet-grid-cell"
                             type="button"
                             style={trainingSheetCellInlineStyle(cell)}
-                            aria-label={trainingSheetCellAriaLabel(cell)}
-                            title={trainingSheetCellAriaLabel(cell)}
+                            aria-label={trainingSheetCellAriaLabel(displayCell)}
+                            title={trainingSheetCellAriaLabel(displayCell)}
                             onClick={() => setSelectedRef(cell.ref)}
                           >
-                            {cell.displayValue || "\u00a0"}
+                            {displayCell.displayValue || "\u00a0"}
                           </button>
                         </td>
                       );
@@ -3757,7 +3764,7 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
               </tbody>
             </table>
           </div>
-          {selectedCell && <TrainingSheetPreviewCellInspector cell={selectedCell} />}
+          {effectiveSelectedCell && <TrainingSheetPreviewCellInspector cell={effectiveSelectedCell} onOverrideChange={onOverrideChange} />}
         </>
       ) : (
         <div className="muted">No sheet values are available to preview.</div>
@@ -3766,8 +3773,27 @@ function TrainingSheetPreviewPanel({ preview }: { preview: TrainingSheetWritebac
   );
 }
 
-function TrainingSheetPreviewCellInspector({ cell }: { cell: TrainingSheetPreviewCell }) {
+function trainingSheetPreviewCellWithOverride(cell: TrainingSheetPreviewCell, overrides: Record<string, string>): TrainingSheetPreviewCell {
+  if (!Object.prototype.hasOwnProperty.call(overrides, cell.ref) || !cell.section) {
+    return cell;
+  }
+  const value = overrides[cell.ref];
+  return { ...cell, displayValue: value, proposedValue: value, status: cell.currentValue === value ? "unchanged" : "manual" };
+}
+
+function trainingSheetPreviewChangeWithOverride(change: TrainingSheetPreviewChange, overrides: Record<string, string>): TrainingSheetPreviewChange {
+  const separator = change.range.lastIndexOf("!");
+  const ref = (separator >= 0 ? change.range.slice(separator + 1) : change.range).replace(/\$/g, "").toUpperCase();
+  if (!Object.prototype.hasOwnProperty.call(overrides, ref)) {
+    return change;
+  }
+  const proposedValue = overrides[ref];
+  return { ...change, proposedValue, status: change.currentValue === proposedValue ? "unchanged" : "manual" };
+}
+
+function TrainingSheetPreviewCellInspector({ cell, onOverrideChange }: { cell: TrainingSheetPreviewCell; onOverrideChange: (ref: string, value: string) => void }) {
   const changed = cell.status !== "unchanged";
+  const editable = Boolean(cell.section);
   return (
     <div className="training-sheet-preview-inspector" aria-live="polite">
       <div className="training-sheet-preview-inspector-heading">
@@ -3780,7 +3806,12 @@ function TrainingSheetPreviewCellInspector({ cell }: { cell: TrainingSheetPrevie
       </div>
       <div className="training-sheet-preview-inspector-values">
         <div><span>Current</span><strong>{cell.currentValue || "(blank)"}</strong></div>
-        {changed && <div><span>Proposed</span><strong>{cell.proposedValue || "(blank)"}</strong></div>}
+        {editable ? (
+          <label className="training-sheet-preview-edit-value">
+            <span>Proposed</span>
+            <input value={cell.proposedValue ?? cell.displayValue} onChange={(event) => onOverrideChange(cell.ref, event.target.value)} />
+          </label>
+        ) : changed && <div><span>Proposed</span><strong>{cell.proposedValue || "(blank)"}</strong></div>}
       </div>
     </div>
   );
@@ -3826,11 +3857,12 @@ function trainingSheetCellAriaLabel(cell: TrainingSheetPreviewCell) {
   return `${cell.ref}: ${current} to ${cell.proposedValue || "blank"}; ${trainingSheetPreviewStatusLabel(cell.status)}`;
 }
 
-function trainingSheetPreviewStatusLabel(status: "write" | "conflict" | "unchanged") {
+function trainingSheetPreviewStatusLabel(status: "write" | "conflict" | "unchanged" | "manual") {
   switch (status) {
     case "write": return "will write";
     case "conflict": return "existing value preserved";
     case "unchanged": return "unchanged";
+    case "manual": return "manual override";
   }
 }
 
@@ -3840,10 +3872,12 @@ function writebackStatusLabel(status: string) {
       return "written";
     case "completed_with_conflicts":
       return "existing values preserved";
+    case "completed_with_warnings":
+      return "written with warnings";
     case "skipped":
       return "skipped; review needed";
-    case "waiting_for_feedback":
-      return "waiting for feedback";
+    case "not_provided":
+      return "not provided";
     case "not_applicable":
       return "not applicable";
     case "running":
@@ -4700,6 +4734,7 @@ function SettingsPage({
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
       <TrainingSheetSettings />
+      <ClimbDetectionSettingsSection />
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} error={themePreferenceError} />
       <UserManagement />
       <section id="import" className="panel upload-panel">
@@ -4721,6 +4756,105 @@ function SettingsPage({
         importsLoading={imports.isLoading}
       />
     </Page>
+  );
+}
+
+function ClimbDetectionSettingsSection() {
+  const queryClient = useQueryClient();
+  const config = useQuery({ queryKey: ["config"], queryFn: api.config });
+  const configuredSensitivity = config.data?.climbDetection?.sensitivity ?? defaultClimbSensitivity;
+  const [draftSensitivity, setDraftSensitivity] = useState(configuredSensitivity);
+  const sensitivity = clampClimbSensitivity(draftSensitivity);
+  const activePreset = climbSensitivityPresetForValue(sensitivity);
+  const activePresetLabel = climbSensitivityPresetLabel(sensitivity);
+
+  useEffect(() => {
+    if (config.data?.climbDetection) {
+      setDraftSensitivity(config.data.climbDetection.sensitivity);
+    }
+  }, [config.data?.climbDetection?.sensitivity]);
+
+  const save = useMutation({
+    mutationFn: (nextSensitivity: number) => api.updateClimbDetectionSettings({ sensitivity: nextSensitivity }),
+    onSuccess: async (updatedConfig) => {
+      setDraftSensitivity(updatedConfig.climbDetection.sensitivity);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["config"] }),
+        queryClient.invalidateQueries({ queryKey: ["activity"] }),
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] })
+      ]);
+    }
+  });
+
+  const updateDraft = (nextSensitivity: number) => {
+    save.reset();
+    setDraftSensitivity(clampClimbSensitivity(nextSensitivity));
+  };
+
+  return (
+    <section className="panel climb-settings-panel">
+      <div className="climb-settings-header">
+        <div>
+          <div className="panel-heading">Climb detection</div>
+          <p className="muted">Choose the default sensitivity used when detecting climbs across activities.</p>
+        </div>
+        <span className="climb-sensitivity-preset-label muted">{activePresetLabel}</span>
+      </div>
+      <div className="climb-settings-content">
+        <div className="climb-sensitivity-range">
+          <span>Sensitivity</span>
+          <strong>{sensitivity}</strong>
+        </div>
+        <input
+          className="climb-sensitivity-slider"
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={sensitivity}
+          aria-label="Default climb sensitivity"
+          disabled={!config.data}
+          onChange={(event) => updateDraft(Number(event.target.value))}
+        />
+        <div className="climb-sensitivity-presets">
+          {climbSensitivityPresets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={`secondary-button small-button ${activePreset === preset.id ? "active" : ""}`}
+              aria-pressed={activePreset === preset.id}
+              disabled={!config.data}
+              onClick={() => updateDraft(preset.value)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="climb-sensitivity-actions">
+          <button
+            className="secondary-button small-button"
+            type="button"
+            disabled={!config.data || sensitivity === defaultClimbSensitivity || save.isPending}
+            onClick={() => updateDraft(defaultClimbSensitivity)}
+          >
+            Restore defaults
+          </button>
+          <button
+            className="primary-button small-button"
+            type="button"
+            disabled={!config.data || sensitivity === configuredSensitivity || save.isPending}
+            onClick={() => save.mutate(sensitivity)}
+          >
+            {save.isPending ? "Saving..." : "Save permanently"}
+          </button>
+        </div>
+        {config.isLoading && <div className="muted">Loading climb detection settings…</div>}
+        {config.error && <div className="error">{config.error instanceof Error ? config.error.message : "Could not load climb detection settings"}</div>}
+        {save.error && <div className="error">{save.error instanceof Error ? save.error.message : "Could not save climb detection settings"}</div>}
+        {save.isSuccess && <div className="muted">Climb detection settings saved.</div>}
+      </div>
+    </section>
   );
 }
 
@@ -5662,7 +5796,7 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
                   stroke={series.color}
                   dot={false}
                   strokeWidth={2}
-                  connectNulls
+                  connectNulls={series.key !== "paceSPKM"}
                 />
               ))}
             </LineChart>
@@ -6010,15 +6144,6 @@ function paceRouteSegmentsForActivity(
     grouped.push({ color, points: [segment.start, segment.end] });
     return grouped;
   }, []);
-}
-
-function paceForRouteSegment(previousSpeedMPS?: number, currentSpeedMPS?: number) {
-  const speeds = [previousSpeedMPS, currentSpeedMPS].filter((speed): speed is number => typeof speed === "number" && speed > 0);
-  if (speeds.length === 0) {
-    return undefined;
-  }
-  const avgSpeedMPS = speeds.reduce((total, speed) => total + speed, 0) / speeds.length;
-  return speedToPaceSPKM(avgSpeedMPS);
 }
 
 function lapGapPaceForSample(laps: ActivityLap[], sample: ActivitySample): number | undefined {
@@ -6408,9 +6533,7 @@ function formatChartTick(value: number, series: ActivityChartSeries) {
     return "";
   }
   if (series.key === "paceSPKM") {
-    const minutes = Math.floor(value / 60);
-    const seconds = Math.round(value % 60);
-    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+    return formatPaceMinutesSeconds(value);
   }
   return String(Math.round(value));
 }
@@ -6662,9 +6785,10 @@ function difficultyClass(value: string) {
 }
 
 function formatDuration(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+  const roundedSeconds = Math.round(totalSeconds);
+  const hours = Math.floor(roundedSeconds / 3600);
+  const minutes = Math.floor((roundedSeconds % 3600) / 60);
+  const seconds = roundedSeconds % 60;
   if (hours > 0) {
     return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
@@ -6728,9 +6852,7 @@ function formatPace(secondsPerKm?: number) {
   if (!secondsPerKm || !Number.isFinite(secondsPerKm)) {
     return "-";
   }
-  const minutes = Math.floor(secondsPerKm / 60);
-  const seconds = Math.round(secondsPerKm % 60);
-  return `${minutes}:${String(seconds).padStart(2, "0")} /km`;
+  return `${formatPaceMinutesSeconds(secondsPerKm)} /km`;
 }
 
 function formatBPM(value?: number) {

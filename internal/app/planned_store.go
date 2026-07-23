@@ -249,9 +249,10 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 }
 
 type plannedActivityReflection struct {
-	Feedback *string
-	RPESet   bool
-	RPE      *int
+	Feedback        *string
+	RPESet          bool
+	RPE             *int
+	ManualOverrides map[string]string
 }
 
 func (s *Store) MatchPlannedActivity(ctx context.Context, activityID, plannedActivityID string) (PlannedActivity, error) {
@@ -264,9 +265,18 @@ func (s *Store) MatchPlannedActivityWithReflection(ctx context.Context, activity
 
 func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedActivityID string, reflection *plannedActivityReflection) (PlannedActivity, error) {
 	feedback := ""
+	manualOverrides := []byte(`{}`)
+	manualOverridesSet := reflection != nil
 	if reflection != nil && reflection.Feedback != nil {
 		var err error
 		feedback, err = localActivityFeedbackValue(*reflection.Feedback)
+		if err != nil {
+			return PlannedActivity{}, err
+		}
+	}
+	if reflection != nil && reflection.ManualOverrides != nil {
+		var err error
+		manualOverrides, err = json.Marshal(reflection.ManualOverrides)
 		if err != nil {
 			return PlannedActivity{}, err
 		}
@@ -317,10 +327,13 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 				return PlannedActivity{}, err
 			}
 			if _, err = tx.Exec(ctx, `
-				insert into training_sheet_writebacks(planned_activity_id, activity_id)
-				values($1, $2)
-				on conflict(planned_activity_id) do update set activity_id = excluded.activity_id, updated_at = now()
-			`, planned.ID, activityID); err != nil {
+				insert into training_sheet_writebacks(planned_activity_id, activity_id, manual_overrides)
+				values($1, $2, $3::jsonb)
+				on conflict(planned_activity_id) do update set
+					activity_id = excluded.activity_id,
+					manual_overrides = case when $4 then excluded.manual_overrides else training_sheet_writebacks.manual_overrides end,
+					updated_at = now()
+			`, planned.ID, activityID, manualOverrides, manualOverridesSet); err != nil {
 				return PlannedActivity{}, err
 			}
 			if err = tx.Commit(ctx); err != nil {
@@ -349,10 +362,13 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 	planned.MatchedActivityID = activityID
 	planned.MatchedAt = &matchedAt
 	if _, err = tx.Exec(ctx, `
-		insert into training_sheet_writebacks(planned_activity_id, activity_id)
-		values($1, $2)
-		on conflict(planned_activity_id) do update set activity_id = excluded.activity_id, updated_at = now()
-	`, planned.ID, activityID); err != nil {
+		insert into training_sheet_writebacks(planned_activity_id, activity_id, manual_overrides)
+		values($1, $2, $3::jsonb)
+		on conflict(planned_activity_id) do update set
+			activity_id = excluded.activity_id,
+			manual_overrides = case when $4 then excluded.manual_overrides else training_sheet_writebacks.manual_overrides end,
+			updated_at = now()
+	`, planned.ID, activityID, manualOverrides, manualOverridesSet); err != nil {
 		return PlannedActivity{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {

@@ -15,6 +15,20 @@ export function speedToPaceSPKM(speedMPS: number | null | undefined) {
   return 1000 / speedMPS;
 }
 
+export function paceForRouteSegment(previousSpeedMPS: number | undefined, currentSpeedMPS: number | undefined) {
+  if (!isPositiveFiniteSpeed(previousSpeedMPS) || !isPositiveFiniteSpeed(currentSpeedMPS)) {
+    return undefined;
+  }
+  return speedToPaceSPKM((previousSpeedMPS + currentSpeedMPS) / 2);
+}
+
+export function formatPaceMinutesSeconds(secondsPerKm: number) {
+  const roundedSeconds = Math.round(secondsPerKm);
+  const minutes = Math.floor(roundedSeconds / 60);
+  const seconds = roundedSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 export function paceScaleFromSpeeds(speedsMPS: Array<number | null | undefined>) {
   return paceScaleFromPaces(speedsMPS.map(speedToPaceSPKM));
 }
@@ -72,4 +86,8 @@ function quantile(sortedValues: number[], quantileValue: number) {
   }
   const ratio = position - lowerIndex;
   return sortedValues[lowerIndex] + (sortedValues[upperIndex] - sortedValues[lowerIndex]) * ratio;
+}
+
+function isPositiveFiniteSpeed(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }

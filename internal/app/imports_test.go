@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"testing"
+	"time"
 
 	fit "github.com/tormoder/fit"
 )
@@ -112,6 +113,58 @@ func TestFITSessionCaloriesKcal(t *testing.T) {
 	}
 	if invalid := fitSessionCaloriesKcal(&fit.SessionMsg{TotalCalories: 0xFFFF}); invalid != nil {
 		t.Fatalf("invalid calories = %#v", invalid)
+	}
+}
+
+func TestFITPauseIntervals(t *testing.T) {
+	start := time.Date(2026, 7, 1, 6, 0, 0, 0, time.UTC)
+	events := []*fit.EventMsg{
+		{Timestamp: start.Add(20 * time.Second), Event: fit.EventTimer, EventType: fit.EventTypeStop},
+		{Timestamp: start.Add(10 * time.Second), Event: fit.EventTimer, EventType: fit.EventTypeStart},
+		{Timestamp: start.Add(30 * time.Second), Event: fit.EventTimer, EventType: fit.EventTypeStart},
+		{Timestamp: start.Add(40 * time.Second), Event: fit.EventTimer, EventType: fit.EventTypeStop},
+	}
+
+	intervals := fitPauseIntervals(events)
+	if len(intervals) != 2 {
+		t.Fatalf("pause intervals = %d, want 2", len(intervals))
+	}
+	if !intervals[0].Start.Equal(start.Add(20*time.Second)) || !intervals[0].End.Equal(start.Add(30*time.Second)) {
+		t.Fatalf("first pause = %#v, want 20s-30s", intervals[0])
+	}
+	if !intervals[1].Start.Equal(start.Add(40*time.Second)) || !intervals[1].End.IsZero() {
+		t.Fatalf("final pause = %#v, want open pause at 40s", intervals[1])
+	}
+	if !isFitPausedAt(start.Add(25*time.Second), intervals) {
+		t.Fatal("sample inside pause was not marked paused")
+	}
+	if isFitPausedAt(start.Add(35*time.Second), intervals) {
+		t.Fatal("sample between pauses was marked paused")
+	}
+	if !isFitPausedAt(start.Add(45*time.Second), intervals) {
+		t.Fatal("sample inside final pause was not marked paused")
+	}
+}
+
+func TestFITMovingDurationExcludesPauses(t *testing.T) {
+	start := time.Date(2026, 7, 1, 6, 0, 0, 0, time.UTC)
+	end := start.Add(100 * time.Second)
+	intervals := []fitPauseInterval{{Start: start.Add(20 * time.Second), End: start.Add(35 * time.Second)}, {Start: start.Add(70 * time.Second), End: end}}
+
+	if got, want := fitMovingDuration(start, end, intervals), 55; got != want {
+		t.Fatalf("moving duration = %d, want %d", got, want)
+	}
+}
+
+func TestFITRecordSpeedIsOmittedDuringPause(t *testing.T) {
+	record := fit.NewRecordMsg()
+	record.EnhancedSpeed = 3000
+
+	if speed := fitRecordSpeed(record, true); speed != nil {
+		t.Fatalf("paused speed = %v, want nil", *speed)
+	}
+	if speed := fitRecordSpeed(record, false); speed == nil || *speed != 3 {
+		t.Fatalf("active speed = %#v, want 3", speed)
 	}
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
+import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 
 describe("pace display scaling", () => {
   it("converts only finite positive speeds to pace", () => {
@@ -17,6 +17,18 @@ describe("pace display scaling", () => {
 
     expect(scale?.minPaceSPKM).toBeCloseTo(525);
     expect(scale?.maxPaceSPKM).toBeCloseTo(975);
+  });
+
+  it("does not create a pace segment through a paused sample", () => {
+    expect(paceForRouteSegment(2, undefined)).toBeUndefined();
+    expect(paceForRouteSegment(undefined, 2)).toBeUndefined();
+    expect(paceForRouteSegment(2, 2)).toBe(500);
+  });
+
+  it("carries rounded seconds into the next minute", () => {
+    expect(formatPaceMinutesSeconds(299.49)).toBe("4:59");
+    expect(formatPaceMinutesSeconds(299.5)).toBe("5:00");
+    expect(formatPaceMinutesSeconds(359.6)).toBe("6:00");
   });
 
   it("does not flatten slow activities above ten minutes per kilometer", () => {

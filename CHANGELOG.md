@@ -18,6 +18,8 @@
 - Sync jobs can now be canceled cooperatively from progress views, diagnostics, training-plan import, and training-sheet write-back controls, while retaining completed partial work.
 - Added local multi-user accounts with administrator-managed username/password access, disabled accounts, password resets, per-user preferences, private datasets, per-user provider connections and scheduled syncs, and read-only administrator support views.
 - Matched training-sheet activities now write summary metrics, structured workout interval tables, and separate athlete feedback/RPE back to Google Sheets with conflict-safe retries and safe warnings for ambiguous interval mappings.
+- Training-sheet matching now accepts optional feedback, partially maps unrepresented structured intervals with warnings, and allows proposed preview values to be edited before write-back.
+- Training-sheet matching now records the default RPE of 5 when the user leaves the RPE slider unchanged.
 - Training-sheet feedback write-back now refreshes the feedback cell with the latest saved reflection, queues updates that arrive during another sheet job, and repairs HR cells that were interpreted as time values by the workbook format.
 - Planned activity matching now offers a read-only training-sheet change preview with explicit Apply, conflict visibility, and stale-sheet revalidation before writeback.
 - Training-sheet match previews now render a focused, sheet-like live grid with proposed values in place, formatting when available, and selectable current/proposed cell details.
@@ -53,11 +55,19 @@
 - Gear list and gear detail pages now support sorting by last used, first used, distance, percent-to-limit, and activity count.
 - Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
-- Added configurable server-side climb detection settings in Settings with preset profiles and manual tuning; activity climb detections now re-compute after saves.
+- Climb detection settings now live in Settings with persistent preset controls and a temporary per-activity sensitivity override; activity climb detections re-compute after saved changes.
 - Added a new Calendar view with a month-by-month activity grid, month navigation, and clickable activity links.
 
 ### Fixes
 
+- Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
+- Hide the interval step-type selector when all intervals use the same step type.
+- Interval and lap cumulative times now follow Garmin’s recorded durations instead of wall-clock timestamps that include pauses; single-type interval views open expanded.
+- Pace formatting now carries rounded seconds into the next minute instead of displaying invalid values such as `4:60 /km`.
+- Paused Garmin timer intervals now remain visible in route geometry without contributing their walking speed to pace charts or pace-colored routes.
+- Health chart axes now reserve enough space for grouped values such as steps
+  and show units for sleep, resting heart rate, and HRV.
+- Fixed training-sheet writeback status lookups failing when PostgreSQL UUID columns were compared with text parameters.
 - Removed the inline theme bootstrap script so strict Content Security Policy no longer reports script violations on SPA routes such as Calendar.
 - Display preferences, activity-list columns, and gear sorting now persist per user instead of being shared through browser-local storage.
 - Garmin gear last-used dates now come from linked activities instead of Garmin gear setup metadata.

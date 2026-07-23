@@ -363,29 +363,34 @@ func durationMatches(group string, duration int) bool {
 	return absInt(expected-duration) <= tolerance
 }
 
-func intervalUpdatesForPlannedActivity(planned PlannedActivity, activity Activity) ([]googleValueRangeUpdate, error) {
+type trainingSheetIntervalUpdatePlan struct {
+	Updates       []googleValueRangeUpdate
+	SkippedRecord int
+}
+
+func intervalUpdatesForPlannedActivity(planned PlannedActivity, activity Activity) (trainingSheetIntervalUpdatePlan, error) {
 	table := workoutTableFromPlanned(planned)
 	if table == nil {
-		return nil, nil
+		return trainingSheetIntervalUpdatePlan{}, nil
 	}
 	if activity.Workout == nil || len(activity.Intervals) == 0 {
-		return nil, fmt.Errorf("the activity has no structured Garmin workout intervals")
+		return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("the activity has no structured Garmin workout intervals")
 	}
 
 	records := structuredWorkoutRecords(activity, false)
-	updates, err := intervalUpdatesForRecords(planned.SheetTitle, table, records)
+	plan, err := intervalUpdatesForRecordsWithWarning(planned.SheetTitle, table, records)
 	if err == nil {
-		return updates, nil
+		return plan, nil
 	}
 	if !workoutTableHasRangeRows(table) {
-		return nil, err
+		return trainingSheetIntervalUpdatePlan{}, err
 	}
 
 	expandedRecords := structuredWorkoutRecords(activity, true)
 	if len(expandedRecords) <= len(records) {
-		return nil, err
+		return trainingSheetIntervalUpdatePlan{}, err
 	}
-	return intervalUpdatesForRecords(planned.SheetTitle, table, expandedRecords)
+	return intervalUpdatesForRecordsWithWarning(planned.SheetTitle, table, expandedRecords)
 }
 
 func workoutTableHasRangeRows(table *trainingSheetWorkoutTable) bool {
@@ -398,40 +403,56 @@ func workoutTableHasRangeRows(table *trainingSheetWorkoutTable) bool {
 }
 
 func intervalUpdatesForRecords(sheetTitle string, table *trainingSheetWorkoutTable, records []trainingSheetWorkoutRecord) ([]googleValueRangeUpdate, error) {
+	plan, err := intervalUpdatesForRecordsWithWarning(sheetTitle, table, records)
+	if err != nil {
+		return nil, err
+	}
+	if plan.SkippedRecord > 0 {
+		return nil, fmt.Errorf("worksheet table does not account for all active structured intervals")
+	}
+	return plan.Updates, nil
+}
+
+func intervalUpdatesForRecordsWithWarning(sheetTitle string, table *trainingSheetWorkoutTable, records []trainingSheetWorkoutRecord) (trainingSheetIntervalUpdatePlan, error) {
 	if len(records) == 0 {
-		return nil, fmt.Errorf("the activity has no active structured workout intervals")
+		return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("the activity has no active structured workout intervals")
 	}
 	assignments := make([][]trainingSheetWorkoutRecord, len(table.Rows))
 	cursor := 0
+	skippedRecords := 0
 	currentGroup := ""
 	var currentRecords []trainingSheetWorkoutRecord
 	for rowIndex, row := range table.Rows {
 		switch row.Kind {
 		case trainingSheetRowFastest, trainingSheetRowSlowest:
 			if currentGroup == "" || len(currentRecords) == 0 {
-				return nil, fmt.Errorf("%s row %q has no preceding interval group", row.Kind, row.Label)
+				return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("%s row %q has no preceding interval group", row.Kind, row.Label)
 			}
 			assignments[rowIndex] = currentRecords
 		case trainingSheetRowExact:
-			if cursor >= len(records) {
-				return nil, fmt.Errorf("worksheet row %q has no matching structured interval", row.Label)
+			match, ok := nextMatchingWorkoutRecord(records, cursor, row.Group)
+			if !ok {
+				return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("worksheet row %q has no matching structured interval", row.Label)
 			}
-			if row.Group != "" && !durationMatches(row.Group, records[cursor].DurationS) {
-				return nil, fmt.Errorf("worksheet row %q does not match the next structured interval", row.Label)
-			}
-			assignments[rowIndex] = records[cursor : cursor+1]
+			skippedRecords += match - cursor
+			assignments[rowIndex] = records[match : match+1]
 			currentGroup = row.Group
 			currentRecords = assignments[rowIndex]
-			cursor++
+			cursor = match + 1
 		case trainingSheetRowAverage:
 			group := row.Group
 			if group == "" {
 				group = currentGroup
 			}
 			if group == "" {
-				return nil, fmt.Errorf("average row %q has no interval group", row.Label)
+				return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("average row %q has no interval group", row.Label)
 			}
-			start := cursor
+			start, ok := nextMatchingWorkoutRecord(records, cursor, group)
+			if !ok {
+				return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("average row %q has no matching structured intervals", row.Label)
+			}
+			skippedRecords += start - cursor
+			cursor = start
 			nextGroup := nextConsumedWorkoutGroup(table.Rows, rowIndex, group)
 			groupStep := records[start].StepIndex
 			for cursor < len(records) {
@@ -444,17 +465,17 @@ func intervalUpdatesForRecords(sheetTitle string, table *trainingSheetWorkoutTab
 				cursor++
 			}
 			if cursor == start {
-				return nil, fmt.Errorf("average row %q has no matching structured intervals", row.Label)
+				return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("average row %q has no matching structured intervals", row.Label)
 			}
 			currentGroup = group
 			currentRecords = records[start:cursor]
 			assignments[rowIndex] = currentRecords
 		default:
-			return nil, fmt.Errorf("unsupported worksheet row kind %q", row.Kind)
+			return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("unsupported worksheet row kind %q", row.Kind)
 		}
 	}
-	if cursor != len(records) {
-		return nil, fmt.Errorf("worksheet table does not account for all active structured intervals")
+	if cursor < len(records) {
+		skippedRecords += len(records) - cursor
 	}
 
 	updates := make([]googleValueRangeUpdate, 0, len(table.Rows)*len(table.Columns))
@@ -466,21 +487,30 @@ func intervalUpdatesForRecords(sheetTitle string, table *trainingSheetWorkoutTab
 		case trainingSheetRowAverage:
 			aggregate, err := aggregateWorkoutRecords(selected)
 			if err != nil {
-				return nil, fmt.Errorf("%s row %q: %w", trainingSheetRowAverage, row.Label, err)
+				return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("%s row %q: %w", trainingSheetRowAverage, row.Label, err)
 			}
 			updates = append(updates, workoutRecordUpdates(sheetTitle, table, row, aggregate)...)
 		case trainingSheetRowFastest, trainingSheetRowSlowest:
 			selectedRecord, err := fastestOrSlowestWorkoutRecord(selected, row.Kind == trainingSheetRowFastest)
 			if err != nil {
-				return nil, fmt.Errorf("%s row %q: %w", row.Kind, row.Label, err)
+				return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("%s row %q: %w", row.Kind, row.Label, err)
 			}
 			updates = append(updates, workoutRecordUpdates(sheetTitle, table, row, *selectedRecord)...)
 		}
 	}
 	if len(updates) == 0 {
-		return nil, fmt.Errorf("worksheet table has no available interval metrics")
+		return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("worksheet table has no available interval metrics")
 	}
-	return updates, nil
+	return trainingSheetIntervalUpdatePlan{Updates: updates, SkippedRecord: skippedRecords}, nil
+}
+
+func nextMatchingWorkoutRecord(records []trainingSheetWorkoutRecord, cursor int, group string) (int, bool) {
+	for index := cursor; index < len(records); index++ {
+		if durationMatches(group, records[index].DurationS) {
+			return index, true
+		}
+	}
+	return 0, false
 }
 
 func nextConsumedWorkoutGroup(rows []trainingSheetWorkoutTableRow, start int, current string) string {

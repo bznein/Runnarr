@@ -137,7 +137,7 @@ export type TrainingSheetPreviewChange = {
   label: string;
   currentValue: string;
   proposedValue: string;
-  status: "write" | "conflict" | "unchanged";
+  status: "write" | "conflict" | "unchanged" | "manual";
 };
 
 export type TrainingSheetPreviewCellStyle = {
@@ -163,7 +163,7 @@ export type TrainingSheetPreviewCell = {
   currentValue: string;
   displayValue: string;
   proposedValue?: string;
-  status: "write" | "conflict" | "unchanged";
+  status: "write" | "conflict" | "unchanged" | "manual";
   section?: string;
   label?: string;
   style?: TrainingSheetPreviewCellStyle;
@@ -287,6 +287,7 @@ export type ActivityLap = {
   intensityType?: string;
   workoutStepIndex?: number;
   workoutRepeatIndex?: number;
+  raw?: Record<string, unknown>;
 };
 
 export type ActivityWorkoutStep = {
@@ -339,6 +340,7 @@ export type ActivityInterval = {
   elevationLossM?: number;
   caloriesKcal?: number;
   lapIndexes?: number[];
+  raw?: Record<string, unknown>;
 };
 
 export type ActivityClimb = {
