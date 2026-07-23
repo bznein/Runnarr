@@ -529,7 +529,7 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 		if userID != "" {
 			timezoneArg++
 		}
-		dayExpression = fmt.Sprintf("date(start_time at time zone $%d)", timezoneArg)
+		dayExpression = calendarActivityDateExpression(timezoneArg)
 	}
 	rows, err := s.db.Query(ctx, fmt.Sprintf(`
 		select
@@ -604,10 +604,11 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 	return calendar, nil
 }
 
-func (s *Store) CalendarDay(ctx context.Context, date time.Time) (CalendarDayView, error) {
+func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string) (CalendarDayView, error) {
 	filters := ActivityFilters{
 		DateFrom:             date,
 		DateTo:               date,
+		CalendarTimezone:     timezone,
 		IncludeTrainingSheet: true,
 	}
 	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
@@ -2063,7 +2064,7 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 		timezoneArg = nextArg
 		args = append(args, filters.CalendarTimezone)
 		nextArg++
-		activityDateExpression = fmt.Sprintf("date(start_time at time zone $%d)", timezoneArg)
+		activityDateExpression = calendarActivityDateExpression(timezoneArg)
 	}
 	if !filters.IncludeTrainingSheet {
 		conditions = append(conditions, "source <> 'training_sheet'")
@@ -2092,13 +2093,23 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 		nextArg++
 	}
 	if !filters.DateFrom.IsZero() {
-		conditions = append(conditions, fmt.Sprintf("start_time >= $%d", nextArg))
-		args = append(args, filters.DateFrom)
+		if filters.CalendarTimezone != "" {
+			conditions = append(conditions, fmt.Sprintf("%s >= $%d::date", activityDateExpression, nextArg))
+			args = append(args, filters.DateFrom.Format("2006-01-02"))
+		} else {
+			conditions = append(conditions, fmt.Sprintf("start_time >= $%d", nextArg))
+			args = append(args, filters.DateFrom)
+		}
 		nextArg++
 	}
 	if !filters.DateTo.IsZero() {
-		conditions = append(conditions, fmt.Sprintf("start_time < $%d", nextArg))
-		args = append(args, filters.DateTo.AddDate(0, 0, 1))
+		if filters.CalendarTimezone != "" {
+			conditions = append(conditions, fmt.Sprintf("%s <= $%d::date", activityDateExpression, nextArg))
+			args = append(args, filters.DateTo.Format("2006-01-02"))
+		} else {
+			conditions = append(conditions, fmt.Sprintf("start_time < $%d", nextArg))
+			args = append(args, filters.DateTo.AddDate(0, 0, 1))
+		}
 		nextArg++
 	}
 	if len(filters.SportTypes) > 0 {
@@ -2111,6 +2122,13 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 		args = append(args, filters.ExcludedSportTypes)
 	}
 	return conditions, args
+}
+
+func calendarActivityDateExpression(timezoneArg int) string {
+	if timezoneArg <= 0 {
+		return "date(start_time)"
+	}
+	return fmt.Sprintf("case when source = 'training_sheet' then date(start_time) else date(start_time at time zone $%d) end", timezoneArg)
 }
 
 func activityOrderBy(sortBy, sortOrder string) string {

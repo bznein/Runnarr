@@ -747,7 +747,7 @@ func (s *Server) handleCalendarDay(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	day, err := s.store.CalendarDay(r.Context(), date)
+	day, err := s.store.CalendarDay(r.Context(), date, timezone)
 	if err != nil {
 		s.logger.Error("calendar day", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not load calendar day")

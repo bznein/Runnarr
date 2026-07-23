@@ -129,9 +129,31 @@ func TestCalendarTimezoneFilterUsesRequestedZoneForDates(t *testing.T) {
 	if len(args) != 2 || args[0] != "user-1" || args[1] != "Europe/Dublin" {
 		t.Fatalf("args = %#v, want user and timezone", args)
 	}
-	want := "(source <> 'training_sheet' or (date(start_time at time zone $2) >= date(now() at time zone $2) and not exists ("
+	want := "(source <> 'training_sheet' or (case when source = 'training_sheet' then date(start_time) else date(start_time at time zone $2) end >= date(now() at time zone $2) and not exists ("
 	if len(conditions) < 2 || !strings.HasPrefix(conditions[1], want) {
 		t.Fatalf("planned conditions = %#v, want prefix %q", conditions, want)
+	}
+}
+
+func TestCalendarTimezoneFilterUsesCalendarDatesForActivityBounds(t *testing.T) {
+	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.FixedZone("PDT", -7*60*60))
+	to := time.Date(2026, 7, 2, 0, 0, 0, 0, time.FixedZone("PDT", -7*60*60))
+	conditions, args := activityFilterConditionsForUser(ActivityFilters{
+		CalendarTimezone:     "America/Los_Angeles",
+		DateFrom:             from,
+		DateTo:               to,
+		IncludeTrainingSheet: true,
+	}, 1, "user-1")
+	dateExpression := "case when source = 'training_sheet' then date(start_time) else date(start_time at time zone $2) end"
+	if !strings.Contains(conditions[2], dateExpression+" >= $3::date") {
+		t.Fatalf("date-from condition = %q, want calendar date expression", conditions[2])
+	}
+	if !strings.Contains(conditions[3], dateExpression+" <= $4::date") {
+		t.Fatalf("date-to condition = %q, want calendar date expression", conditions[3])
+	}
+	wantArgs := []any{"user-1", "America/Los_Angeles", "2026-07-01", "2026-07-02"}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("args = %#v, want %#v", args, wantArgs)
 	}
 }
 
