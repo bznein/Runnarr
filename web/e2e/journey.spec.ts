@@ -156,6 +156,8 @@ test.describe("local product journey", () => {
       buffer: png
     });
     await expect(page.getByText("1 photo", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Match", exact: true })).toBeVisible();
+    await expect(page.locator(".planned-match-panel")).toHaveCount(0);
 
     await page.getByRole("button", { name: "Activity actions" }).click();
     await page.getByRole("menuitem", { name: "Export GPX" }).click();
@@ -170,7 +172,7 @@ test.describe("local product journey", () => {
     await cyclingActivity.click();
 
     await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
-    await expect(page.getByText("Suggested planned run", { exact: true })).toBeHidden();
+    await expect(page.locator(".planned-match-panel")).toHaveCount(0);
 
     await page.goto("/activities");
     const swimmingActivity = visibleActivityLink(page, "E2E Pool Swim", mobile);
