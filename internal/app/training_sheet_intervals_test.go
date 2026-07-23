@@ -45,6 +45,11 @@ func TestWorkoutTableColumnsRecognizesElevationColumns(t *testing.T) {
 	if combined[trainingSheetMetricElevation] != "C" {
 		t.Fatalf("combined elevation column = %#v, want C", combined)
 	}
+
+	spacedCombined := workoutTableColumns([]string{"", "Avg Pace", "Elevation Gain / Loss"})
+	if spacedCombined[trainingSheetMetricElevation] != "C" {
+		t.Fatalf("spaced combined elevation column = %#v, want C", spacedCombined)
+	}
 }
 
 func TestPlannedActivitiesFromTabStoresWorkoutTableMetadata(t *testing.T) {

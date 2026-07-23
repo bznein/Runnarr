@@ -161,7 +161,11 @@ func workoutTableColumns(row []string) map[string]string {
 }
 
 func normalizeSheetHeader(value string) string {
-	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
+	normalized := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
+	normalized = strings.ReplaceAll(normalized, " / ", "/")
+	normalized = strings.ReplaceAll(normalized, " /", "/")
+	normalized = strings.ReplaceAll(normalized, "/ ", "/")
+	return normalized
 }
 
 func workoutTableRowKind(label string) string {
