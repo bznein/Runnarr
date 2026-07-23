@@ -3653,7 +3653,7 @@ function PlannedActivityMatchDialog({
             <label className="field">
               <span>RPE <strong>{rpe}/10</strong></span>
               <input
-                className="rpe-slider"
+                className={`rpe-slider rpe-slider--${rpeTone(rpe)}`}
                 type="range"
                 min={1}
                 max={10}
@@ -3992,7 +3992,7 @@ function ActivityReflectionDialog({
         <label className="field">
           <span>RPE <strong>{rpe}/10</strong></span>
           <input
-            className="rpe-slider"
+            className={`rpe-slider rpe-slider--${rpeTone(rpe)}`}
             type="range"
             min={1}
             max={10}
@@ -6807,6 +6807,19 @@ function formatGearActivityCount(value?: number) {
     return "0";
   }
   return value.toLocaleString();
+}
+
+function rpeTone(value: number) {
+  if (value >= 9) {
+    return "max";
+  }
+  if (value >= 7) {
+    return "hard";
+  }
+  if (value >= 4) {
+    return "moderate";
+  }
+  return "easy";
 }
 
 function gearDistanceUsagePercent(totalDistanceM?: number, maxDistanceM?: number) {
