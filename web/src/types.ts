@@ -266,6 +266,7 @@ export type ActivityLap = {
   intensityType?: string;
   workoutStepIndex?: number;
   workoutRepeatIndex?: number;
+  raw?: Record<string, unknown>;
 };
 
 export type ActivityWorkoutStep = {
@@ -318,6 +319,7 @@ export type ActivityInterval = {
   elevationLossM?: number;
   caloriesKcal?: number;
   lapIndexes?: number[];
+  raw?: Record<string, unknown>;
 };
 
 export type ActivityClimb = {

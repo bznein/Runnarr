@@ -56,6 +56,10 @@
 
 ### Fixes
 
+- Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
+- Hide the interval step-type selector when all intervals use the same step type.
+- Interval and lap cumulative times now follow Garmin’s recorded durations instead of wall-clock timestamps that include pauses; single-type interval views open expanded.
+- Pace formatting now carries rounded seconds into the next minute instead of displaying invalid values such as `4:60 /km`.
 - Paused Garmin timer intervals now remain visible in route geometry without contributing their walking speed to pace charts or pace-colored routes.
 - Fixed training-sheet writeback status lookups failing when PostgreSQL UUID columns were compared with text parameters.
 - Removed the inline theme bootstrap script so strict Content Security Policy no longer reports script violations on SPA routes such as Calendar.
