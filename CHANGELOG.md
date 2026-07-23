@@ -59,6 +59,7 @@
 - `scripts/dev.sh` no longer overwrites a user-provided `RUNNARR_ADMIN_PASSWORD` (including `change-me`); it only auto-generates one when missing, so the login value you set stays valid.
 - Gear list and gear detail pages now support sorting by last used, first used, distance, percent-to-limit, and activity count.
 - Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
+- Climb details now show recorded pace and overlapping lap GAP alongside the elevation profile when those values are available.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
 - Climb detection settings now live in Settings with persistent preset controls and a temporary per-activity sensitivity override; activity climb detections re-compute after saved changes.
 - Added a new Calendar view with a month-by-month activity grid, month navigation, and clickable activity links.
