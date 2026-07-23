@@ -2246,6 +2246,7 @@ function ActivityTypeFilterPanel({
   filters: ActivityTypeFiltersValue;
   onChange: (filters: ActivityTypeFiltersValue) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const includeSet = new Set(filters.sports);
   const excludeSet = new Set(filters.excludeSports);
   if (activityTypes.length === 0) {
@@ -2274,45 +2275,65 @@ function ActivityTypeFilterPanel({
   };
   const clearFilters = () => onChange({ ...filters, sports: [], excludeSports: [] });
   const hasFilters = filters.sports.length > 0 || filters.excludeSports.length > 0;
+  const selectedCount = filters.sports.length + filters.excludeSports.length;
+  const setAllIncluded = () => onChange({ ...filters, sports: [...activityTypes], excludeSports: [] });
+  const clearIncluded = () => onChange({ ...filters, sports: [] });
+  const setAllExcluded = () => onChange({ ...filters, sports: [], excludeSports: [...activityTypes] });
+  const clearExcluded = () => onChange({ ...filters, excludeSports: [] });
 
   return (
-    <section className="panel filter-panel">
+    <section className={`panel filter-panel activity-type-filter-panel${open ? " open" : ""}`}>
       <div className="filter-header">
-        <div className="panel-heading">Activity types</div>
-        <button className="secondary-button small-button" type="button" disabled={!hasFilters} onClick={clearFilters}>Clear</button>
-      </div>
-      <div className="filter-grid">
-        <div className="filter-group">
-          <div className="filter-label">Show only</div>
-          <div className="chip-list">
-            {activityTypes.map((sport) => (
-              <button
-                key={`include-${sport}`}
-                className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`}
-                type="button"
-                onClick={() => toggleInclude(sport)}
-              >
-                {sport}
-              </button>
-            ))}
-          </div>
+        <div>
+          <div className="panel-heading">Activity types</div>
+          <div className="muted">{hasFilters ? `${selectedCount} filters selected` : "All activity types"}</div>
         </div>
-        <div className="filter-group">
-          <div className="filter-label">Exclude</div>
-          <div className="chip-list">
-            {activityTypes.map((sport) => (
-              <button
-                key={`exclude-${sport}`}
-                className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`}
-                type="button"
-                onClick={() => toggleExclude(sport)}
-              >
-                {sport}
-              </button>
-            ))}
-          </div>
+        <div className="filter-header-actions">
+          {hasFilters && <button className="secondary-button small-button" type="button" onClick={clearFilters}>Clear</button>}
+          <button className="secondary-button small-button" type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)}>
+            <Filter size={15} />
+            {open ? "Close" : "Filter"}
+          </button>
         </div>
       </div>
+      {open && (
+        <div className="activity-type-filter-menu">
+          <div className="activity-type-filter-group" role="group" aria-labelledby="activity-type-include-label">
+            <div className="activity-type-filter-group-header">
+              <div id="activity-type-include-label" className="filter-label">Show only</div>
+              <span>
+                <button type="button" onClick={setAllIncluded}>Select all</button>
+                <button type="button" onClick={clearIncluded}>Clear all</button>
+              </span>
+            </div>
+            <div className="activity-type-options">
+              {activityTypes.map((sport) => (
+                <label key={`include-${sport}`} className="activity-type-option">
+                  <input type="checkbox" checked={includeSet.has(sport)} onChange={() => toggleInclude(sport)} />
+                  <span>{sport}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="activity-type-filter-group" role="group" aria-labelledby="activity-type-exclude-label">
+            <div className="activity-type-filter-group-header">
+              <div id="activity-type-exclude-label" className="filter-label">Exclude</div>
+              <span>
+                <button type="button" onClick={setAllExcluded}>Select all</button>
+                <button type="button" onClick={clearExcluded}>Clear all</button>
+              </span>
+            </div>
+            <div className="activity-type-options">
+              {activityTypes.map((sport) => (
+                <label key={`exclude-${sport}`} className="activity-type-option">
+                  <input type="checkbox" checked={excludeSet.has(sport)} onChange={() => toggleExclude(sport)} />
+                  <span>{sport}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

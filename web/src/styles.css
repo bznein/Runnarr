@@ -600,6 +600,20 @@ textarea {
   margin-bottom: 0;
 }
 
+.filter-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.filter-header-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .filter-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -609,6 +623,71 @@ textarea {
 .filter-group {
   display: grid;
   gap: 8px;
+}
+
+.activity-type-filter-panel {
+  gap: 10px;
+}
+
+.activity-type-filter-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.activity-type-filter-group {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 8px;
+}
+
+.activity-type-filter-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.activity-type-filter-group-header .filter-label {
+  margin: 0;
+}
+
+.activity-type-filter-group-header span {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.activity-type-filter-group-header button {
+  padding: 0;
+  border: 0;
+  color: var(--color-primary-text);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.activity-type-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.activity-type-option {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  color: var(--color-text-soft);
+  font-size: 13px;
+}
+
+.activity-type-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .filter-label {
@@ -2884,6 +2963,7 @@ textarea {
   .tools-equivalent-grid,
   .tools-result-grid,
   .filter-grid,
+  .activity-type-filter-menu,
   .date-range-grid,
   .search-panel,
   .sync-progress-grid,

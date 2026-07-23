@@ -64,6 +64,7 @@
 
 ### Fixes
 
+- Activity type filters now use a compact include/exclude control with checkbox bulk actions.
 - Planned-run suggestions and matching now only apply to running activities.
 - RPE sliders now use effort-based colors from easy through maximum effort.
 - Hide per-activity climb sensitivity controls for activity types such as swimming, kayaking, and treadmill runs where climbs are not meaningful.

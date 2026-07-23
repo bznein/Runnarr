@@ -229,6 +229,11 @@ test.describe("local product journey", () => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
 
+    await expect(page.getByText("Activity types", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Filter", exact: true }).first().click();
+    await expect(page.getByText("Show only", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select all", exact: true })).toHaveCount(2);
+
     await navigateTo(page, "Calendar", mobile);
     await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
     await expect(page.getByText("Monthly activity calendar", { exact: true })).toBeVisible();
