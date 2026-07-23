@@ -65,11 +65,11 @@ func (s *Store) GetTrainingSheetWriteback(ctx context.Context, plannedID string)
 			select id::text, status, cancel_requested_at
 			from sync_jobs
 			where user_id = $2 and provider = $3 and kind = 'writeback'
-				and payload->>'plannedActivityId' = $1::text
+				and payload->>'plannedActivityId' = ($1::uuid)::text
 			order by created_at desc
 			limit 1
 		) as writeback_job on true
-		where planned_activity_id = $1 and exists (select 1 from planned_activities where id = $1 and user_id = $2)
+		where planned_activity_id = $1::uuid and exists (select 1 from planned_activities where id = $1::uuid and user_id = $2)
 	`, plannedID, scopedUserID(ctx), trainingSheetProvider).Scan(&status.PlannedActivityID, &status.ActivityID, &status.SummaryStatus, &status.SummaryError, &summaryWritten,
 		&status.IntervalsStatus, &status.IntervalsError, &intervalsWritten,
 		&status.FeedbackStatus, &status.FeedbackError, &feedbackWritten, &lastAttempt, &jobID, &jobStatus, &cancelRequestedAt)
