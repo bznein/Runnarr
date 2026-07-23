@@ -167,8 +167,20 @@ export const api = {
     params.set("period", period);
     return request<SummaryStats>(`/api/stats/summary?${params.toString()}`);
   },
-  activityCalendar: (filters?: ActivityTypeFilters) => request<ActivityCalendar>(`/api/stats/calendar?${activityFilterQuery(filters)}`),
-  calendarDay: (date: string) => request<CalendarDayView>(`/api/stats/calendar/day?date=${encodeURIComponent(date)}`),
+  activityCalendar: (filters?: ActivityTypeFilters, timezone?: string) => {
+    const params = new URLSearchParams(activityFilterQuery(filters));
+    if (timezone) {
+      params.set("timezone", timezone);
+    }
+    return request<ActivityCalendar>(`/api/stats/calendar?${params.toString()}`);
+  },
+  calendarDay: (date: string, timezone?: string) => {
+    const params = new URLSearchParams({ date });
+    if (timezone) {
+      params.set("timezone", timezone);
+    }
+    return request<CalendarDayView>(`/api/stats/calendar/day?${params.toString()}`);
+  },
   healthDaily: (range?: HealthRange) => {
     const query = healthRangeQuery(range);
     return request<{ from?: string; to?: string; metrics: DailyHealthMetric[] | null; chart?: HealthChartPoint[] }>(`/api/health/daily${query ? `?${query}` : ""}`);

@@ -306,6 +306,7 @@ type ActivityFilters struct {
 	Search               string
 	DateFrom             time.Time
 	DateTo               time.Time
+	CalendarTimezone     string
 	SortBy               string
 	SortOrder            string
 	SummaryPeriod        string

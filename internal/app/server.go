@@ -708,14 +708,20 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
+	timezone, err := calendarTimezoneFromQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	filters := activityFiltersFromQuery(r)
-	dateFrom, dateTo, err := calendarDateRangeFromQuery(r)
+	dateFrom, dateTo, err := calendarDateRangeFromQuery(r, timezone)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	filters.DateFrom = dateFrom
 	filters.DateTo = dateTo
+	filters.CalendarTimezone = timezone
 	calendar, err := s.store.ActivityCalendar(r.Context(), filters)
 	if err != nil {
 		s.logger.Error("calendar activities", "error", err)
@@ -727,6 +733,16 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCalendarDay(w http.ResponseWriter, r *http.Request) {
 	date, err := calendarDayDateFromQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	timezone, err := calendarTimezoneFromQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	date, err = calendarDateInTimezone(date, timezone)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1361,7 +1377,47 @@ func parseOptionalAPIDate(value, field string) (time.Time, error) {
 	return parsed, nil
 }
 
-func calendarDateRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
+func calendarTimezoneFromQuery(r *http.Request) (string, error) {
+	timezone := strings.TrimSpace(r.URL.Query().Get("timezone"))
+	if timezone == "" {
+		return "UTC", nil
+	}
+	if len(timezone) > 100 {
+		return "", errors.New("timezone must be a valid IANA timezone")
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return "", errors.New("timezone must be a valid IANA timezone")
+	}
+	return timezone, nil
+}
+
+func calendarDateInTimezone(value time.Time, timezone string) (time.Time, error) {
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return time.Time{}, errors.New("timezone must be a valid IANA timezone")
+	}
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, location), nil
+}
+
+func calendarDateRangeInTimezone(from, to time.Time, timezone string) (time.Time, time.Time, error) {
+	if !from.IsZero() {
+		var err error
+		from, err = calendarDateInTimezone(from, timezone)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+	}
+	if !to.IsZero() {
+		var err error
+		to, err = calendarDateInTimezone(to, timezone)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+	}
+	return from, to, nil
+}
+
+func calendarDateRangeFromQuery(r *http.Request, timezone string) (time.Time, time.Time, error) {
 	values := r.URL.Query()
 	dateFrom, err := parseOptionalAPIDate(values.Get("dateFrom"), "dateFrom")
 	if err != nil {
@@ -1372,9 +1428,13 @@ func calendarDateRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, err
 	}
 	if dateFrom.IsZero() && dateTo.IsZero() {
-		now := time.Now().UTC()
-		dateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-		dateTo = dateFrom.AddDate(0, 1, 0).Add(-24 * time.Hour)
+		location, err := time.LoadLocation(timezone)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("timezone must be a valid IANA timezone")
+		}
+		now := time.Now().In(location)
+		dateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, location)
+		dateTo = time.Date(now.Year(), now.Month()+1, 0, 0, 0, 0, 0, location)
 	}
 	if dateFrom.IsZero() {
 		dateFrom = dateTo
@@ -1388,7 +1448,7 @@ func calendarDateRangeFromQuery(r *http.Request) (time.Time, time.Time, error) {
 	if dateTo.Sub(dateFrom) > 370*24*time.Hour {
 		return time.Time{}, time.Time{}, errors.New("calendar range cannot exceed 370 days")
 	}
-	return dateFrom, dateTo, nil
+	return calendarDateRangeInTimezone(dateFrom, dateTo, timezone)
 }
 
 func calendarDayDateFromQuery(r *http.Request) (time.Time, error) {

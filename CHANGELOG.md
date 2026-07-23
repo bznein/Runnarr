@@ -66,6 +66,7 @@
 
 ### Fixes
 
+- Calendar day and month queries now honor the browser timezone at activity date boundaries, including planned entries around midnight.
 - Activity detail planned-run matching now uses a compact Match/Unmatch action, and assigned gear appears as a small chip beside the activity title.
 - Health range changes no longer load the preserved raw Garmin payload for every day, making first-time 30D and 90D views responsive.
 - Activity type filters now use a compact include/exclude control with checkbox bulk actions.

@@ -3,6 +3,7 @@ package app
 import (
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -88,6 +89,49 @@ func TestActivityFilterConditionsDateRange(t *testing.T) {
 	}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+}
+
+func TestCalendarDateRangeUsesRequestedTimezone(t *testing.T) {
+	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	gotFrom, gotTo, err := calendarDateRangeInTimezone(from, to, "Europe/Dublin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFrom := time.Date(2026, 7, 1, 0, 0, 0, 0, time.FixedZone("IST", 3600))
+	wantTo := time.Date(2026, 7, 1, 0, 0, 0, 0, time.FixedZone("IST", 3600))
+	if !gotFrom.Equal(wantFrom) || gotFrom.Location().String() != "Europe/Dublin" {
+		t.Fatalf("from = %v (%s), want %v (Europe/Dublin)", gotFrom, gotFrom.Location(), wantFrom)
+	}
+	if !gotTo.Equal(wantTo) || gotTo.Location().String() != "Europe/Dublin" {
+		t.Fatalf("to = %v (%s), want %v (Europe/Dublin)", gotTo, gotTo.Location(), wantTo)
+	}
+}
+
+func TestCalendarTimezoneFromQueryValidatesIANAZone(t *testing.T) {
+	request := httptest.NewRequest("GET", "/api/stats/calendar/day?date=2026-07-01&timezone=Europe%2FDublin", nil)
+	if got, err := calendarTimezoneFromQuery(request); err != nil || got != "Europe/Dublin" {
+		t.Fatalf("timezone = %q, error = %v", got, err)
+	}
+
+	request = httptest.NewRequest("GET", "/api/stats/calendar/day?date=2026-07-01&timezone=not-a-zone", nil)
+	if _, err := calendarTimezoneFromQuery(request); err == nil {
+		t.Fatal("expected invalid timezone error")
+	}
+}
+
+func TestCalendarTimezoneFilterUsesRequestedZoneForDates(t *testing.T) {
+	conditions, args := activityFilterConditionsForUser(ActivityFilters{
+		CalendarTimezone:     "Europe/Dublin",
+		IncludeTrainingSheet: true,
+	}, 1, "user-1")
+	if len(args) != 2 || args[0] != "user-1" || args[1] != "Europe/Dublin" {
+		t.Fatalf("args = %#v, want user and timezone", args)
+	}
+	want := "(source <> 'training_sheet' or (date(start_time at time zone $2) >= date(now() at time zone $2) and not exists ("
+	if len(conditions) < 2 || !strings.HasPrefix(conditions[1], want) {
+		t.Fatalf("planned conditions = %#v, want prefix %q", conditions, want)
 	}
 }
 

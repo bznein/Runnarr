@@ -42,4 +42,19 @@ describe("shared backend API contract", () => {
     expect(requestURL).toContain("/api/activities/activity%2Fwith%20spaces/series");
     expect(requestURL).toContain("maxPoints=900");
   });
+
+  it("passes the browser timezone to calendar requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      date: "2026-07-01",
+      activities: []
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.calendarDay("2026-07-01", "Europe/Dublin");
+
+    const requestURL = String(fetchMock.mock.calls[0][0]);
+    expect(requestURL).toContain("/api/stats/calendar/day?");
+    expect(requestURL).toContain("date=2026-07-01");
+    expect(requestURL).toContain("timezone=Europe%2FDublin");
+  });
 });

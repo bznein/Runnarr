@@ -1900,6 +1900,7 @@ function ActivitiesPage() {
 function ActivityCalendarPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const month = parseCalendarMonth(searchParams.get("month"));
+  const timezone = browserCalendarTimezone();
   const monthRange = calendarMonthRange(month);
   const filters: ActivityTypeFiltersValue = {
     ...emptyActivityTypeFilters,
@@ -1907,8 +1908,8 @@ function ActivityCalendarPage() {
     dateTo: monthRange.end
   };
   const calendar = useQuery({
-    queryKey: ["activity-calendar", month.year, month.month],
-    queryFn: () => api.activityCalendar(filters)
+    queryKey: ["activity-calendar", month.year, month.month, timezone],
+    queryFn: () => api.activityCalendar(filters, timezone)
   });
   const monthLabel = formatCalendarMonthLabel(month);
   const dayByDate = new Map(calendar.data?.days?.map((day) => [day.date, day]) ?? []);
@@ -2056,9 +2057,10 @@ function ActivityCalendarPage() {
 function CalendarDayPage() {
   const { date: routeDate } = useParams();
   const date = isCalendarDate(routeDate) ? routeDate : "";
+  const timezone = browserCalendarTimezone();
   const day = useQuery({
-    queryKey: ["calendar-day", date],
-    queryFn: () => api.calendarDay(date),
+    queryKey: ["calendar-day", date, timezone],
+    queryFn: () => api.calendarDay(date, timezone),
     enabled: Boolean(date)
   });
   const health = day.data?.health;
@@ -5535,6 +5537,10 @@ function formatCalendarAgendaDate(value: string) {
 function formatCalendarDayLongDate(value: string) {
   const date = new Date(`${value}T12:00:00`);
   return date.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+}
+
+function browserCalendarTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
 function isCalendarDate(value: string | undefined): value is string {

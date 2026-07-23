@@ -521,10 +521,19 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 
 func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (ActivityCalendar, error) {
 	filters.IncludeTrainingSheet = true
-	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
-	rows, err := s.db.Query(ctx, `
+	userID := scopedUserID(ctx)
+	where, args := activityFilterWhereForUser(filters, 1, userID)
+	dayExpression := "date(start_time)"
+	if filters.CalendarTimezone != "" {
+		timezoneArg := 1
+		if userID != "" {
+			timezoneArg++
+		}
+		dayExpression = fmt.Sprintf("date(start_time at time zone $%d)", timezoneArg)
+	}
+	rows, err := s.db.Query(ctx, fmt.Sprintf(`
 		select
-			date(start_time) as day,
+			%s as day,
 			id::text,
 			source,
 			coalesce(nullif(local_name, ''), name),
@@ -533,9 +542,9 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 			coalesce(distance_m, 0),
 			coalesce(moving_time_s, 0)
 		from activities
-	`+where+`
+		`+where+`
 		order by day, start_time
-	`, args...)
+	`, dayExpression), args...)
 	if err != nil {
 		return ActivityCalendar{}, err
 	}
@@ -2048,16 +2057,34 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 		args = append(args, userID)
 		nextArg++
 	}
+	timezoneArg := 0
+	activityDateExpression := "date(start_time)"
+	if filters.CalendarTimezone != "" {
+		timezoneArg = nextArg
+		args = append(args, filters.CalendarTimezone)
+		nextArg++
+		activityDateExpression = fmt.Sprintf("date(start_time at time zone $%d)", timezoneArg)
+	}
 	if !filters.IncludeTrainingSheet {
 		conditions = append(conditions, "source <> 'training_sheet'")
 	} else {
-		conditions = append(conditions, `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
+		if timezoneArg > 0 {
+			conditions = append(conditions, fmt.Sprintf(`(source <> 'training_sheet' or (%s >= date(now() at time zone $%d) and not exists (
 			select 1 from planned_activities
 			where planned_activities.source = 'training_sheet'
 				and planned_activities.source_id = activities.source_id
 				and planned_activities.user_id = activities.user_id
 				and planned_activities.status = 'completed'
-		)))`)
+			)))`, activityDateExpression, timezoneArg))
+		} else {
+			conditions = append(conditions, `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
+			select 1 from planned_activities
+			where planned_activities.source = 'training_sheet'
+				and planned_activities.source_id = activities.source_id
+				and planned_activities.user_id = activities.user_id
+				and planned_activities.status = 'completed'
+			)))`)
+		}
 	}
 	if strings.TrimSpace(filters.Search) != "" {
 		conditions = append(conditions, fmt.Sprintf("coalesce(nullif(local_name, ''), name) ilike $%d", nextArg))
