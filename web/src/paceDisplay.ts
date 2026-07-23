@@ -22,6 +22,13 @@ export function paceForRouteSegment(previousSpeedMPS: number | undefined, curren
   return speedToPaceSPKM((previousSpeedMPS + currentSpeedMPS) / 2);
 }
 
+export function formatPaceMinutesSeconds(secondsPerKm: number) {
+  const roundedSeconds = Math.round(secondsPerKm);
+  const minutes = Math.floor(roundedSeconds / 60);
+  const seconds = roundedSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 export function paceScaleFromSpeeds(speedsMPS: Array<number | null | undefined>) {
   return paceScaleFromPaces(speedsMPS.map(speedToPaceSPKM));
 }
