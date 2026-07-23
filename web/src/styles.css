@@ -569,26 +569,6 @@ textarea {
   font-weight: 740;
 }
 
-.filter-panel {
-  display: grid;
-  gap: 12px;
-}
-
-.search-panel {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto;
-  align-items: end;
-  gap: 12px;
-}
-
-.search-field {
-  min-width: 0;
-}
-
-.search-field input {
-  width: 100%;
-}
-
 .filter-header {
   display: flex;
   align-items: center;
@@ -600,38 +580,9 @@ textarea {
   margin-bottom: 0;
 }
 
-.filter-header-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.filter-header-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.filter-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
-}
-
-.filter-group {
-  display: grid;
-  gap: 8px;
-}
-
-.activity-type-filter-panel {
-  gap: 10px;
-}
-
 .activity-type-filter-menu {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   padding-top: 4px;
 }
@@ -669,6 +620,12 @@ textarea {
   cursor: pointer;
 }
 
+.activity-type-filter-group-header button:disabled {
+  color: var(--color-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .activity-type-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -696,12 +653,6 @@ textarea {
   font-weight: 680;
 }
 
-.chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .filter-chip {
   min-height: 32px;
   padding: 0 10px;
@@ -716,12 +667,6 @@ textarea {
   border-color: var(--color-primary-strong);
   color: var(--color-white);
   background: var(--color-primary);
-}
-
-.filter-chip.exclude.active {
-  border-color: var(--color-danger-strong);
-  color: var(--color-white);
-  background: var(--color-danger);
 }
 
 .active-filter-button {
@@ -2934,6 +2879,11 @@ textarea {
   color: var(--color-muted);
 }
 
+.empty-state-copy {
+  display: grid;
+  gap: 4px;
+}
+
 @media (max-width: 920px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -2962,10 +2912,7 @@ textarea {
   .tools-form-grid,
   .tools-equivalent-grid,
   .tools-result-grid,
-  .filter-grid,
-  .activity-type-filter-menu,
   .date-range-grid,
-  .search-panel,
   .sync-progress-grid,
   .health-chart-grid,
   .health-detail-grid,
@@ -3251,7 +3198,6 @@ textarea {
   }
 
   .split-layout,
-  .filter-grid,
   .tools-form-grid,
   .date-range-grid,
   .user-create-form,
@@ -3283,11 +3229,6 @@ textarea {
   .health-range-actions > * {
     flex: 1 1 100%;
     min-width: 0;
-  }
-
-  .search-panel {
-    grid-template-columns: 1fr;
-    align-items: stretch;
   }
 
   .calendar-controls {
