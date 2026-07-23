@@ -63,6 +63,7 @@
 
 ### Fixes
 
+- Document the Cloudflare JavaScript Detections setting required to preserve Runnarr's strict CSP.
 - Round VDOT distance presets to the precision accepted by the calculator input.
 - Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
 - Hide the interval step-type selector when all intervals use the same step type.
