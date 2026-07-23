@@ -1900,6 +1900,14 @@ textarea {
   background: var(--color-primary);
 }
 
+.gear-progress--warning span {
+  background: var(--color-warning-bright);
+}
+
+.gear-progress--critical span {
+  background: var(--color-danger);
+}
+
 .gear-chip-list {
   display: flex;
   flex-wrap: wrap;

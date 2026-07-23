@@ -63,6 +63,7 @@
 ### Fixes
 
 - RPE sliders now use effort-based colors from easy through maximum effort.
+- Round VDOT distance presets to the precision accepted by the calculator input.
 - Structured Garmin intervals now retain and display recorded laps when Garmin omits explicit interval-to-lap indexes.
 - Hide the interval step-type selector when all intervals use the same step type.
 - Interval and lap cumulative times now follow Garmin’s recorded durations instead of wall-clock timestamps that include pauses; single-type interval views open expanded.
@@ -78,6 +79,7 @@
 - `scripts/dev.sh` now selects and reports the actual Vite port it starts on (with optional `RUNNARR_FRONTEND_PORT`), which prevents logging stale localhost:5173 URLs when ports are already taken and avoids loading the wrong frontend instance that causes `/api/...` 404s.
 - Activity type names from providers are now normalized for UI consistency (for example, Cycling, Treadmill Run, and Swimming variants render with readable labels).
 - Route GAP/PACE selector now uses a clean sliding control without an extra divider edge under Pace.
+- Gear distance usage bars now use green, yellow, and red thresholds at 70% and 95%.
 
 ## 0.3.0 - 2026-07-16
 
