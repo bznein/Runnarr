@@ -8,7 +8,7 @@ insert into daily_health_metrics(
     body_battery_avg, body_battery_min, body_battery_max, hrv_avg_ms,
     hrv_status, weight_kg, body_fat_pct
 )
-select id, 'garmin', current_date - 1, 12450, 2380, 780, 48, 71, 156,
+select id, 'garmin', current_date, 12450, 2380, 780, 48, 71, 156,
     27900, 7200, 14400, 6300, 900, 86, 23, 61, 72, 41, 98, 58,
     'balanced', 68.4, 14.2
 from users

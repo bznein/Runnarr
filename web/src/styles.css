@@ -589,26 +589,6 @@ textarea {
   font-weight: 740;
 }
 
-.filter-panel {
-  display: grid;
-  gap: 12px;
-}
-
-.search-panel {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto;
-  align-items: end;
-  gap: 12px;
-}
-
-.search-field {
-  min-width: 0;
-}
-
-.search-field input {
-  width: 100%;
-}
-
 .filter-header {
   display: flex;
   align-items: center;
@@ -620,27 +600,77 @@ textarea {
   margin-bottom: 0;
 }
 
-.filter-grid {
+.activity-type-filter-menu {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding-top: 4px;
 }
 
-.filter-group {
-  display: grid;
+.activity-type-filter-group {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 8px;
+}
+
+.activity-type-filter-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.activity-type-filter-group-header .filter-label {
+  margin: 0;
+}
+
+.activity-type-filter-group-header span {
+  display: inline-flex;
   gap: 8px;
+}
+
+.activity-type-filter-group-header button {
+  padding: 0;
+  border: 0;
+  color: var(--color-primary-text);
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.activity-type-filter-group-header button:disabled {
+  color: var(--color-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.activity-type-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.activity-type-option {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  color: var(--color-text-soft);
+  font-size: 13px;
+}
+
+.activity-type-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .filter-label {
   color: var(--color-muted);
   font-size: 13px;
   font-weight: 680;
-}
-
-.chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .filter-chip {
@@ -657,12 +687,6 @@ textarea {
   border-color: var(--color-primary-strong);
   color: var(--color-white);
   background: var(--color-primary);
-}
-
-.filter-chip.exclude.active {
-  border-color: var(--color-danger-strong);
-  color: var(--color-white);
-  background: var(--color-danger);
 }
 
 .active-filter-button {
@@ -2875,6 +2899,11 @@ textarea {
   color: var(--color-muted);
 }
 
+.empty-state-copy {
+  display: grid;
+  gap: 4px;
+}
+
 @media (max-width: 920px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -2903,9 +2932,7 @@ textarea {
   .tools-form-grid,
   .tools-equivalent-grid,
   .tools-result-grid,
-  .filter-grid,
   .date-range-grid,
-  .search-panel,
   .sync-progress-grid,
   .health-chart-grid,
   .health-detail-grid,
@@ -3191,7 +3218,6 @@ textarea {
   }
 
   .split-layout,
-  .filter-grid,
   .tools-form-grid,
   .date-range-grid,
   .user-create-form,
@@ -3223,11 +3249,6 @@ textarea {
   .health-range-actions > * {
     flex: 1 1 100%;
     min-width: 0;
-  }
-
-  .search-panel {
-    grid-template-columns: 1fr;
-    align-items: stretch;
   }
 
   .calendar-controls {

@@ -39,6 +39,7 @@
 
 - Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.
 - Activity list columns can now be toggled, and long activity/gear names are clipped more aggressively to keep the list scannable.
+- Activity list name, type, and date filters now share one filter dialog with a single selectable activity-type list.
 - Activity detail pages now support local-only notes that do not modify provider activities.
 - Activity detail pages can export a GPX track, with an option to include sensor extensions.
 - Garmin health sync now imports daily health metrics, including steps, calories, resting heart rate, sleep, stress, body battery, HRV, and body composition where Garmin provides them.
@@ -64,6 +65,7 @@
 
 ### Fixes
 
+- Activity type filters now use a compact include/exclude control with checkbox bulk actions.
 - Activity detail charts now recover when the available metrics change.
 - Health summary cards now show the actual metric date and remain pinned to today's data while chart ranges change.
 - Planned-run suggestions and matching now only apply to running activities.

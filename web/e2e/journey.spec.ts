@@ -229,6 +229,24 @@ test.describe("local product journey", () => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
 
+    await navigateTo(page, "Activities", mobile);
+    await expect(page.getByRole("heading", { name: "Activities" })).toBeVisible();
+    await page.getByRole("button", { name: "Filter", exact: true }).click();
+    const activityFilters = page.getByRole("dialog", { name: "Activities" });
+    await expect(activityFilters.getByLabel("Search by name")).toBeVisible();
+    await expect(activityFilters.getByText("Activity types", { exact: true })).toBeVisible();
+    await expect(activityFilters.getByText("Show only", { exact: true })).toHaveCount(0);
+    await expect(activityFilters.getByText("Exclude", { exact: true })).toHaveCount(0);
+    await expect(activityFilters.getByRole("button", { name: "Select all", exact: true })).toBeDisabled();
+    await activityFilters.getByRole("button", { name: "Clear all", exact: true }).click();
+    await activityFilters.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(page.getByText("No activities match these filters", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: /^Filter/ }).click();
+    const resetActivityFilters = page.getByRole("dialog", { name: "Activities" });
+    await resetActivityFilters.getByRole("button", { name: "Select all", exact: true }).click();
+    await resetActivityFilters.getByRole("button", { name: "Apply", exact: true }).click();
+
     await navigateTo(page, "Calendar", mobile);
     await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
     await expect(page.getByText("Monthly activity calendar", { exact: true })).toBeVisible();
