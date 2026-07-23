@@ -77,6 +77,7 @@
 - `scripts/dev.sh` now selects and reports the actual Vite port it starts on (with optional `RUNNARR_FRONTEND_PORT`), which prevents logging stale localhost:5173 URLs when ports are already taken and avoids loading the wrong frontend instance that causes `/api/...` 404s.
 - Activity type names from providers are now normalized for UI consistency (for example, Cycling, Treadmill Run, and Swimming variants render with readable labels).
 - Route GAP/PACE selector now uses a clean sliding control without an extra divider edge under Pace.
+- Gear distance usage bars now use green, yellow, and red thresholds at 70% and 95%.
 
 ## 0.3.0 - 2026-07-16
 

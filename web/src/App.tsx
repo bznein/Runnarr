@@ -1693,7 +1693,7 @@ function GearDistanceBlock({ gear }: { gear: Gear }) {
       </div>
       {max && (
         <>
-          <div className="gear-progress" aria-label={`Gear distance ${usagePercentLabel}`}>
+          <div className={`gear-progress gear-progress--${gearUsageTone(usagePercent)}`} aria-label={`Gear distance ${usagePercentLabel}`}>
             <span style={{ width: `${usagePercent}%` }} />
           </div>
           <div className="gear-progress-label">{formatGearDistance(total)} of {formatGearDistance(max)} · {usagePercentLabel}</div>
@@ -6830,6 +6830,16 @@ function gearDistanceUsagePercentRaw(totalDistanceM?: number, maxDistanceM?: num
   const ratio = totalDistanceM / maxDistanceM;
   const percent = ratio * 100;
   return percent >= 0 ? Math.min(100, Math.round(percent)) : 0;
+}
+
+function gearUsageTone(percent: number) {
+  if (percent >= 95) {
+    return "critical";
+  }
+  if (percent >= 70) {
+    return "warning";
+  }
+  return "safe";
 }
 
 function formatDistance(value: number) {
