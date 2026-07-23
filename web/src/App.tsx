@@ -11,6 +11,7 @@ import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
+import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import type {
   Activity,
   ActivityClimb,
@@ -601,10 +602,8 @@ function LoginPage() {
 }
 
 function Dashboard() {
-  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
   const [period, setPeriod] = useState<"weekly" | "monthly" | "yearly">("weekly");
-  const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
-  const summary = useQuery({ queryKey: ["summary", filters, period], queryFn: () => api.summary(filters, period) });
+  const summary = useQuery({ queryKey: ["summary", period], queryFn: () => api.summary(undefined, period) });
 
   if (summary.isLoading) {
     return <Page title="Dashboard"><LoadingRow /></Page>;
@@ -623,11 +622,6 @@ function Dashboard() {
 
   return (
     <Page title="Dashboard">
-      <ActivityTypeFilterPanel
-        activityTypes={activityTypes.data?.activityTypes ?? []}
-        filters={filters}
-        onChange={setFilters}
-      />
       <div className="segmented-control" aria-label="Dashboard time scale">
         {(["weekly", "monthly", "yearly"] as const).map((value) => (
           <button key={value} type="button" className={period === value ? "active" : ""} onClick={() => setPeriod(value)}>
@@ -677,20 +671,28 @@ function HealthPage() {
   const [draftRange, setDraftRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
   const [selectedDate, setSelectedDate] = useState("");
   const dayDetailRef = useRef<HTMLDivElement | null>(null);
+  const today = localDateString();
   const health = useQuery({
     queryKey: ["health-daily", range],
     queryFn: () => api.healthDaily(range),
     refetchInterval: false
   });
+  const todayHealth = useQuery({
+    queryKey: ["health-daily", "today", today],
+    queryFn: () => api.healthDaily({ from: today, to: today }),
+    staleTime: Infinity,
+    refetchInterval: false
+  });
+  const healthError = health.error ?? todayHealth.error;
   const metrics = health.data?.metrics ?? [];
-  const latestMetric = latestHealthMetric(metrics);
+  const todayMetric = latestHealthMetric(todayHealth.data?.metrics ?? []);
   const selectedMetric = metrics.find((metric) => metric.date === selectedDate);
   const chartData = (health.data?.chart ?? healthChartData(metrics)).map((point) => ({
     ...point,
     label: point.label ?? healthChartLabel(point.date)
   }));
   const showLongRangeHealthLines = healthRangeDayCount(range) > healthBarChartMaxDays;
-  const cardItems = healthMetricCards(latestMetric);
+  const cardItems = healthMetricCards(todayMetric);
   const activePreset = healthRangePresets().find((preset) => healthRangesMatch(draftRange, healthRangeForLastDays(preset.days)));
   const draftRangeChanged = !healthRangesMatch(draftRange, range);
   const draftRangeValid = healthRangeDayCount(draftRange) > 0;
@@ -706,63 +708,74 @@ function HealthPage() {
     dayDetailRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [selectedMetric?.date]);
 
+  const healthRangeControls = (
+    <section className="panel health-controls-panel">
+      <div className="health-range-controls">
+        <div className="segmented-control health-preset-control" role="group" aria-label="Health date range">
+          {healthRangePresets().map((preset) => (
+            <button
+              key={preset.days}
+              className={activePreset?.days === preset.days ? "active" : ""}
+              type="button"
+              onClick={() => applyHealthRange(healthRangeForLastDays(preset.days))}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="date-range-grid health-date-grid">
+          <label className="field">
+            <span>From</span>
+            <input
+              type="date"
+              value={draftRange.from}
+              max={draftRange.to || localDateString()}
+              onChange={(event) => setDraftRange({ ...draftRange, from: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>To</span>
+            <input
+              type="date"
+              value={draftRange.to}
+              min={draftRange.from}
+              max={localDateString()}
+              onChange={(event) => setDraftRange({ ...draftRange, to: event.target.value })}
+            />
+          </label>
+        </div>
+        <div className="health-range-actions">
+          <button className="secondary-button small-button" type="button" disabled={!draftRangeChanged} onClick={() => setDraftRange(range)}>
+            Reset
+          </button>
+          <button className="primary-button small-button" type="button" disabled={!draftRangeChanged || !draftRangeValid} onClick={() => applyHealthRange(draftRange)}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+
   return (
     <Page title="Health">
-      <section className="panel health-controls-panel">
-        <div className="health-range-controls">
-          <div className="segmented-control health-preset-control" role="group" aria-label="Health date range">
-            {healthRangePresets().map((preset) => (
-              <button
-                key={preset.days}
-                className={activePreset?.days === preset.days ? "active" : ""}
-                type="button"
-                onClick={() => applyHealthRange(healthRangeForLastDays(preset.days))}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <div className="date-range-grid health-date-grid">
-            <label className="field">
-              <span>From</span>
-              <input
-                type="date"
-                value={draftRange.from}
-                max={draftRange.to || localDateString()}
-                onChange={(event) => setDraftRange({ ...draftRange, from: event.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>To</span>
-              <input
-                type="date"
-                value={draftRange.to}
-                min={draftRange.from}
-                max={localDateString()}
-                onChange={(event) => setDraftRange({ ...draftRange, to: event.target.value })}
-              />
-            </label>
-          </div>
-          <div className="health-range-actions">
-            <button className="secondary-button small-button" type="button" disabled={!draftRangeChanged} onClick={() => setDraftRange(range)}>
-              Reset
-            </button>
-            <button className="primary-button small-button" type="button" disabled={!draftRangeChanged || !draftRangeValid} onClick={() => applyHealthRange(draftRange)}>
-              Apply
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {health.error && <div className="error">{health.error instanceof Error ? health.error.message : "Could not load health metrics"}</div>}
+      {healthError && <div className="error">{healthError instanceof Error ? healthError.message : "Could not load health metrics"}</div>}
 
       {cardItems.length > 0 && (
-        <section className="metric-grid">
-          {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+        <section className="health-summary" aria-label="Health summary">
+          <div className="health-summary-header">
+            <div className="panel-heading">Summary</div>
+            <span className="muted">Data for {healthSummaryDateLabel(todayMetric)}</span>
+          </div>
+          <div className="metric-grid">
+            {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+          </div>
+          {healthRangeControls}
         </section>
       )}
 
-      {health.isLoading && <LoadingRow />}
+      {cardItems.length === 0 && healthRangeControls}
+
+      {(health.isLoading || todayHealth.isLoading) && <LoadingRow />}
       {!health.isLoading && metrics.length === 0 && (
         <EmptyState
           title="No health metrics found"
@@ -1777,8 +1790,8 @@ function ActivitiesPage() {
   };
   const activityList = activities.data?.pages.flatMap((page) => page.activities ?? []) ?? [];
   const activitiesLoaded = Boolean(activities.data);
-  const dateFiltersActive = hasDateFilters(filters);
   const anyFiltersActive = hasActivityFilters(filters);
+  const activeFilterCount = activityFilterCount(filters);
   const currentSort = normalizedActivitySort(filters);
   const sortActive = !activitySortsMatch(currentSort, defaultActivitySort);
   const hiddenColumnCount = defaultActivityTableColumns.length - visibleColumns.length;
@@ -1798,13 +1811,13 @@ function ActivitiesPage() {
       actions={
         <>
           <button
-            className={`secondary-button ${dateFiltersActive ? "active-filter-button" : ""}`}
+            className={`secondary-button ${activeFilterCount > 0 ? "active-filter-button" : ""}`}
             type="button"
             onClick={() => setFiltersOpen(true)}
           >
             <Filter size={16} />
             Filter
-            {dateFiltersActive && <span className="button-badge">1</span>}
+            {activeFilterCount > 0 && <span className="button-badge">{activeFilterCount}</span>}
           </button>
           <button
             className={`secondary-button ${sortActive ? "active-filter-button" : ""}`}
@@ -1828,6 +1841,7 @@ function ActivitiesPage() {
     >
       {filtersOpen && (
         <ActivityFiltersDialog
+          activityTypes={activityTypes.data?.activityTypes ?? []}
           filters={filters}
           onApply={setFilters}
           onClose={() => setFiltersOpen(false)}
@@ -1847,15 +1861,6 @@ function ActivitiesPage() {
           onClose={() => setColumnsOpen(false)}
         />
       )}
-      <ActivitySearchPanel
-        value={filters.search ?? ""}
-        onChange={(search) => setFilters({ ...filters, search })}
-      />
-      <ActivityTypeFilterPanel
-        activityTypes={activityTypes.data?.activityTypes ?? []}
-        filters={filters}
-        onChange={setFilters}
-      />
       {activities.isLoading && <LoadingRow />}
       {activities.error && <div className="error">{activities.error instanceof Error ? activities.error.message : "Could not load activities"}</div>}
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
@@ -1879,7 +1884,8 @@ function ActivitiesPage() {
       )}
       {activitiesLoaded && activityList.length === 0 && (
         <EmptyState
-          title={anyFiltersActive ? "No activities found" : "No activities yet"}
+          title={anyFiltersActive ? "No activities match these filters" : "No activities yet"}
+          message={anyFiltersActive ? "Try broadening your search, date range, or selected activity types." : undefined}
           action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/settings#import">Import a file</Link>}
         />
       )}
@@ -2020,50 +2026,57 @@ function ActivityCalendarPage() {
   );
 }
 
-function ActivitySearchPanel({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <section className="panel search-panel">
-      <label className="field search-field">
-        <span>Search by name</span>
-        <input
-          type="search"
-          placeholder="Activity name"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-      <button className="secondary-button small-button" type="button" disabled={value.length === 0} onClick={() => onChange("")}>
-        Clear
-      </button>
-    </section>
-  );
-}
-
 function ActivityFiltersDialog({
+  activityTypes,
   filters,
   onApply,
   onClose
 }: {
+  activityTypes: string[];
   filters: ActivityTypeFiltersValue;
   onApply: (filters: ActivityTypeFiltersValue) => void;
   onClose: () => void;
 }) {
-  const [draftDates, setDraftDates] = useState<ActivityDateRange>({
-    dateFrom: filters.dateFrom ?? "",
-    dateTo: filters.dateTo ?? ""
-  });
+  const [draftFilters, setDraftFilters] = useState<ActivityTypeFiltersValue>(filters);
   const presets = dateFilterPresets();
+  const draftDates: ActivityDateRange = {
+    dateFrom: draftFilters.dateFrom ?? "",
+    dateTo: draftFilters.dateTo ?? ""
+  };
   const activePreset = presets.find((preset) => dateRangesMatch(draftDates, preset.range));
   const dateRangeInvalid = Boolean(draftDates.dateFrom && draftDates.dateTo && draftDates.dateFrom > draftDates.dateTo);
-  const applyDates = () => {
+  const selectedTypes = selectedActivityTypes(draftFilters, activityTypes);
+  const selectedSet = new Set(selectedTypes);
+  const allTypesSelected = selectedTypes.length === activityTypes.length;
+  const noTypesSelected = selectedTypes.length === 0;
+  const updateDates = (nextDates: ActivityDateRange) => {
+    setDraftFilters({
+      ...draftFilters,
+      dateFrom: nextDates.dateFrom ?? "",
+      dateTo: nextDates.dateTo ?? ""
+    });
+  };
+  const toggleActivityType = (sport: string) => {
+    const nextSelectedTypes = selectedSet.has(sport)
+      ? selectedTypes.filter((item) => item !== sport)
+      : [...selectedTypes, sport];
+    setDraftFilters(activityTypeFiltersForSelection(draftFilters, activityTypes, nextSelectedTypes));
+  };
+  const clearFilters = () => {
+    setDraftFilters({
+      ...draftFilters,
+      search: "",
+      sports: [],
+      excludeSports: [],
+      dateFrom: "",
+      dateTo: ""
+    });
+  };
+  const applyFilters = () => {
     if (dateRangeInvalid) {
       return;
     }
-    onApply({
-      ...filters,
-      dateFrom: draftDates.dateFrom ?? "",
-      dateTo: draftDates.dateTo ?? ""
-    });
+    onApply(draftFilters);
     onClose();
   };
 
@@ -2076,11 +2089,11 @@ function ActivityFiltersDialog({
         }
       }}
     >
-      <section className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-filters-title">
+      <section className="filter-dialog activity-filters-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-filters-title">
         <div className="dialog-header">
           <div>
             <div className="eyebrow">Filters</div>
-            <h2 id="activity-filters-title">Date</h2>
+            <h2 id="activity-filters-title">Activities</h2>
           </div>
           <button className="icon-button" type="button" aria-label="Close filters" onClick={onClose}>
             <X size={16} />
@@ -2088,14 +2101,52 @@ function ActivityFiltersDialog({
         </div>
 
         <div className="filter-dialog-section">
-          <div className="filter-label">Preset</div>
+          <div className="filter-label">Search</div>
+          <label className="field">
+            <span>Search by name</span>
+            <input
+              type="search"
+              placeholder="Activity name"
+              value={draftFilters.search ?? ""}
+              onChange={(event) => setDraftFilters({ ...draftFilters, search: event.target.value })}
+            />
+          </label>
+        </div>
+
+        {activityTypes.length > 0 && (
+          <div className="filter-dialog-section">
+            <div className="filter-label">Activity types</div>
+            <div className="activity-type-filter-menu">
+              <div className="activity-type-filter-group" role="group" aria-labelledby="activity-filter-types-label">
+                <div className="activity-type-filter-group-header">
+                  <div id="activity-filter-types-label" className="filter-label">Select types</div>
+                  <span>
+                    <button type="button" disabled={allTypesSelected} onClick={() => setDraftFilters(activityTypeFiltersForSelection(draftFilters, activityTypes, activityTypes))}>Select all</button>
+                    <button type="button" disabled={noTypesSelected} onClick={() => setDraftFilters(activityTypeFiltersForSelection(draftFilters, activityTypes, []))}>Clear all</button>
+                  </span>
+                </div>
+                <div className="activity-type-options">
+                  {activityTypes.map((sport) => (
+                    <label key={`dialog-${sport}`} className="activity-type-option">
+                      <input type="checkbox" checked={selectedSet.has(sport)} onChange={() => toggleActivityType(sport)} />
+                      <span>{sport}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Date</div>
           <div className="date-preset-grid">
             {presets.map((preset) => (
               <button
                 key={preset.id}
                 className={`filter-chip ${activePreset?.id === preset.id ? "active" : ""}`}
                 type="button"
-                onClick={() => setDraftDates(preset.range)}
+                onClick={() => updateDates(preset.range)}
               >
                 {preset.label}
               </button>
@@ -2112,7 +2163,7 @@ function ActivityFiltersDialog({
                 type="date"
                 value={draftDates.dateFrom ?? ""}
                 max={draftDates.dateTo || undefined}
-                onChange={(event) => setDraftDates({ ...draftDates, dateFrom: event.target.value })}
+                onChange={(event) => updateDates({ ...draftDates, dateFrom: event.target.value })}
               />
             </label>
             <label className="field">
@@ -2121,7 +2172,7 @@ function ActivityFiltersDialog({
                 type="date"
                 value={draftDates.dateTo ?? ""}
                 min={draftDates.dateFrom || undefined}
-                onChange={(event) => setDraftDates({ ...draftDates, dateTo: event.target.value })}
+                onChange={(event) => updateDates({ ...draftDates, dateTo: event.target.value })}
               />
             </label>
           </div>
@@ -2129,13 +2180,13 @@ function ActivityFiltersDialog({
         </div>
 
         <div className="dialog-actions">
-          <button className="secondary-button" type="button" onClick={() => setDraftDates({ dateFrom: "", dateTo: "" })}>
-            Clear dates
+          <button className="secondary-button" type="button" onClick={clearFilters}>
+            Clear filters
           </button>
           <button className="secondary-button" type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="primary-button" type="button" disabled={dateRangeInvalid} onClick={applyDates}>
+          <button className="primary-button" type="button" disabled={dateRangeInvalid} onClick={applyFilters}>
             Apply
           </button>
         </div>
@@ -2234,86 +2285,6 @@ function ActivitySortDialog({
         </div>
       </section>
     </div>
-  );
-}
-
-function ActivityTypeFilterPanel({
-  activityTypes,
-  filters,
-  onChange
-}: {
-  activityTypes: string[];
-  filters: ActivityTypeFiltersValue;
-  onChange: (filters: ActivityTypeFiltersValue) => void;
-}) {
-  const includeSet = new Set(filters.sports);
-  const excludeSet = new Set(filters.excludeSports);
-  if (activityTypes.length === 0) {
-    return null;
-  }
-
-  const toggleInclude = (sport: string) => {
-    const nextSports = includeSet.has(sport)
-      ? filters.sports.filter((item) => item !== sport)
-      : [...filters.sports, sport];
-    onChange({
-      ...filters,
-      sports: nextSports,
-      excludeSports: filters.excludeSports.filter((item) => item !== sport)
-    });
-  };
-  const toggleExclude = (sport: string) => {
-    const nextExcluded = excludeSet.has(sport)
-      ? filters.excludeSports.filter((item) => item !== sport)
-      : [...filters.excludeSports, sport];
-    onChange({
-      ...filters,
-      sports: filters.sports.filter((item) => item !== sport),
-      excludeSports: nextExcluded
-    });
-  };
-  const clearFilters = () => onChange({ ...filters, sports: [], excludeSports: [] });
-  const hasFilters = filters.sports.length > 0 || filters.excludeSports.length > 0;
-
-  return (
-    <section className="panel filter-panel">
-      <div className="filter-header">
-        <div className="panel-heading">Activity types</div>
-        <button className="secondary-button small-button" type="button" disabled={!hasFilters} onClick={clearFilters}>Clear</button>
-      </div>
-      <div className="filter-grid">
-        <div className="filter-group">
-          <div className="filter-label">Show only</div>
-          <div className="chip-list">
-            {activityTypes.map((sport) => (
-              <button
-                key={`include-${sport}`}
-                className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`}
-                type="button"
-                onClick={() => toggleInclude(sport)}
-              >
-                {sport}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="filter-group">
-          <div className="filter-label">Exclude</div>
-          <div className="chip-list">
-            {activityTypes.map((sport) => (
-              <button
-                key={`exclude-${sport}`}
-                className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`}
-                type="button"
-                onClick={() => toggleExclude(sport)}
-              >
-                {sport}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -5569,6 +5540,10 @@ function formatHealthDate(date: string) {
   return new Date(year, month - 1, day).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function healthSummaryDateLabel(metric?: DailyHealthMetric) {
+  return formatHealthDate(metric?.date ?? localDateString());
+}
+
 function finiteValue(value?: number) {
   return isFiniteNumber(value) ? value : undefined;
 }
@@ -5665,13 +5640,22 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
   const defaultVisible = availableSeries.filter((series) => series.defaultVisible).map((series) => series.key);
   const initialVisible = defaultVisible.length > 0 ? defaultVisible : availableSeries.slice(0, 1).map((series) => series.key);
   const [visibleSeries, setVisibleSeries] = useState<ActivityChartSeriesKey[]>(initialVisible);
-  const activeSeries = availableSeries.filter((series) => visibleSeries.includes(series.key));
+  const availableKeys = availableSeries.map((series) => series.key);
+  const effectiveVisibleSeries = reconcileVisibleActivitySeries(visibleSeries, availableKeys, initialVisible);
+  const activeSeries = availableSeries.filter((series) => effectiveVisibleSeries.includes(series.key));
+  useEffect(() => {
+    setVisibleSeries((current) => {
+      const next = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      return next.length === current.length && next.every((key, index) => key === current[index]) ? current : next;
+    });
+  }, [availableKeys.join(","), initialVisible.join(",")]);
   const toggleSeries = (key: ActivityChartSeriesKey) => {
     setVisibleSeries((current) => {
-      if (current.includes(key)) {
-        return current.length === 1 ? current : current.filter((item) => item !== key);
+      const selected = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      if (selected.includes(key)) {
+        return selected.length === 1 ? selected : selected.filter((item) => item !== key);
       }
-      return [...current, key];
+      return [...selected, key];
     });
   };
 
@@ -6177,8 +6161,38 @@ function hasActivityFilters(filters: ActivityTypeFiltersValue) {
   );
 }
 
-function hasDateFilters(filters: ActivityTypeFiltersValue) {
-  return Boolean(filters.dateFrom || filters.dateTo);
+function activityFilterCount(filters: ActivityTypeFiltersValue) {
+  return [
+    filters.search?.trim(),
+    filters.dateFrom || filters.dateTo,
+    filters.sports.length > 0 || filters.excludeSports.length > 0
+  ].filter(Boolean).length;
+}
+
+function selectedActivityTypes(filters: ActivityTypeFiltersValue, activityTypes: string[]) {
+  if (filters.sports.length > 0) {
+    const selected = new Set(filters.sports);
+    return activityTypes.filter((sport) => selected.has(sport));
+  }
+  if (filters.excludeSports.length > 0) {
+    const excluded = new Set(filters.excludeSports);
+    return activityTypes.filter((sport) => !excluded.has(sport));
+  }
+  return [...activityTypes];
+}
+
+function activityTypeFiltersForSelection(
+  filters: ActivityTypeFiltersValue,
+  activityTypes: string[],
+  selectedTypes: string[]
+) {
+  const selected = new Set(selectedTypes);
+  const allSelected = activityTypes.every((sport) => selected.has(sport));
+  return {
+    ...filters,
+    sports: allSelected ? [] : activityTypes.filter((sport) => selected.has(sport)),
+    excludeSports: allSelected || selectedTypes.length > 0 ? [] : [...activityTypes]
+  };
 }
 
 function activityFiltersFromSearchParams(params: URLSearchParams): ActivityTypeFiltersValue {
@@ -6605,10 +6619,13 @@ function LoadingRow() {
   return <div className="loading"><Database size={18} /> Loading</div>;
 }
 
-function EmptyState({ title, action }: { title: string; action?: ReactNode }) {
+function EmptyState({ title, message, action }: { title: string; message?: string; action?: ReactNode }) {
   return (
     <div className="empty-state">
-      <span>{title}</span>
+      <div className="empty-state-copy">
+        <span>{title}</span>
+        {message && <span className="muted">{message}</span>}
+      </div>
       {action}
     </div>
   );
