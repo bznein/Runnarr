@@ -15,6 +15,20 @@ You still need a PostgreSQL database for the app, but you can run the server and
 2. Set `RUNNARR_STATIC_DIR=web/dist` (default) for the backend config.
 3. Set `RUNNARR_HTTP_ADDR` for the backend (if unset, `scripts/dev.sh` now auto-chooses a random high port and binds it to loopback).
 
+## Make targets
+
+The repository Makefile provides the standard checks in one place:
+
+```bash
+make check       # Go format, vet, backend tests, frontend tests, and build
+make test-race   # Backend race-enabled tests
+make e2e         # Isolated Docker Compose Playwright suite
+```
+
+`make` runs `make check`. The E2E suite is separate because it starts and
+removes an isolated Docker Compose project. Set `GOCACHE` when the default Go
+cache location is not writable; it defaults to `/tmp/runnarr-go-cache`.
+
 ## Start backend + frontend (with Vite hot-reload)
 
 ```bash
