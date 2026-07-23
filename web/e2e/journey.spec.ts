@@ -164,6 +164,13 @@ test.describe("local product journey", () => {
     await page.getByRole("dialog", { name: "Export GPX" }).getByRole("button", { name: "Download" }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/\.gpx$/);
+    await page.goto("/activities");
+    const cyclingActivity = visibleActivityLink(page, "E2E Cycling Activity", mobile);
+    await expect(cyclingActivity).toBeVisible();
+    await cyclingActivity.click();
+
+    await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    await expect(page.getByText("Suggested planned run", { exact: true })).toBeHidden();
   });
 
   test("pins an activity photo to a map location", async ({ page }, testInfo) => {
@@ -207,18 +214,6 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("button", { name: `Open ${filename}` }).click();
     await expect(page.locator(".media-preview-dialog")).toContainText("GPS");
-  });
-
-  test("does not suggest planned runs for non-running activities", async ({ page }, testInfo) => {
-    const mobile = isMobileProject(testInfo.project.name);
-    await login(page, mobile);
-    await page.goto("/activities");
-    const activity = visibleActivityLink(page, "E2E Cycling Activity", mobile);
-    await expect(activity).toBeVisible();
-    await activity.click();
-
-    await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
-    await expect(page.getByText("Suggested planned run", { exact: true })).toBeHidden();
   });
 
   test("covers calendar, health, gear, tools, and settings", async ({ page }, testInfo) => {
