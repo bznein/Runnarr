@@ -8,7 +8,7 @@ import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
-import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
+import { PACE_ROUTE_COLORS, clampPaceToScale, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import type {
   Activity,
@@ -5447,7 +5447,7 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
                   stroke={series.color}
                   dot={false}
                   strokeWidth={2}
-                  connectNulls
+                  connectNulls={series.key !== "paceSPKM"}
                 />
               ))}
             </LineChart>
@@ -5795,15 +5795,6 @@ function paceRouteSegmentsForActivity(
     grouped.push({ color, points: [segment.start, segment.end] });
     return grouped;
   }, []);
-}
-
-function paceForRouteSegment(previousSpeedMPS?: number, currentSpeedMPS?: number) {
-  const speeds = [previousSpeedMPS, currentSpeedMPS].filter((speed): speed is number => typeof speed === "number" && speed > 0);
-  if (speeds.length === 0) {
-    return undefined;
-  }
-  const avgSpeedMPS = speeds.reduce((total, speed) => total + speed, 0) / speeds.length;
-  return speedToPaceSPKM(avgSpeedMPS);
 }
 
 function lapGapPaceForSample(laps: ActivityLap[], sample: ActivitySample): number | undefined {

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -432,6 +433,101 @@ func fitSessionCaloriesKcal(session *fit.SessionMsg) *int {
 	return &value
 }
 
+type fitPauseInterval struct {
+	Start time.Time
+	End   time.Time
+}
+
+func fitPauseIntervals(events []*fit.EventMsg) []fitPauseInterval {
+	if len(events) == 0 {
+		return nil
+	}
+
+	sortedEvents := append([]*fit.EventMsg(nil), events...)
+	sort.SliceStable(sortedEvents, func(left, right int) bool {
+		if sortedEvents[left] == nil {
+			return false
+		}
+		if sortedEvents[right] == nil {
+			return true
+		}
+		return sortedEvents[left].Timestamp.Before(sortedEvents[right].Timestamp)
+	})
+
+	var pausedAt time.Time
+	intervals := make([]fitPauseInterval, 0)
+	for _, event := range sortedEvents {
+		if event == nil || event.Event != fit.EventTimer || event.Timestamp.IsZero() {
+			continue
+		}
+		switch event.EventType {
+		case fit.EventTypeStop, fit.EventTypeStopAll, fit.EventTypeStopDisable:
+			if pausedAt.IsZero() {
+				pausedAt = event.Timestamp
+			}
+		case fit.EventTypeStart:
+			if !pausedAt.IsZero() && !event.Timestamp.Before(pausedAt) {
+				intervals = append(intervals, fitPauseInterval{Start: pausedAt, End: event.Timestamp})
+			}
+			pausedAt = time.Time{}
+		}
+	}
+	if !pausedAt.IsZero() {
+		intervals = append(intervals, fitPauseInterval{Start: pausedAt})
+	}
+	return intervals
+}
+
+func isFitPausedAt(timestamp time.Time, intervals []fitPauseInterval) bool {
+	if timestamp.IsZero() {
+		return false
+	}
+	for _, interval := range intervals {
+		if timestamp.Before(interval.Start) {
+			continue
+		}
+		if interval.End.IsZero() || timestamp.Before(interval.End) {
+			return true
+		}
+	}
+	return false
+}
+
+func fitRecordSpeed(record *fit.RecordMsg, paused bool) *float64 {
+	if record == nil || paused {
+		return nil
+	}
+	if value := record.GetEnhancedSpeedScaled(); !math.IsNaN(value) {
+		return &value
+	}
+	return nil
+}
+
+func fitMovingDuration(start, end time.Time, intervals []fitPauseInterval) int {
+	if start.IsZero() || end.IsZero() || !end.After(start) {
+		return 0
+	}
+
+	moving := end.Sub(start)
+	for _, interval := range intervals {
+		pauseStart := interval.Start
+		if pauseStart.Before(start) {
+			pauseStart = start
+		}
+		pauseEnd := interval.End
+		if pauseEnd.IsZero() || pauseEnd.After(end) {
+			pauseEnd = end
+		}
+		if pauseEnd.After(pauseStart) {
+			moving -= pauseEnd.Sub(pauseStart)
+		}
+	}
+	if moving <= 0 {
+		return 0
+	}
+	return int(moving.Seconds())
+}
+
 func (FITParser) Parse(_ context.Context, filename string, data []byte) (ImportedActivity, error) {
 	decoded, err := fit.Decode(bytes.NewReader(data))
 	if err != nil {
@@ -480,6 +576,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 	if sport == "" {
 		sport = "Run"
 	}
+	pauseIntervals := fitPauseIntervals(activityFile.Events)
 
 	var samples []ActivitySample
 	var firstTime *time.Time
@@ -559,10 +656,7 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 			power = &value
 		}
 
-		var speed *float64
-		if value := record.GetEnhancedSpeedScaled(); !math.IsNaN(value) {
-			speed = &value
-		}
+		speed := fitRecordSpeed(record, isFitPausedAt(ts, pauseIntervals))
 
 		samples = append(samples, ActivitySample{
 			Index:      idx,
@@ -583,7 +677,12 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 		elapsed = int(lastTime.Sub(*firstTime).Seconds())
 	}
 	if moving == 0 {
-		moving = elapsed
+		if firstTime != nil && lastTime != nil {
+			moving = fitMovingDuration(*firstTime, *lastTime, pauseIntervals)
+		}
+		if moving == 0 {
+			moving = elapsed
+		}
 	}
 	start := time.Now().UTC()
 	if firstTime != nil {
@@ -613,7 +712,16 @@ func (FITParser) Parse(_ context.Context, filename string, data []byte) (Importe
 			lapMoving = int(value)
 		}
 		if lapMoving <= 0 {
-			lapMoving = lapElapsed
+			if lapStart != nil && lapElapsed > 0 {
+				lapEnd := sourceLap.Timestamp
+				if lapEnd.IsZero() {
+					lapEnd = lapStart.Add(time.Duration(lapElapsed) * time.Second)
+				}
+				lapMoving = fitMovingDuration(*lapStart, lapEnd, pauseIntervals)
+			}
+			if lapMoving <= 0 {
+				lapMoving = lapElapsed
+			}
 		}
 		lapDistance := 0.0
 		if value := sourceLap.GetTotalDistanceScaled(); !math.IsNaN(value) {
