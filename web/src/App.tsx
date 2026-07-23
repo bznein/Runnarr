@@ -18,6 +18,7 @@ import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./pla
 import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./plannedMatchPreview";
 import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
 import type { ThemePreference } from "./theme";
+import { chartDisplayDomain } from "./activityChartBounds";
 import type {
   Activity,
   ActivityClimb,
@@ -6103,7 +6104,7 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
                   yAxisId={series.key}
                   orientation={index === 0 ? "left" : "right"}
                   width={series.key === "paceSPKM" ? 58 : 46}
-                  domain={["auto", "auto"]}
+                  domain={chartDisplayDomain(data.map((item) => item[series.key])) ?? ["auto", "auto"]}
                   reversed={series.key === "paceSPKM"}
                   tickFormatter={(value) => formatChartTick(Number(value), series)}
                 />
