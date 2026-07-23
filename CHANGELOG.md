@@ -4,6 +4,7 @@
 
 ### Features
 
+- Health now shows Garmin sleep score in the summary cards, trend chart, and daily metrics table when available.
 - Added a responsive mobile web shell with mobile navigation, mobile activity and health cards, calendar agenda rendering, safe-area handling, and an installable PWA shell that keeps authenticated data network-only.
 - Added a bounded activity-series API so chart and map clients use server-limited sample payloads while full samples remain available for server-side exports and analysis.
 - Added a shared web/PWA smoke-test checklist covering Pixel-sized layouts, installability, service-worker updates, and private-data cache boundaries.

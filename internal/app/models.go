@@ -413,6 +413,7 @@ type HealthChartPoint struct {
 	ActiveCalories         *float64 `json:"activeCalories,omitempty"`
 	RemainingCalories      *float64 `json:"remainingCalories,omitempty"`
 	SleepHours             *float64 `json:"sleepHours,omitempty"`
+	SleepScore             *float64 `json:"sleepScore,omitempty"`
 	RestingHeartRate       *float64 `json:"restingHeartRate,omitempty"`
 	Stress                 *float64 `json:"stress,omitempty"`
 	BodyBatteryGained      *float64 `json:"bodyBatteryGained,omitempty"`

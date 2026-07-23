@@ -585,6 +585,7 @@ export type HealthChartPoint = {
   activeCalories?: number;
   remainingCalories?: number;
   sleepHours?: number;
+  sleepScore?: number;
   restingHeartRate?: number;
   stress?: number;
   bodyBatteryGained?: number;

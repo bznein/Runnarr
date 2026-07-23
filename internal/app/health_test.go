@@ -135,6 +135,14 @@ func TestNormalizeGarminHealthDay(t *testing.T) {
 	}
 }
 
+func TestHealthChartPointsIncludeSleepScore(t *testing.T) {
+	score := 84.0
+	points := healthChartPoints([]DailyHealthMetric{{Date: "2026-07-16", SleepScore: &score}})
+	if len(points) != 1 || points[0].SleepScore == nil || *points[0].SleepScore != score {
+		t.Fatalf("sleep score chart point = %#v, want %v", points, score)
+	}
+}
+
 func TestNormalizeGarminHealthDayKeepsKilogramWeight(t *testing.T) {
 	metric := normalizeGarminHealthDay(GarminBridgeHealthDay{
 		Date: "2026-07-16",

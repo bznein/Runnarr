@@ -134,6 +134,7 @@ func healthChartPoints(metrics []DailyHealthMetric) []HealthChartPoint {
 			TotalCalories:      intFloatPtr(metric.TotalCaloriesKcal),
 			ActiveCalories:     intFloatPtr(metric.ActiveCaloriesKcal),
 			SleepHours:         intFloatPtrDivided(metric.SleepDurationS, 3600),
+			SleepScore:         metric.SleepScore,
 			RestingHeartRate:   metric.RestingHeartRateBPM,
 			Stress:             metric.StressAvg,
 			BodyBatteryGained:  metric.BodyBatteryGained,
