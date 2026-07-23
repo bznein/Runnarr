@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "vitest run"
+    "test": "vitest run src",
+    "e2e": "bash ../scripts/e2e.sh"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.83.0",
@@ -20,6 +21,7 @@
     "recharts": "^3.9.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/leaflet": "^1.9.20",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",

@@ -39,6 +39,39 @@ Set `RUNNARR_KEEP_LEGACY_FRONTEND=1` to keep manually managed legacy frontend in
 
 The frontend uses Vite proxy rules for `/api` and `/healthz`, routed from `scripts/dev.sh` via `VITE_API_TARGET`.
 
+## Browser end-to-end tests
+
+The Playwright suite exercises the full local web app in desktop Chromium and
+mobile Chromium emulation. It starts an isolated Docker Compose project with a
+fresh PostgreSQL database, seeds deterministic health and gear records, runs
+the tests, and removes only that test project when finished.
+
+Install the web dependencies and browser once:
+
+```bash
+cd web
+npm ci
+npx playwright install chromium
+```
+
+Then run the suite from the `web` directory:
+
+```bash
+npm run e2e
+```
+
+The runner chooses free host ports automatically. Override
+`RUNNARR_E2E_PORT`, `RUNNARR_E2E_DB_PORT`, `RUNNARR_E2E_USERNAME`, or
+`RUNNARR_E2E_PASSWORD` when needed. Pass normal Playwright arguments after
+the npm command, for example `npm run e2e -- --project=mobile-chromium`.
+Videos are written for every executed test under `web/test-results/`. Set
+`PLAYWRIGHT_SLOW_MO` to add a delay between browser actions when reviewing
+them, for example `PLAYWRIGHT_SLOW_MO=250 npm run e2e`.
+
+The browser tests intentionally use local password authentication and local
+fixtures. Garmin Connect, Google OAuth, MFA, and real provider syncs are not
+part of the deterministic CI suite.
+
 ### What the script does
 
 - Validates required runtime variables
