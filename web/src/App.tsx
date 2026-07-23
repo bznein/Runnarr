@@ -5,7 +5,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import type { QueryClient } from "@tanstack/react-query";
 import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
 import { divIcon } from "leaflet";
-import { MapContainer, Marker, Polyline, TileLayer, useMap } from "react-leaflet";
+import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
@@ -2685,6 +2685,24 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       });
     }
   });
+  const updateMediaLocation = useMutation({
+    mutationFn: ({ mediaId, latitude, longitude }: { mediaId: string; latitude: number; longitude: number }) =>
+      api.updateActivityMediaLocation(id!, mediaId, latitude, longitude),
+    onSuccess: ({ media }) => {
+      queryClient.setQueryData<{ activity: Activity }>(activityQueryKey, (current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          activity: {
+            ...current.activity,
+            media: (current.activity.media ?? []).map((item) => item.id === media.id ? media : item)
+          }
+        };
+      });
+      setPinningMediaId(undefined);
+    }
+  });
   const [highlightedSample, setHighlightedSample] = useState<ActivityChartPoint | undefined>();
   const [selectedClimbIndex, setSelectedClimbIndex] = useState<number | undefined>();
   const [routeColorSource, setRouteColorSource] = useState<RouteColorSource>("pace");
@@ -2698,6 +2716,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const [exportOpen, setExportOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
+  const [pinningMediaId, setPinningMediaId] = useState<string>();
   const [analysisTab, setAnalysisTab] = useState<ActivityAnalysisTab>("stats");
   const [climbSensitivityDraft, setClimbSensitivityDraft] = useState(defaultClimbSensitivity);
   const [climbSensitivityPreview, setClimbSensitivityPreview] = useState(defaultClimbSensitivity);
@@ -2730,9 +2749,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setPlannedMatchWindowDays(7);
     setExportOpen(false);
     setSelectedMediaId(undefined);
+    setPinningMediaId(undefined);
     setAnalysisTab("stats");
     updateActivityNotes.reset();
     uploadMedia.reset();
+    updateMediaLocation.reset();
     setMediaFileInputKey((key) => key + 1);
     setClimbSensitivityDraft(configuredClimbSensitivity);
     setClimbSensitivityPreview(configuredClimbSensitivity);
@@ -2780,6 +2801,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const displayItem = { ...confirmedItem, samples: activitySeries.data?.samples ?? [] };
   const mediaItems = item.media ?? [];
   const locatedMedia = mediaItems.filter(hasMediaLocation);
+  const pinningMedia = mediaItems.find((media) => media.id === pinningMediaId);
   const routePoints = routeForActivity(displayItem);
   const canExportGPX = (activitySeries.data?.totalSamples ?? 0) > 1;
   const paceScale = paceScaleForActivity(displayItem, "pace");
@@ -2852,6 +2874,21 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
     uploadMedia.reset();
     uploadMedia.mutate(files);
+  };
+  const handleStartMediaPinning = (mediaId: string) => {
+    updateMediaLocation.reset();
+    setSelectedMediaId(undefined);
+    setPinningMediaId(mediaId);
+  };
+  const handleCancelMediaPinning = () => {
+    updateMediaLocation.reset();
+    setPinningMediaId(undefined);
+  };
+  const handleMapLocationSelect = (location: RoutePoint) => {
+    if (!pinningMediaId || updateMediaLocation.isPending) {
+      return;
+    }
+    updateMediaLocation.mutate({ mediaId: pinningMediaId, latitude: location[0], longitude: location[1] });
   };
   const handleClimbSensitivityChange = (value: number) => {
     setClimbSensitivityDraft(clampClimbSensitivity(value));
@@ -3032,16 +3069,22 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           uploadError={uploadMedia.error}
           selectedMediaId={selectedMediaId}
           onSelectMedia={setSelectedMediaId}
+          onPinMedia={handleStartMediaPinning}
         />
       ) : (
         Boolean(uploadMedia.error) && <div className="error">{uploadMedia.error instanceof Error ? uploadMedia.error.message : "Upload failed"}</div>
       )}
 
-      {(routePoints.length > 1 || locatedMedia.length > 0) && (
+      {(routePoints.length > 1 || locatedMedia.length > 0 || Boolean(pinningMediaId)) && (
         <section className="panel">
           <div className="route-panel-header">
-            <div className="panel-heading">Route</div>
+            <div>
+              <div className="panel-heading">{pinningMedia ? "Pin photo" : "Route"}</div>
+              {pinningMedia && <p className="muted">Click the map to place this photo.</p>}
+            </div>
+            {pinningMedia && <button className="secondary-button small-button" type="button" onClick={handleCancelMediaPinning}>Cancel pin</button>}
           </div>
+          {updateMediaLocation.error && <div className="error">{updateMediaLocation.error instanceof Error ? updateMediaLocation.error.message : "Could not pin photo"}</div>}
           <ActivityMap
             points={routePoints}
             paceSegments={paceRouteSegments}
@@ -3053,6 +3096,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             mediaMarkers={locatedMedia}
             selectedMediaId={selectedMediaId}
             onSelectMedia={setSelectedMediaId}
+            onMapLocationSelect={pinningMediaId ? handleMapLocationSelect : undefined}
             routeColorSource={routeColorSource}
             onRouteColorSourceChange={setRouteColorSource}
             showRouteColorSelector={routeUsesGap}
@@ -4188,13 +4232,15 @@ function ActivityMediaPanel({
   uploading,
   uploadError,
   selectedMediaId,
-  onSelectMedia
+  onSelectMedia,
+  onPinMedia
 }: {
   activity: Activity;
   uploading: boolean;
   uploadError: unknown;
   selectedMediaId?: string;
   onSelectMedia: (mediaId?: string) => void;
+  onPinMedia: (mediaId: string) => void;
 }) {
   const queryClient = useQueryClient();
   const media = activity.media ?? [];
@@ -4262,6 +4308,7 @@ function ActivityMediaPanel({
           onDelete={() => handleDeleteMedia(previewMedia)}
           onPrevious={previousMedia ? () => onSelectMedia(previousMedia.id) : undefined}
           onNext={nextMedia ? () => onSelectMedia(nextMedia.id) : undefined}
+          onPinMedia={() => onPinMedia(previewMedia.id)}
         />
       )}
     </section>
@@ -4274,7 +4321,8 @@ function ActivityMediaPreview({
   onClose,
   onDelete,
   onPrevious,
-  onNext
+  onNext,
+  onPinMedia
 }: {
   media: ActivityMedia;
   deleting: boolean;
@@ -4282,6 +4330,7 @@ function ActivityMediaPreview({
   onDelete: () => void;
   onPrevious?: () => void;
   onNext?: () => void;
+  onPinMedia: () => void;
 }) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -4343,6 +4392,9 @@ function ActivityMediaPreview({
             <ExternalLink size={16} />
             Open original
           </a>
+          <button className="secondary-button" type="button" onClick={onPinMedia}>
+            {hasMediaLocation(media) ? "Move pin" : "Pin to map"}
+          </button>
           <button className="danger-button" type="button" disabled={deleting} onClick={onDelete}>
             <Trash2 size={16} />
             Delete
@@ -5825,6 +5877,7 @@ function ActivityMap({
   mediaMarkers = [],
   selectedMediaId,
   onSelectMedia,
+  onMapLocationSelect,
   routeColorSource,
   onRouteColorSourceChange,
   showRouteColorSelector
@@ -5839,6 +5892,7 @@ function ActivityMap({
   mediaMarkers?: ActivityMedia[];
   selectedMediaId?: string;
   onSelectMedia?: (mediaId: string) => void;
+  onMapLocationSelect?: (location: RoutePoint) => void;
   routeColorSource?: RouteColorSource;
   onRouteColorSourceChange?: (next: RouteColorSource) => void;
   showRouteColorSelector?: boolean;
@@ -5861,6 +5915,7 @@ function ActivityMap({
         {end && <Marker position={end} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
         {highlightedPoint && <Marker position={highlightedPoint} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
         <ActivityMediaMapMarkers mediaMarkers={mediaMarkers} selectedMediaId={selectedMediaId} onSelectMedia={onSelectMedia} />
+        {onMapLocationSelect && <MapLocationPicker onSelect={onMapLocationSelect} />}
         <FitMapContent points={mapPoints} />
       </MapContainer>
       {showRouteColorSelector && onRouteColorSourceChange && (
@@ -5873,6 +5928,13 @@ function ActivityMap({
       {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}
     </div>
   );
+}
+
+function MapLocationPicker({ onSelect }: { onSelect: (location: RoutePoint) => void }) {
+  useMapEvents({
+    click: (event) => onSelect([event.latlng.lat, event.latlng.lng])
+  });
+  return null;
 }
 
 function ActivityPaceRouteLegend({ source }: { source: RouteColorSource }) {

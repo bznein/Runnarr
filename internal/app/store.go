@@ -1102,6 +1102,18 @@ func (s *Store) DeleteActivityMedia(ctx context.Context, activityID, mediaID str
 	return media, scanActivityMedia(row, &media)
 }
 
+func (s *Store) UpdateActivityMediaLocation(ctx context.Context, activityID, mediaID string, latitude, longitude *float64) (ActivityMedia, error) {
+	var media ActivityMedia
+	row := s.db.QueryRow(ctx, `
+		update activity_media
+		set latitude = $3, longitude = $4
+		where activity_id = $1 and id = $2 and exists (select 1 from activities where activities.id = activity_media.activity_id and activities.user_id = $5)
+		returning id::text, activity_id::text, original_filename, content_type, size_bytes, sha256,
+			original_path, thumbnail_path, width, height, capture_time, latitude, longitude, created_at
+	`, activityID, mediaID, latitude, longitude, scopedUserID(ctx))
+	return media, scanActivityMedia(row, &media)
+}
+
 func (s *Store) RenameActivity(ctx context.Context, id, requestedName string) (Activity, error) {
 	var sourceName string
 	if err := s.db.QueryRow(ctx, `select name from activities where id = $1 and user_id = $2`, id, scopedUserID(ctx)).Scan(&sourceName); err != nil {

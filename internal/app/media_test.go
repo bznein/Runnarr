@@ -46,6 +46,27 @@ func TestReadMediaUploadValidation(t *testing.T) {
 	}
 }
 
+func TestValidateMediaLocation(t *testing.T) {
+	validLatitude, validLongitude := 53.3498, -6.2603
+	if err := validateMediaLocation(&validLatitude, &validLongitude); err != nil {
+		t.Fatalf("valid location error = %v", err)
+	}
+	if err := validateMediaLocation(nil, nil); err != nil {
+		t.Fatalf("cleared location error = %v", err)
+	}
+	invalidLocations := [][2]*float64{
+		{nil, &validLongitude},
+		{&validLatitude, nil},
+		{func() *float64 { value := 91.0; return &value }(), &validLongitude},
+		{&validLatitude, func() *float64 { value := 181.0; return &value }()},
+	}
+	for _, location := range invalidLocations {
+		if err := validateMediaLocation(location[0], location[1]); !errors.Is(err, ErrInvalidMediaLocation) {
+			t.Fatalf("location (%v, %v) error = %v", location[0], location[1], err)
+		}
+	}
+}
+
 func TestThumbnailJPEGScalesToMaximumDimension(t *testing.T) {
 	thumbnail, err := thumbnailJPEG(solidImage(1200, 600, color.RGBA{B: 200, A: 255}), 480)
 	if err != nil {

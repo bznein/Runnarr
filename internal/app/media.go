@@ -35,6 +35,7 @@ var (
 	ErrMediaFileTooLarge    = errors.New("media file must be 25 MiB or smaller")
 	ErrUnsupportedMediaType = errors.New("media must be a JPEG or PNG image")
 	ErrMediaImageTooLarge   = errors.New("image dimensions are too large")
+	ErrInvalidMediaLocation = errors.New("media location must include a valid latitude and longitude")
 	ErrUnsafeMediaPath      = errors.New("invalid media storage path")
 )
 
@@ -50,6 +51,16 @@ type imageMetadata struct {
 	Latitude    *float64
 	Longitude   *float64
 	Orientation int
+}
+
+func validateMediaLocation(latitude, longitude *float64) error {
+	if latitude == nil && longitude == nil {
+		return nil
+	}
+	if latitude == nil || longitude == nil || math.IsNaN(*latitude) || math.IsInf(*latitude, 0) || math.IsNaN(*longitude) || math.IsInf(*longitude, 0) || *latitude < -90 || *latitude > 90 || *longitude < -180 || *longitude > 180 {
+		return ErrInvalidMediaLocation
+	}
+	return nil
 }
 
 func NewMediaService(cfg Config, store *Store) *MediaService {

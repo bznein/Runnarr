@@ -230,6 +230,11 @@ export const api = {
       body
     });
   },
+  updateActivityMediaLocation: (activityId: string, mediaId: string, latitude: number | null, longitude: number | null) =>
+    request<{ media: ActivityMedia }>(`/api/activities/${activityId}/media/${mediaId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ latitude, longitude })
+    }),
   deleteActivityMedia: (activityId: string, mediaId: string) =>
     request<DeleteActivityMediaResult>(`/api/activities/${activityId}/media/${mediaId}`, { method: "DELETE" }),
   imports: () => request<{ imports: ImportFile[] | null }>("/api/imports"),
