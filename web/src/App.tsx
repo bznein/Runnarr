@@ -2904,8 +2904,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
   const loadingCandidateRetry = retryingPlannedMatchCandidates;
   const loadingCandidateRequest = loadingMorePlans || loadingCandidateRetry;
-  const canLoadMorePlans = (plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)) || plannedMatchCandidates.isError;
-  const loadMorePlansLabel = plannedMatchCandidates.isError
+  const canLoadMorePlans = loadingCandidateRetry || (plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)) || plannedMatchCandidates.isError;
+  const loadMorePlansLabel = plannedMatchCandidates.isError || loadingCandidateRetry
     ? (loadingCandidateRetry ? "Retrying plans…" : "Retry loading plans")
     : "Load more plans";
   const candidateLoadingStatus = loadingCandidateRetry ? "Retrying planned runs…" : "Loading more plans…";
