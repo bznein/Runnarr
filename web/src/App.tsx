@@ -2558,6 +2558,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const activityListSearch = searchParams.toString();
   const activityFilters = activityFiltersFromSearchParams(searchParams);
   const [plannedMatchWindowDays, setPlannedMatchWindowDays] = useState(7);
+  const [retryingPlannedMatchCandidates, setRetryingPlannedMatchCandidates] = useState(false);
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
   const activityNavigation = useQuery({
     queryKey: ["activity-navigation", id, activityListSearch],
@@ -2573,7 +2574,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryKey: ["planned-match-candidates", id, plannedMatchWindowDays],
     queryFn: () => api.plannedMatchCandidates(id!, plannedMatchWindowDays),
     enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet",
-    placeholderData: (previousData) => previousData,
     initialData: plannedMatchWindowDays === 30
       ? () => queryClient.getQueryData<PlannedActivityMatchResponse>(["planned-match-candidates", id, 7])
       : undefined,
@@ -2750,6 +2750,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setMatchCandidateId(undefined);
     setCheckInOpen(false);
     setPlannedMatchWindowDays(7);
+    setRetryingPlannedMatchCandidates(false);
     setExportOpen(false);
     setSelectedMediaId(undefined);
     setPinningMediaId(undefined);
@@ -2845,8 +2846,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const writeback = plannedMatchCandidates.data?.writeback;
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
+  const loadingCandidateRetry = retryingPlannedMatchCandidates;
+  const loadingCandidateRequest = loadingMorePlans || loadingCandidateRetry;
   const canLoadMorePlans = (plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)) || plannedMatchCandidates.isError;
-  const loadMorePlansLabel = plannedMatchCandidates.isError ? "Retry loading plans" : "Load more plans";
+  const loadMorePlansLabel = plannedMatchCandidates.isError
+    ? (loadingCandidateRetry ? "Retrying plans…" : "Retry loading plans")
+    : "Load more plans";
+  const candidateLoadingStatus = loadingCandidateRetry ? "Retrying planned runs…" : "Loading more plans…";
   const canRetryWriteback = Boolean(writeback && [
     writeback.summaryStatus,
     writeback.intervalsStatus,
@@ -3041,7 +3047,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           selectedCandidateId={matchCandidateId}
           canLoadMore={canLoadMorePlans}
           loadMoreLabel={loadMorePlansLabel}
-          loadingMore={loadingMorePlans}
+          loadingStatus={candidateLoadingStatus}
+          loadingMore={loadingCandidateRequest}
           matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending}
           error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error}
           preview={matchPreview}
@@ -3051,7 +3058,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onPreviewReset={resetMatchPreview}
           onLoadMore={() => {
             if (plannedMatchCandidates.isError) {
-              void plannedMatchCandidates.refetch();
+              setRetryingPlannedMatchCandidates(true);
+              void plannedMatchCandidates.refetch().finally(() => setRetryingPlannedMatchCandidates(false));
               return;
             }
             setPlannedMatchWindowDays(30);
@@ -3501,6 +3509,7 @@ function PlannedActivityMatchDialog({
   selectedCandidateId,
   canLoadMore,
   loadMoreLabel,
+  loadingStatus,
   loadingMore,
   matching,
   error,
@@ -3516,6 +3525,7 @@ function PlannedActivityMatchDialog({
   selectedCandidateId?: string;
   canLoadMore: boolean;
   loadMoreLabel: string;
+  loadingStatus: string;
   loadingMore: boolean;
   matching: boolean;
   error: unknown;
@@ -3593,7 +3603,7 @@ function PlannedActivityMatchDialog({
           onSelectCandidate={onSelectCandidate}
         />
         {data.candidates.length === 0 && <p className="muted">No planned runs were found for this date.</p>}
-        {loadingMore && <div className="muted" role="status" aria-live="polite">Loading more plans…</div>}
+        {loadingMore && <div className="muted" role="status" aria-live="polite">{loadingStatus}</div>}
         {selectedCandidate && (
           <>
             <label className="field">

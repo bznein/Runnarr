@@ -210,8 +210,21 @@ test.describe("local product journey", () => {
     await expect(initialFailurePlannedMatchDialog.getByText("initial planned candidates unavailable", { exact: true })).toBeVisible();
     await expect(initialFailurePlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true })).toBeVisible();
     await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=7");
+    let releaseInitialRetry = () => {};
+    const initialRetryGate = new Promise<void>((resolve) => {
+      releaseInitialRetry = resolve;
+    });
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=7", async (route) => {
+      await initialRetryGate;
+      await route.continue();
+    });
     await initialFailurePlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true }).click();
+    const retryingPlans = initialFailurePlannedMatchDialog.getByRole("button", { name: "Retrying plans…", exact: true });
+    await expect(retryingPlans).toBeDisabled();
+    await expect(initialFailurePlannedMatchDialog.getByRole("status")).toHaveText("Retrying planned runs…");
+    releaseInitialRetry();
     await expect(initialFailurePlannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=7");
     await initialFailurePlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(initialFailurePlannedMatchDialog).toBeHidden();
 
