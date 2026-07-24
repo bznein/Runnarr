@@ -138,6 +138,23 @@ test.describe("local product journey", () => {
 
     await visibleActivityLink(page, name, mobile).click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
+
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    const plannedMatchDialog = page.getByRole("dialog", { name: "Match planned run" });
+    await expect(plannedMatchDialog).toBeVisible();
+    const agendaDays = plannedMatchDialog.locator(".planned-match-agenda-day");
+    await expect(agendaDays).toHaveCount(3);
+    await expect(agendaDays.nth(0).locator("h3")).toHaveText(/2026/);
+    await expect(agendaDays.nth(1).getByText("E2E Planned Run", { exact: true })).toBeVisible();
+    await expect(agendaDays.nth(1).getByText("E2E Planned Speed Work", { exact: true })).toBeVisible();
+    await expect(agendaDays.nth(1).getByRole("radio")).toHaveCount(2);
+    await expect(agendaDays.nth(2).getByText("E2E Planned Long Run", { exact: true })).toBeVisible();
+    if (mobile) {
+      await expectNoHorizontalOverflow(page);
+    }
+    await plannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(plannedMatchDialog).toBeHidden();
+
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();

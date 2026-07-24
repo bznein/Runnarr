@@ -14,6 +14,7 @@ import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
+import { PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
 import type {
   Activity,
   ActivityClimb,
@@ -3558,27 +3559,13 @@ function PlannedActivityMatchDialog({
           </button>
         </div>
         <p className="muted">Review the sheet changes before matching and writing them back.</p>
-        <div className="planned-match-candidates">
-          {(data.candidates ?? []).map((candidate) => (
-            <label className="planned-match-candidate" key={candidate.id}>
-              <input
-                type="radio"
-                name="planned-activity"
-                checked={candidate.id === selectedCandidateId}
-                disabled={matching}
-                onChange={() => onSelectCandidate(candidate.id)}
-              />
-              <div>
-                <div className="planned-match-candidate-title">
-                  <strong>{candidate.name}</strong>
-                  {candidate.id === data.suggestedId && <span className="planned-match-badge">Suggested</span>}
-                </div>
-                <div className="planned-match-candidate-meta">{formatDate(candidate.plannedDate)}</div>
-                {candidate.notes && <p className="muted">{candidate.notes}</p>}
-              </div>
-            </label>
-          ))}
-        </div>
+        <PlannedActivityMatchAgenda
+          candidates={data.candidates ?? []}
+          suggestedId={data.suggestedId}
+          selectedCandidateId={selectedCandidateId}
+          matching={matching}
+          onSelectCandidate={onSelectCandidate}
+        />
         {data.candidates.length === 0 && <p className="muted">No planned runs were found for this date.</p>}
         {selectedCandidate && (
           <>
