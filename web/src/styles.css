@@ -489,6 +489,24 @@ textarea {
   gap: 10px;
 }
 
+.calendar-day-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.calendar-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.calendar-top-bar .panel-heading {
+  margin-bottom: 4px;
+}
+
 .calendar-month-label {
   font-weight: 700;
 }
@@ -546,6 +564,15 @@ textarea {
   color: var(--color-text-soft);
 }
 
+.calendar-day-link {
+  color: var(--color-primary-text);
+  text-decoration: none;
+}
+
+.calendar-day-link:hover {
+  text-decoration: underline;
+}
+
 .calendar-day-list {
   margin: 0;
   padding: 0;
@@ -588,6 +615,73 @@ textarea {
 .calendar-day-activity-meta {
   color: var(--color-muted);
   font-size: 11px;
+}
+
+.calendar-day-empty-health,
+.calendar-day-activities-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.calendar-day-empty-health .panel-heading,
+.calendar-day-activities-panel .panel-heading {
+  margin-bottom: 0;
+}
+
+.calendar-day-activity-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-day-activity-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 7px;
+  background: var(--color-surface-muted);
+}
+
+.calendar-day-activity-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.calendar-day-activity-row a {
+  color: var(--color-primary-text);
+  font-weight: 680;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.calendar-day-activity-row a:hover {
+  text-decoration: underline;
+}
+
+.calendar-day-activity-row--planned {
+  border-color: var(--color-warning-strong);
+  background: var(--color-warning-soft);
+}
+
+.calendar-day-activity-row--planned a {
+  color: var(--color-text);
+}
+
+.calendar-day-planned-label {
+  flex: 0 0 auto;
+  color: var(--color-warning-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.calendar-day-empty-activities {
+  padding-top: 2px;
 }
 
 .panel {
@@ -3032,6 +3126,20 @@ textarea {
     gap: 8px;
   }
 
+  .calendar-day-controls {
+    width: 100%;
+  }
+
+  .calendar-top-bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .calendar-top-bar .small-button {
+    justify-content: center;
+  }
+
   .calendar-month-label {
     width: 100%;
     text-align: left;
@@ -3324,6 +3432,11 @@ textarea {
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-column: 1 / -1;
     width: 100%;
+  }
+
+  .calendar-day-controls .small-button {
+    width: 100%;
+    justify-content: center;
   }
 
   .calendar-month-label {

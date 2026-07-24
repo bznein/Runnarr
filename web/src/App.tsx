@@ -26,6 +26,7 @@ import type {
   ActivitySortBy,
   ActivityTypeFilters as ActivityTypeFiltersValue,
   AppConfig,
+  CalendarActivitySummary,
   DailyHealthMetric,
   HealthChartPoint,
   Gear,
@@ -388,6 +389,7 @@ function AuthenticatedApp({
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
           <Route path="/calendar" element={<ActivityCalendarPage />} />
+          <Route path="/calendar/day/:date" element={<CalendarDayPage />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/gear" element={<GearPage />} />
@@ -423,17 +425,19 @@ function MobileNavigation({
     ? "Activity"
     : location.pathname.startsWith("/activities")
       ? "Activities"
-      : location.pathname.startsWith("/calendar")
-        ? "Calendar"
-        : location.pathname.startsWith("/health")
-          ? "Health"
-          : location.pathname.startsWith("/tools")
-            ? "Tools"
-            : location.pathname.startsWith("/gear")
-              ? "Gear"
-              : location.pathname.startsWith("/settings")
-                ? "Settings"
-                : "Dashboard";
+      : location.pathname.startsWith("/calendar/day/")
+        ? "Day view"
+        : location.pathname.startsWith("/calendar")
+          ? "Calendar"
+          : location.pathname.startsWith("/health")
+            ? "Health"
+            : location.pathname.startsWith("/tools")
+              ? "Tools"
+              : location.pathname.startsWith("/gear")
+                ? "Gear"
+                : location.pathname.startsWith("/settings")
+                  ? "Settings"
+                  : "Dashboard";
 
   return (
     <>
@@ -1907,6 +1911,7 @@ function ActivitiesPage() {
 function ActivityCalendarPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const month = parseCalendarMonth(searchParams.get("month"));
+  const timezone = browserCalendarTimezone();
   const monthRange = calendarMonthRange(month);
   const filters: ActivityTypeFiltersValue = {
     ...emptyActivityTypeFilters,
@@ -1914,11 +1919,12 @@ function ActivityCalendarPage() {
     dateTo: monthRange.end
   };
   const calendar = useQuery({
-    queryKey: ["activity-calendar", month.year, month.month],
-    queryFn: () => api.activityCalendar(filters)
+    queryKey: ["activity-calendar", month.year, month.month, timezone],
+    queryFn: () => api.activityCalendar(filters, timezone)
   });
   const monthLabel = formatCalendarMonthLabel(month);
   const dayByDate = new Map(calendar.data?.days?.map((day) => [day.date, day]) ?? []);
+  const today = localDateString();
   const updateMonth = (nextMonth: CalendarMonth) => {
     const params = new URLSearchParams(searchParams);
     params.set("month", formatCalendarMonth(nextMonth));
@@ -1968,7 +1974,16 @@ function ActivityCalendarPage() {
       }
     >
       <section className="panel">
-        <div className="panel-heading">Monthly activity calendar</div>
+        <div className="calendar-top-bar">
+          <div>
+            <div className="panel-heading">Monthly activity calendar</div>
+            <span className="muted">Open a day to inspect its health data and activities.</span>
+          </div>
+          <Link className="secondary-button small-button" to={`/calendar/day/${today}`}>
+            <CalendarDays size={16} />
+            View today
+          </Link>
+        </div>
         {calendar.isLoading && <LoadingRow />}
         {calendar.error && <div className="error">{calendar.error instanceof Error ? calendar.error.message : "Could not load calendar"}</div>}
         <div className="calendar-weekday-header">
@@ -1982,12 +1997,19 @@ function ActivityCalendarPage() {
               return <div className="calendar-day-cell empty" key={`empty-${index}`} />;
             }
             const hasActivities = entry.dayData && entry.dayData.activityCount > 0;
+            const hasDayView = Boolean(hasActivities || entry.dayData?.hasHealthData);
             return (
               <div
-                className={`calendar-day-cell ${hasActivities ? "calendar-day-cell--active" : ""}`}
+                className={`calendar-day-cell ${hasDayView ? "calendar-day-cell--active" : ""}`}
                 key={entry.date}
               >
-                <div className="calendar-day-number">{entry.day}</div>
+                {hasDayView ? (
+                  <Link className="calendar-day-number calendar-day-link" to={`/calendar/day/${entry.date}`} aria-label={`View ${formatCalendarAgendaDate(entry.date)}`}>
+                    {entry.day}
+                  </Link>
+                ) : (
+                  <div className="calendar-day-number">{entry.day}</div>
+                )}
                 {hasActivities && (
                   <ul className="calendar-day-list">
                     {entry.dayData?.activities.map((activity) => (
@@ -2011,13 +2033,19 @@ function ActivityCalendarPage() {
           {monthCells.filter((entry): entry is NonNullable<typeof entry> => entry !== null).map((entry) => (
             <div className="calendar-agenda-day" key={`agenda-${entry.date}`}>
               <div className="calendar-agenda-day-header">
-                <strong>{formatCalendarAgendaDate(entry.date)}</strong>
+                {(entry.dayData?.activityCount || entry.dayData?.hasHealthData) ? (
+                  <Link className="calendar-day-link" to={`/calendar/day/${entry.date}`}>
+                    <strong>{formatCalendarAgendaDate(entry.date)}</strong>
+                  </Link>
+                ) : (
+                  <strong>{formatCalendarAgendaDate(entry.date)}</strong>
+                )}
                 <span>{entry.dayData?.activityCount ? `${entry.dayData.activityCount} activit${entry.dayData.activityCount === 1 ? "y" : "ies"}` : "No activities"}</span>
               </div>
               {entry.dayData && entry.dayData.activityCount > 0 ? (
                 <ul className="calendar-day-list">
                   {entry.dayData.activities.map((activity) => (
-                    <li key={activity.id} className="calendar-day-activity">
+                    <li key={activity.id} className={`calendar-day-activity${activity.source === "training_sheet" ? " calendar-day-activity--planned" : ""}`}>
                       <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
                       <span className="calendar-day-activity-meta">
                         {activity.sportType}
@@ -2034,6 +2062,100 @@ function ActivityCalendarPage() {
         </div>
       </section>
     </Page>
+  );
+}
+
+function CalendarDayPage() {
+  const { date: routeDate } = useParams();
+  const date = isCalendarDate(routeDate) ? routeDate : "";
+  const timezone = browserCalendarTimezone();
+  const day = useQuery({
+    queryKey: ["calendar-day", date, timezone],
+    queryFn: () => api.calendarDay(date, timezone),
+    enabled: Boolean(date)
+  });
+  const health = day.data?.health;
+  const activities = day.data?.activities ?? [];
+  const future = date > localDateString();
+
+  return (
+    <Page
+      title="Day view"
+      eyebrow={date ? formatCalendarDayLongDate(date) : undefined}
+      actions={
+        <div className="calendar-day-controls">
+          <Link className="secondary-button small-button" to={date ? `/calendar?month=${date.slice(0, 7)}` : "/calendar"}>
+            <ChevronLeft size={16} />
+            Back to calendar
+          </Link>
+        </div>
+      }
+    >
+      {!date && <div className="error">That day is not valid.</div>}
+      {day.isLoading && <LoadingRow />}
+      {day.error && <div className="error">{day.error instanceof Error ? day.error.message : "Could not load day view"}</div>}
+
+      {date && !day.isLoading && !day.error && (
+        <>
+          {health ? (
+            <>
+              <section className="health-summary" aria-label="Daily health">
+                <div className="health-summary-header">
+                  <div className="panel-heading">Health</div>
+                  <span className="muted">Daily Garmin metrics</span>
+                </div>
+                <div className="metric-grid">
+                  {healthMetricCards(health).map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+                </div>
+              </section>
+              <HealthDayDetail metric={health} />
+            </>
+          ) : (
+            <section className="panel calendar-day-empty-health">
+              <div className="panel-heading">Health</div>
+              <span className="muted">{future ? "Health data is not available for future days." : "No health data recorded for this day."}</span>
+            </section>
+          )}
+
+          <section className="panel calendar-day-activities-panel">
+            <div className="filter-header">
+              <div className="panel-heading">Activities</div>
+              <span className="muted">{activities.length.toLocaleString()}</span>
+            </div>
+            {activities.length > 0 ? (
+              <CalendarDayActivityList activities={activities} />
+            ) : (
+              <div className="calendar-day-empty-activities muted">
+                {future ? "No planned activities for this day." : "No activities recorded for this day."}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </Page>
+  );
+}
+
+function CalendarDayActivityList({ activities }: { activities: CalendarActivitySummary[] }) {
+  return (
+    <ul className="calendar-day-activity-list">
+      {activities.map((activity) => {
+        const metadata = [
+          activity.sportType,
+          activity.distanceM > 0 ? formatDistance(activity.distanceM) : "",
+          activity.movingTimeS > 0 ? formatDuration(activity.movingTimeS) : ""
+        ].filter(Boolean).join(" · ");
+        return (
+          <li key={activity.id} className={`calendar-day-activity-row${activity.source === "training_sheet" ? " calendar-day-activity-row--planned" : ""}`}>
+            <div>
+              <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
+              {metadata && <span className="calendar-day-activity-meta">{metadata}</span>}
+            </div>
+            {activity.source === "training_sheet" && <span className="calendar-day-planned-label">Planned</span>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -5546,6 +5668,23 @@ function formatCalendarAgendaDate(value: string) {
   return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+function formatCalendarDayLongDate(value: string) {
+  const date = new Date(`${value}T12:00:00`);
+  return date.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+}
+
+function browserCalendarTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function isCalendarDate(value: string | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const parsed = localDateFromString(value);
+  return Boolean(parsed && formatCalendarDate(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate()) === value);
+}
+
 function calendarMonthRange(month: CalendarMonth) {
   return {
     start: formatCalendarDate(month.year, month.month, 1),
@@ -5648,6 +5787,10 @@ function healthDetailItems(metric: DailyHealthMetric) {
     { label: "Sleep score", value: formatHealthRounded(metric.sleepScore) },
     { label: "Average stress", value: formatHealthRounded(metric.stressAvg) },
     { label: "Maximum stress", value: formatHealthRounded(metric.stressMax) },
+    { label: "Average body battery", value: formatHealthRounded(metric.bodyBatteryAvg) },
+    { label: "Minimum body battery", value: formatHealthRounded(metric.bodyBatteryMin) },
+    { label: "Body battery start", value: formatHealthRounded(metric.bodyBatteryStart) },
+    { label: "Body battery end", value: formatHealthRounded(metric.bodyBatteryEnd) },
     { label: "Body battery gained", value: formatHealthRounded(metric.bodyBatteryGained) },
     { label: "Body battery drained", value: formatHealthRounded(metric.bodyBatteryDrained) },
     { label: "Body battery highest", value: formatHealthRounded(metric.bodyBatteryMax) },

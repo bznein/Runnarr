@@ -480,6 +480,7 @@ export type CalendarActivitySummary = {
 export type CalendarDay = {
   date: string;
   activityCount: number;
+  hasHealthData: boolean;
   activities: CalendarActivitySummary[];
 };
 
@@ -487,6 +488,12 @@ export type ActivityCalendar = {
   monthStart: string;
   monthEnd: string;
   days: CalendarDay[];
+};
+
+export type CalendarDayView = {
+  date: string;
+  health?: DailyHealthMetric;
+  activities: CalendarActivitySummary[];
 };
 
 export type SummaryStats = {
