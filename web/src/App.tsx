@@ -15,7 +15,7 @@ import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
 import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
-import { plannedMatchPreviewForActivity } from "./plannedMatchPreview";
+import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./plannedMatchPreview";
 import type {
   Activity,
   ActivityClimb,
@@ -2554,6 +2554,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
   const activityIdRef = useRef(id);
   activityIdRef.current = id;
+  const activityViewRef = useRef({ id, generation: 0 });
+  if (activityViewRef.current.id !== id) {
+    activityViewRef.current = { id, generation: activityViewRef.current.generation + 1 };
+  }
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
@@ -2589,8 +2593,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
   });
   const previewPlannedActivity = useMutation({
-    mutationFn: (draft: PlannedMatchDraft) => api.plannedMatchPreview(id!, draft),
-    onSuccess: ({ preview }) => {
+    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; draft: PlannedMatchDraft }) =>
+      api.plannedMatchPreview(activityId, draft),
+    onSuccess: ({ preview }, { activityId, activityViewGeneration }) => {
+      if (!plannedMatchRequestIsCurrent(activityId, activityViewGeneration, activityIdRef.current, activityViewRef.current.generation)) {
+        return;
+      }
       const currentPreview = plannedMatchPreviewForActivity(preview, activityIdRef.current);
       if (currentPreview) {
         setMatchPreview(currentPreview);
@@ -2598,19 +2606,25 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
   });
   const applyPlannedActivity = useMutation({
-    mutationFn: (draft: PlannedMatchDraft & { fingerprint: string }) => api.applyPlannedMatchPreview(id!, draft),
-    onSuccess: async () => {
+    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; draft: PlannedMatchDraft & { fingerprint: string } }) =>
+      api.applyPlannedMatchPreview(activityId, draft),
+    onSuccess: async (_result, { activityId, activityViewGeneration }) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] }),
+        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", activityId] }),
         queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
         queryClient.invalidateQueries({ queryKey: ["activity-calendar"] }),
-        queryClient.invalidateQueries({ queryKey: ["activity", id] })
+        queryClient.invalidateQueries({ queryKey: ["activity", activityId] })
       ]);
+      if (!plannedMatchRequestIsCurrent(activityId, activityViewGeneration, activityIdRef.current, activityViewRef.current.generation)) {
+        return;
+      }
       setMatchPreview(undefined);
       setMatchOpen(false);
     },
-    onError: () => {
-      setMatchPreview(undefined);
+    onError: (_error, { activityId, activityViewGeneration }) => {
+      if (plannedMatchRequestIsCurrent(activityId, activityViewGeneration, activityIdRef.current, activityViewRef.current.generation)) {
+        setMatchPreview(undefined);
+      }
     }
   });
   const unmatchPlannedActivity = useMutation({
@@ -2901,7 +2915,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   };
   const handlePreviewMatch = (draft: PlannedMatchDraft) => {
     applyPlannedActivity.reset();
-    previewPlannedActivity.mutate(draft);
+    previewPlannedActivity.mutate({ activityId: id!, activityViewGeneration: activityViewRef.current.generation, draft });
   };
   const resetMatchPreview = () => {
     setMatchPreview(undefined);
@@ -2912,7 +2926,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     if (!matchPreview) {
       return;
     }
-    applyPlannedActivity.mutate({ ...draft, fingerprint: matchPreview.fingerprint });
+    applyPlannedActivity.mutate({
+      activityId: id!,
+      activityViewGeneration: activityViewRef.current.generation,
+      draft: { ...draft, fingerprint: matchPreview.fingerprint }
+    });
   };
   const handleMediaFilesSelected = (files: File[]) => {
     if (files.length === 0 || uploadMedia.isPending) {
