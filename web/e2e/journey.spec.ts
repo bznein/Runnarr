@@ -96,7 +96,15 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
 
   if (await visibleActivityLink(page, name, mobile).count() === 0) {
     const original = await readFile(gpxPath, "utf8");
+    // Keep the sequential browser projects at distinct times so navigation
+    // never falls back to UUID ordering for the imported activities.
+    const fixtureDate = new Date().toISOString().slice(0, 10);
+    const fixtureMinuteOffset = mobile ? 30 : 0;
     const fixture = original
+      .replace(/2026-07-01T06:(\d{2}):00Z/g, (_, minute) => {
+        const shiftedMinute = Number(minute) + fixtureMinuteOffset;
+        return `${fixtureDate}T06:${String(shiftedMinute).padStart(2, "0")}:00Z`;
+      })
       .replace("<name>Example Morning Run</name>", `<name>${name}</name>`)
       .replace("</gpx>", `<!-- ${projectSlug(projectName)} -->\n</gpx>`);
 

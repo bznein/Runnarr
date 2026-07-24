@@ -68,6 +68,7 @@
 
 ### Fixes
 
+- Fixed same-year training-sheet replacements leaving stale pending suggestions and duplicate imported planned activities, including after unmatching a plan from a replaced workbook.
 - Climb detection thresholds and difficulty now account for cycling activities separately from running-style activities.
 - Activity detail planned-run matching now uses a compact Match/Unmatch action, and assigned gear appears as a small chip beside the activity title.
 - Health range changes no longer load the preserved raw Garmin payload for every day, making first-time 30D and 90D views responsive.

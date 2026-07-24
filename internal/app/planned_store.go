@@ -12,13 +12,22 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const googleSheetsTokenID = "default"
+const (
+	googleSheetsTokenID             = "default"
+	plannedActivityStatusPending    = "pending"
+	plannedActivityStatusCompleted  = "completed"
+	plannedActivityStatusSuperseded = "superseded"
+)
 
 var (
 	errPlannedMatchInvalid      = errors.New("activity cannot be matched to a planned activity")
 	errPlannedMatchConflict     = errors.New("planned activity is already matched")
 	errPlannedMatchDateMismatch = errors.New("planned activity date does not match activity date")
 )
+
+type pgxQueryRower interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
 
 func (s *Store) GetTrainingSheetConfig(ctx context.Context) (TrainingSheetConfig, error) {
 	config := TrainingSheetConfig{CheckEveryHours: 24, PlanYear: time.Now().UTC().Year()}
@@ -116,6 +125,7 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 			name = excluded.name,
 			sport_type = excluded.sport_type,
 			notes = excluded.notes,
+			status = case when planned_activities.status = 'superseded' then excluded.status else planned_activities.status end,
 			source_url = excluded.source_url,
 			raw = excluded.raw,
 			last_seen_at = now(),
@@ -157,13 +167,32 @@ func (s *Store) PlannedActivityExists(ctx context.Context, source, sourceID stri
 	return exists, err
 }
 
+func (s *Store) SupersedeStaleTrainingSheetPlans(ctx context.Context, workbookID string, planYear int) (int64, error) {
+	workbookID = strings.TrimSpace(workbookID)
+	if workbookID == "" {
+		return 0, fmt.Errorf("training sheet workbook ID is required")
+	}
+	start, end := trainingSheetPlanYearBounds(planYear)
+	result, err := s.db.Exec(ctx, `
+		update planned_activities
+		set status = 'superseded', updated_at = now()
+		where user_id = $1 and source = $2 and workbook_id <> $3
+			and planned_date >= $4::date and planned_date < $5::date
+			and status = 'pending'
+	`, scopedUserID(ctx), trainingSheetProvider, workbookID, start, end)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) ([]PlannedActivity, error) {
 	rows, err := s.db.Query(ctx, `
 		select `+plannedActivityColumns+`
 		from planned_activities
 		where user_id = $1 and planned_date >= $2::date and planned_date < $3::date
 			and planned_date >= current_date
-			and status <> 'completed'
+			and status = 'pending'
 		order by planned_date, plan_cell
 	`, scopedUserID(ctx), from, to)
 	if err != nil {
@@ -352,7 +381,7 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 		}
 		return PlannedActivity{}, errPlannedMatchConflict
 	}
-	if planned.Status != "pending" {
+	if planned.Status != plannedActivityStatusPending {
 		return PlannedActivity{}, errPlannedMatchConflict
 	}
 	if err = updateReflection(); err != nil {
@@ -366,7 +395,7 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 	`, plannedActivityID, activityID, matchedAt, scopedUserID(ctx)); err != nil {
 		return PlannedActivity{}, err
 	}
-	planned.Status = "completed"
+	planned.Status = plannedActivityStatusCompleted
 	planned.MatchedActivityID = activityID
 	planned.MatchedAt = &matchedAt
 	if _, err = tx.Exec(ctx, `
@@ -387,16 +416,49 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 }
 
 func (s *Store) UnmatchPlannedActivity(ctx context.Context, activityID string) error {
-	_, err := s.db.Exec(ctx, `
-		update planned_activities
-		set status = 'pending', matched_activity_id = null, matched_at = null, updated_at = now()
-		where matched_activity_id = $1 and user_id = $2
-	`, activityID, scopedUserID(ctx))
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `delete from training_sheet_writebacks where activity_id = $1 and exists (select 1 from activities where activities.id = $1 and activities.user_id = $2)`, activityID, scopedUserID(ctx))
-	return err
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var source, workbookID string
+	err = tx.QueryRow(ctx, `
+		select source, workbook_id
+		from planned_activities
+		where matched_activity_id = $1 and user_id = $2
+		for update
+	`, activityID, scopedUserID(ctx)).Scan(&source, &workbookID)
+	if err == nil {
+		currentWorkbookID, workbookErr := configuredTrainingSheetWorkbookID(ctx, tx)
+		if workbookErr != nil {
+			return workbookErr
+		}
+		status := plannedActivityStatusAfterUnmatch(source, workbookID, currentWorkbookID)
+		_, err = tx.Exec(ctx, `
+			update planned_activities
+			set status = $3, matched_activity_id = null, matched_at = null, updated_at = now()
+			where matched_activity_id = $1 and user_id = $2
+		`, activityID, scopedUserID(ctx), status)
+		if err != nil {
+			return err
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `delete from training_sheet_writebacks where activity_id = $1 and exists (select 1 from activities where activities.id = $1 and activities.user_id = $2)`, activityID, scopedUserID(ctx)); err != nil {
+		return err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 const plannedActivityColumns = `
@@ -437,6 +499,38 @@ func (s *Store) GetTrainingSheetPlanYear(ctx context.Context) (int, error) {
 		return time.Now().UTC().Year(), nil
 	}
 	return year, err
+}
+
+func configuredTrainingSheetWorkbookID(ctx context.Context, queryer pgxQueryRower) (string, error) {
+	var sheetURL string
+	err := queryer.QueryRow(ctx, `
+		select coalesce(training_sheet_sheet_url, '')
+		from user_settings
+		where user_id = $1
+	`, scopedUserID(ctx)).Scan(&sheetURL)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	sheetID, _, err := parseTrainingSheetID(sheetURL)
+	if err != nil {
+		return "", nil
+	}
+	return sheetID, nil
+}
+
+func plannedActivityStatusAfterUnmatch(source, workbookID, currentWorkbookID string) string {
+	if source == trainingSheetProvider && strings.TrimSpace(currentWorkbookID) != "" && strings.TrimSpace(workbookID) != strings.TrimSpace(currentWorkbookID) {
+		return plannedActivityStatusSuperseded
+	}
+	return plannedActivityStatusPending
+}
+
+func trainingSheetPlanYearBounds(planYear int) (time.Time, time.Time) {
+	start := time.Date(planYear, time.January, 1, 0, 0, 0, 0, time.UTC)
+	return start, start.AddDate(1, 0, 0)
 }
 
 func (s *Store) SetTrainingSheetPlanYear(ctx context.Context, year int) error {

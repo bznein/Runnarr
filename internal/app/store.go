@@ -1050,11 +1050,27 @@ func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityRe
 		result.ExcludedFromSync = true
 		result.SyncExclusionMessage = "This synced activity will be ignored in future imports."
 	}
-	if _, err = tx.Exec(ctx, `
-		update planned_activities
-		set status = 'pending', matched_activity_id = null, matched_at = null, updated_at = now()
+	var plannedSource, plannedWorkbookID string
+	err = tx.QueryRow(ctx, `
+		select source, workbook_id
+		from planned_activities
 		where matched_activity_id = $1 and user_id = $2
-	`, id, scopedUserID(ctx)); err != nil {
+		for update
+	`, id, scopedUserID(ctx)).Scan(&plannedSource, &plannedWorkbookID)
+	if err == nil {
+		currentWorkbookID, workbookErr := configuredTrainingSheetWorkbookID(ctx, tx)
+		if workbookErr != nil {
+			return DeleteActivityResult{}, workbookErr
+		}
+		status := plannedActivityStatusAfterUnmatch(plannedSource, plannedWorkbookID, currentWorkbookID)
+		if _, err = tx.Exec(ctx, `
+			update planned_activities
+			set status = $3, matched_activity_id = null, matched_at = null, updated_at = now()
+			where matched_activity_id = $1 and user_id = $2
+		`, id, scopedUserID(ctx), status); err != nil {
+			return DeleteActivityResult{}, err
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return DeleteActivityResult{}, err
 	}
 
@@ -2015,13 +2031,7 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 	if !filters.IncludeTrainingSheet {
 		conditions = append(conditions, "source <> 'training_sheet'")
 	} else {
-		conditions = append(conditions, `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
-			select 1 from planned_activities
-			where planned_activities.source = 'training_sheet'
-				and planned_activities.source_id = activities.source_id
-				and planned_activities.user_id = activities.user_id
-				and planned_activities.status = 'completed'
-		)))`)
+		conditions = append(conditions, trainingSheetActivityFilterCondition())
 	}
 	if strings.TrimSpace(filters.Search) != "" {
 		conditions = append(conditions, fmt.Sprintf("coalesce(nullif(local_name, ''), name) ilike $%d", nextArg))
@@ -2048,6 +2058,16 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 		args = append(args, filters.ExcludedSportTypes)
 	}
 	return conditions, args
+}
+
+func trainingSheetActivityFilterCondition() string {
+	return `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
+		select 1 from planned_activities
+		where planned_activities.source = 'training_sheet'
+			and planned_activities.source_id = activities.source_id
+			and planned_activities.user_id = activities.user_id
+			and planned_activities.status in ('` + plannedActivityStatusCompleted + `', '` + plannedActivityStatusSuperseded + `')
+	)))`
 }
 
 func activityOrderBy(sortBy, sortOrder string) string {
