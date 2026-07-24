@@ -36,7 +36,7 @@ on conflict (user_id, provider, metric_date) do update set
     weight_kg = excluded.weight_kg,
     body_fat_pct = excluded.body_fat_pct;
 
--- Keep the seeded activities around the imported 06:00 GPX activity so the
+-- Keep the seeded activities outside the imported E2E GPX times so the
 -- navigation journey has a deterministic Cycling -> imported -> Pool order.
 insert into activities(
     user_id, source, source_id, name, sport_type, start_time,
