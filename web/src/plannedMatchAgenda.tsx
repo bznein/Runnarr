@@ -61,6 +61,7 @@ export function PlannedActivityMatchAgenda({
                     name="planned-activity"
                     checked={candidate.id === selectedCandidateId}
                     disabled={matching}
+                    aria-describedby={headingId}
                     onChange={() => onSelectCandidate(candidate.id)}
                   />
                   <div>

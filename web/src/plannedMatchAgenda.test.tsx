@@ -59,6 +59,7 @@ describe("planned activity match agenda", () => {
 
     expect((markup.match(/class="planned-match-agenda-day"/g) ?? [])).toHaveLength(2);
     expect((markup.match(/type="radio"/g) ?? [])).toHaveLength(3);
+    expect((markup.match(/aria-describedby="planned-match-date-2026-07-01"/g) ?? [])).toHaveLength(2);
     expect(markup).toContain("Suggested");
     expect(markup).toContain("Intervals note");
     expect(markup.indexOf("Morning run")).toBeLessThan(markup.indexOf("Long run"));
