@@ -189,6 +189,12 @@ test.describe("local product journey", () => {
     await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=30");
     await failedPlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(failedPlannedMatchDialog).toBeHidden();
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    await expect(failedPlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true })).toBeVisible();
+    await failedPlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true }).click();
+    await expect(failedPlannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
+    await failedPlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(failedPlannedMatchDialog).toBeHidden();
 
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();

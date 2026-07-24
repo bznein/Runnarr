@@ -2845,6 +2845,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const writeback = plannedMatchCandidates.data?.writeback;
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
+  const canLoadMorePlans = (plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)) || plannedMatchCandidates.isError;
+  const loadMorePlansLabel = plannedMatchCandidates.isError ? "Retry loading plans" : "Load more plans";
   const canRetryWriteback = Boolean(writeback && [
     writeback.summaryStatus,
     writeback.intervalsStatus,
@@ -3037,7 +3039,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <PlannedActivityMatchDialog
           data={plannedMatchCandidates.data}
           selectedCandidateId={matchCandidateId}
-          canLoadMore={plannedMatchWindowDays === 7 && plannedMatchCandidates.data.hasMore}
+          canLoadMore={canLoadMorePlans}
+          loadMoreLabel={loadMorePlansLabel}
           loadingMore={loadingMorePlans}
           matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending}
           error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error}
@@ -3046,7 +3049,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onPreview={handlePreviewMatch}
           onApply={handleApplyMatch}
           onPreviewReset={resetMatchPreview}
-          onLoadMore={() => setPlannedMatchWindowDays(30)}
+          onLoadMore={() => {
+            if (plannedMatchCandidates.isError) {
+              void plannedMatchCandidates.refetch();
+              return;
+            }
+            setPlannedMatchWindowDays(30);
+          }}
           onClose={() => setMatchOpen(false)}
         />
       )}
@@ -3491,6 +3500,7 @@ function PlannedActivityMatchDialog({
   data,
   selectedCandidateId,
   canLoadMore,
+  loadMoreLabel,
   loadingMore,
   matching,
   error,
@@ -3505,6 +3515,7 @@ function PlannedActivityMatchDialog({
   data: PlannedActivityMatchResponse;
   selectedCandidateId?: string;
   canLoadMore: boolean;
+  loadMoreLabel: string;
   loadingMore: boolean;
   matching: boolean;
   error: unknown;
@@ -3622,7 +3633,7 @@ function PlannedActivityMatchDialog({
         {error instanceof Error && <div className="error">{error.message}</div>}
         <div className="dialog-actions">
           {canLoadMore && (
-            <button className="secondary-button" type="button" disabled={matching} onClick={onLoadMore}>Load more plans</button>
+            <button className="secondary-button" type="button" disabled={matching || loadingMore} onClick={onLoadMore}>{loadMoreLabel}</button>
           )}
           {preview && (
             <button className="secondary-button" type="button" disabled={matching || loadingMore} onClick={resetPreview}>Edit</button>
