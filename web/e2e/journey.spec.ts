@@ -223,7 +223,7 @@ test.describe("local product journey", () => {
     await expect(retryingPlans).toBeDisabled();
     await expect(initialFailurePlannedMatchDialog.getByRole("status")).toHaveText("Retrying planned runs…");
     releaseInitialRetry();
-    await expect(initialFailurePlannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
+    await expect(initialFailurePlannedMatchDialog.getByText("E2E Planned Long Run", { exact: true })).toBeVisible();
     await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=7");
     await initialFailurePlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(initialFailurePlannedMatchDialog).toBeHidden();
