@@ -42,4 +42,27 @@ describe("shared backend API contract", () => {
     expect(requestURL).toContain("/api/activities/activity%2Fwith%20spaces/series");
     expect(requestURL).toContain("maxPoints=900");
   });
+
+  it("requests activity neighbors with the current list filters and sort", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      previousId: "newer-activity",
+      nextId: "older-activity"
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.activityNavigation("activity/with spaces", {
+      sports: ["Running"],
+      excludeSports: [],
+      search: "morning run",
+      sortBy: "distance",
+      sortOrder: "asc"
+    });
+
+    const requestURL = String(fetchMock.mock.calls[0][0]);
+    expect(requestURL).toContain("/api/activities/activity%2Fwith%20spaces/navigation?");
+    expect(requestURL).toContain("sport=Running");
+    expect(requestURL).toContain("search=morning+run");
+    expect(requestURL).toContain("sortBy=distance");
+    expect(requestURL).toContain("sortOrder=asc");
+  });
 });

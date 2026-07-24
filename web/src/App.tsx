@@ -11,12 +11,16 @@ import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
+import { reconcileVisibleActivitySeries } from "./activityChartSeries";
+import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
+import type { ClimbPerformance } from "./climbPerformance";
 import type {
   Activity,
   ActivityClimb,
   ActivityInterval,
   ActivityLap,
   ActivityMedia,
+  ActivityNavigation as ActivityNavigationData,
   ActivitySample,
   ActivityWorkoutStep,
   ActivitySortBy,
@@ -74,6 +78,8 @@ type ClimbProfilePoint = {
   label: string;
   distanceKm: number;
   elevationM: number;
+  paceSPKM?: number;
+  gapSPKM?: number;
 };
 type ClimbMapSegment = {
   climb: ActivityClimb;
@@ -601,10 +607,8 @@ function LoginPage() {
 }
 
 function Dashboard() {
-  const [filters, setFilters] = useState<ActivityTypeFiltersValue>(emptyActivityTypeFilters);
   const [period, setPeriod] = useState<"weekly" | "monthly" | "yearly">("weekly");
-  const activityTypes = useQuery({ queryKey: ["activity-types"], queryFn: api.activityTypes });
-  const summary = useQuery({ queryKey: ["summary", filters, period], queryFn: () => api.summary(filters, period) });
+  const summary = useQuery({ queryKey: ["summary", period], queryFn: () => api.summary(undefined, period) });
 
   if (summary.isLoading) {
     return <Page title="Dashboard"><LoadingRow /></Page>;
@@ -623,11 +627,6 @@ function Dashboard() {
 
   return (
     <Page title="Dashboard">
-      <ActivityTypeFilterPanel
-        activityTypes={activityTypes.data?.activityTypes ?? []}
-        filters={filters}
-        onChange={setFilters}
-      />
       <div className="segmented-control" aria-label="Dashboard time scale">
         {(["weekly", "monthly", "yearly"] as const).map((value) => (
           <button key={value} type="button" className={period === value ? "active" : ""} onClick={() => setPeriod(value)}>
@@ -677,20 +676,28 @@ function HealthPage() {
   const [draftRange, setDraftRange] = useState(() => healthRangeForLastDays(garminHealthDefaultDays));
   const [selectedDate, setSelectedDate] = useState("");
   const dayDetailRef = useRef<HTMLDivElement | null>(null);
+  const today = localDateString();
   const health = useQuery({
     queryKey: ["health-daily", range],
     queryFn: () => api.healthDaily(range),
     refetchInterval: false
   });
+  const todayHealth = useQuery({
+    queryKey: ["health-daily", "today", today],
+    queryFn: () => api.healthDaily({ from: today, to: today }),
+    staleTime: Infinity,
+    refetchInterval: false
+  });
+  const healthError = health.error ?? todayHealth.error;
   const metrics = health.data?.metrics ?? [];
-  const latestMetric = latestHealthMetric(metrics);
+  const todayMetric = latestHealthMetric(todayHealth.data?.metrics ?? []);
   const selectedMetric = metrics.find((metric) => metric.date === selectedDate);
   const chartData = (health.data?.chart ?? healthChartData(metrics)).map((point) => ({
     ...point,
     label: point.label ?? healthChartLabel(point.date)
   }));
   const showLongRangeHealthLines = healthRangeDayCount(range) > healthBarChartMaxDays;
-  const cardItems = healthMetricCards(latestMetric);
+  const cardItems = healthMetricCards(todayMetric);
   const activePreset = healthRangePresets().find((preset) => healthRangesMatch(draftRange, healthRangeForLastDays(preset.days)));
   const draftRangeChanged = !healthRangesMatch(draftRange, range);
   const draftRangeValid = healthRangeDayCount(draftRange) > 0;
@@ -706,63 +713,74 @@ function HealthPage() {
     dayDetailRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [selectedMetric?.date]);
 
+  const healthRangeControls = (
+    <section className="panel health-controls-panel">
+      <div className="health-range-controls">
+        <div className="segmented-control health-preset-control" role="group" aria-label="Health date range">
+          {healthRangePresets().map((preset) => (
+            <button
+              key={preset.days}
+              className={activePreset?.days === preset.days ? "active" : ""}
+              type="button"
+              onClick={() => applyHealthRange(healthRangeForLastDays(preset.days))}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="date-range-grid health-date-grid">
+          <label className="field">
+            <span>From</span>
+            <input
+              type="date"
+              value={draftRange.from}
+              max={draftRange.to || localDateString()}
+              onChange={(event) => setDraftRange({ ...draftRange, from: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>To</span>
+            <input
+              type="date"
+              value={draftRange.to}
+              min={draftRange.from}
+              max={localDateString()}
+              onChange={(event) => setDraftRange({ ...draftRange, to: event.target.value })}
+            />
+          </label>
+        </div>
+        <div className="health-range-actions">
+          <button className="secondary-button small-button" type="button" disabled={!draftRangeChanged} onClick={() => setDraftRange(range)}>
+            Reset
+          </button>
+          <button className="primary-button small-button" type="button" disabled={!draftRangeChanged || !draftRangeValid} onClick={() => applyHealthRange(draftRange)}>
+            Apply
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+
   return (
     <Page title="Health">
-      <section className="panel health-controls-panel">
-        <div className="health-range-controls">
-          <div className="segmented-control health-preset-control" role="group" aria-label="Health date range">
-            {healthRangePresets().map((preset) => (
-              <button
-                key={preset.days}
-                className={activePreset?.days === preset.days ? "active" : ""}
-                type="button"
-                onClick={() => applyHealthRange(healthRangeForLastDays(preset.days))}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <div className="date-range-grid health-date-grid">
-            <label className="field">
-              <span>From</span>
-              <input
-                type="date"
-                value={draftRange.from}
-                max={draftRange.to || localDateString()}
-                onChange={(event) => setDraftRange({ ...draftRange, from: event.target.value })}
-              />
-            </label>
-            <label className="field">
-              <span>To</span>
-              <input
-                type="date"
-                value={draftRange.to}
-                min={draftRange.from}
-                max={localDateString()}
-                onChange={(event) => setDraftRange({ ...draftRange, to: event.target.value })}
-              />
-            </label>
-          </div>
-          <div className="health-range-actions">
-            <button className="secondary-button small-button" type="button" disabled={!draftRangeChanged} onClick={() => setDraftRange(range)}>
-              Reset
-            </button>
-            <button className="primary-button small-button" type="button" disabled={!draftRangeChanged || !draftRangeValid} onClick={() => applyHealthRange(draftRange)}>
-              Apply
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {health.error && <div className="error">{health.error instanceof Error ? health.error.message : "Could not load health metrics"}</div>}
+      {healthError && <div className="error">{healthError instanceof Error ? healthError.message : "Could not load health metrics"}</div>}
 
       {cardItems.length > 0 && (
-        <section className="metric-grid">
-          {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+        <section className="health-summary" aria-label="Health summary">
+          <div className="health-summary-header">
+            <div className="panel-heading">Summary</div>
+            <span className="muted">Data for {healthSummaryDateLabel(todayMetric)}</span>
+          </div>
+          <div className="metric-grid">
+            {cardItems.map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+          </div>
+          {healthRangeControls}
         </section>
       )}
 
-      {health.isLoading && <LoadingRow />}
+      {cardItems.length === 0 && healthRangeControls}
+
+      {(health.isLoading || todayHealth.isLoading) && <LoadingRow />}
       {!health.isLoading && metrics.length === 0 && (
         <EmptyState
           title="No health metrics found"
@@ -1662,13 +1680,13 @@ function GearDistanceBlock({ gear }: { gear: Gear }) {
   );
 }
 
-function GearChipList({ gear, compact = false }: { gear?: GearSummary[]; compact?: boolean }) {
+function GearChipList({ gear, compact = false, className }: { gear?: GearSummary[]; compact?: boolean; className?: string }) {
   const items = gear ?? [];
   if (items.length === 0) {
     return null;
   }
   return (
-    <div className={`gear-chip-list${compact ? " compact" : ""}`}>
+    <div className={`gear-chip-list${compact ? " compact" : ""}${className ? ` ${className}` : ""}`}>
       {items.map((item) => (
         <Link className={`gear-chip${item.retired ? " retired" : ""}`} key={item.id} to={`/gear/${item.id}`} title={gearDisplayLabel(item)}>
           <Footprints size={13} />
@@ -1777,8 +1795,8 @@ function ActivitiesPage() {
   };
   const activityList = activities.data?.pages.flatMap((page) => page.activities ?? []) ?? [];
   const activitiesLoaded = Boolean(activities.data);
-  const dateFiltersActive = hasDateFilters(filters);
   const anyFiltersActive = hasActivityFilters(filters);
+  const activeFilterCount = activityFilterCount(filters);
   const currentSort = normalizedActivitySort(filters);
   const sortActive = !activitySortsMatch(currentSort, defaultActivitySort);
   const hiddenColumnCount = defaultActivityTableColumns.length - visibleColumns.length;
@@ -1798,13 +1816,13 @@ function ActivitiesPage() {
       actions={
         <>
           <button
-            className={`secondary-button ${dateFiltersActive ? "active-filter-button" : ""}`}
+            className={`secondary-button ${activeFilterCount > 0 ? "active-filter-button" : ""}`}
             type="button"
             onClick={() => setFiltersOpen(true)}
           >
             <Filter size={16} />
             Filter
-            {dateFiltersActive && <span className="button-badge">1</span>}
+            {activeFilterCount > 0 && <span className="button-badge">{activeFilterCount}</span>}
           </button>
           <button
             className={`secondary-button ${sortActive ? "active-filter-button" : ""}`}
@@ -1828,6 +1846,7 @@ function ActivitiesPage() {
     >
       {filtersOpen && (
         <ActivityFiltersDialog
+          activityTypes={activityTypes.data?.activityTypes ?? []}
           filters={filters}
           onApply={setFilters}
           onClose={() => setFiltersOpen(false)}
@@ -1847,21 +1866,18 @@ function ActivitiesPage() {
           onClose={() => setColumnsOpen(false)}
         />
       )}
-      <ActivitySearchPanel
-        value={filters.search ?? ""}
-        onChange={(search) => setFilters({ ...filters, search })}
-      />
-      <ActivityTypeFilterPanel
-        activityTypes={activityTypes.data?.activityTypes ?? []}
-        filters={filters}
-        onChange={setFilters}
-      />
       {activities.isLoading && <LoadingRow />}
       {activities.error && <div className="error">{activities.error instanceof Error ? activities.error.message : "Could not load activities"}</div>}
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
       {activitiesLoaded && activityList.length > 0 && (
         <>
-          <ActivityTable activities={activityList} visibleColumns={visibleColumns} onDelete={handleDelete} deletingId={deleteActivity.variables} />
+          <ActivityTable
+            activities={activityList}
+            visibleColumns={visibleColumns}
+            activityListSearch={searchParams.toString()}
+            onDelete={handleDelete}
+            deletingId={deleteActivity.variables}
+          />
           {activities.hasNextPage && (
             <div className="pagination-actions">
               <button
@@ -1879,7 +1895,8 @@ function ActivitiesPage() {
       )}
       {activitiesLoaded && activityList.length === 0 && (
         <EmptyState
-          title={anyFiltersActive ? "No activities found" : "No activities yet"}
+          title={anyFiltersActive ? "No activities match these filters" : "No activities yet"}
+          message={anyFiltersActive ? "Try broadening your search, date range, or selected activity types." : undefined}
           action={anyFiltersActive ? undefined : <Link className="secondary-button" to="/settings#import">Import a file</Link>}
         />
       )}
@@ -2020,50 +2037,57 @@ function ActivityCalendarPage() {
   );
 }
 
-function ActivitySearchPanel({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <section className="panel search-panel">
-      <label className="field search-field">
-        <span>Search by name</span>
-        <input
-          type="search"
-          placeholder="Activity name"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-      <button className="secondary-button small-button" type="button" disabled={value.length === 0} onClick={() => onChange("")}>
-        Clear
-      </button>
-    </section>
-  );
-}
-
 function ActivityFiltersDialog({
+  activityTypes,
   filters,
   onApply,
   onClose
 }: {
+  activityTypes: string[];
   filters: ActivityTypeFiltersValue;
   onApply: (filters: ActivityTypeFiltersValue) => void;
   onClose: () => void;
 }) {
-  const [draftDates, setDraftDates] = useState<ActivityDateRange>({
-    dateFrom: filters.dateFrom ?? "",
-    dateTo: filters.dateTo ?? ""
-  });
+  const [draftFilters, setDraftFilters] = useState<ActivityTypeFiltersValue>(filters);
   const presets = dateFilterPresets();
+  const draftDates: ActivityDateRange = {
+    dateFrom: draftFilters.dateFrom ?? "",
+    dateTo: draftFilters.dateTo ?? ""
+  };
   const activePreset = presets.find((preset) => dateRangesMatch(draftDates, preset.range));
   const dateRangeInvalid = Boolean(draftDates.dateFrom && draftDates.dateTo && draftDates.dateFrom > draftDates.dateTo);
-  const applyDates = () => {
+  const selectedTypes = selectedActivityTypes(draftFilters, activityTypes);
+  const selectedSet = new Set(selectedTypes);
+  const allTypesSelected = selectedTypes.length === activityTypes.length;
+  const noTypesSelected = selectedTypes.length === 0;
+  const updateDates = (nextDates: ActivityDateRange) => {
+    setDraftFilters({
+      ...draftFilters,
+      dateFrom: nextDates.dateFrom ?? "",
+      dateTo: nextDates.dateTo ?? ""
+    });
+  };
+  const toggleActivityType = (sport: string) => {
+    const nextSelectedTypes = selectedSet.has(sport)
+      ? selectedTypes.filter((item) => item !== sport)
+      : [...selectedTypes, sport];
+    setDraftFilters(activityTypeFiltersForSelection(draftFilters, activityTypes, nextSelectedTypes));
+  };
+  const clearFilters = () => {
+    setDraftFilters({
+      ...draftFilters,
+      search: "",
+      sports: [],
+      excludeSports: [],
+      dateFrom: "",
+      dateTo: ""
+    });
+  };
+  const applyFilters = () => {
     if (dateRangeInvalid) {
       return;
     }
-    onApply({
-      ...filters,
-      dateFrom: draftDates.dateFrom ?? "",
-      dateTo: draftDates.dateTo ?? ""
-    });
+    onApply(draftFilters);
     onClose();
   };
 
@@ -2076,11 +2100,11 @@ function ActivityFiltersDialog({
         }
       }}
     >
-      <section className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-filters-title">
+      <section className="filter-dialog activity-filters-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-filters-title">
         <div className="dialog-header">
           <div>
             <div className="eyebrow">Filters</div>
-            <h2 id="activity-filters-title">Date</h2>
+            <h2 id="activity-filters-title">Activities</h2>
           </div>
           <button className="icon-button" type="button" aria-label="Close filters" onClick={onClose}>
             <X size={16} />
@@ -2088,14 +2112,52 @@ function ActivityFiltersDialog({
         </div>
 
         <div className="filter-dialog-section">
-          <div className="filter-label">Preset</div>
+          <div className="filter-label">Search</div>
+          <label className="field">
+            <span>Search by name</span>
+            <input
+              type="search"
+              placeholder="Activity name"
+              value={draftFilters.search ?? ""}
+              onChange={(event) => setDraftFilters({ ...draftFilters, search: event.target.value })}
+            />
+          </label>
+        </div>
+
+        {activityTypes.length > 0 && (
+          <div className="filter-dialog-section">
+            <div className="filter-label">Activity types</div>
+            <div className="activity-type-filter-menu">
+              <div className="activity-type-filter-group" role="group" aria-labelledby="activity-filter-types-label">
+                <div className="activity-type-filter-group-header">
+                  <div id="activity-filter-types-label" className="filter-label">Select types</div>
+                  <span>
+                    <button type="button" disabled={allTypesSelected} onClick={() => setDraftFilters(activityTypeFiltersForSelection(draftFilters, activityTypes, activityTypes))}>Select all</button>
+                    <button type="button" disabled={noTypesSelected} onClick={() => setDraftFilters(activityTypeFiltersForSelection(draftFilters, activityTypes, []))}>Clear all</button>
+                  </span>
+                </div>
+                <div className="activity-type-options">
+                  {activityTypes.map((sport) => (
+                    <label key={`dialog-${sport}`} className="activity-type-option">
+                      <input type="checkbox" checked={selectedSet.has(sport)} onChange={() => toggleActivityType(sport)} />
+                      <span>{sport}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="filter-dialog-section">
+          <div className="filter-label">Date</div>
           <div className="date-preset-grid">
             {presets.map((preset) => (
               <button
                 key={preset.id}
                 className={`filter-chip ${activePreset?.id === preset.id ? "active" : ""}`}
                 type="button"
-                onClick={() => setDraftDates(preset.range)}
+                onClick={() => updateDates(preset.range)}
               >
                 {preset.label}
               </button>
@@ -2112,7 +2174,7 @@ function ActivityFiltersDialog({
                 type="date"
                 value={draftDates.dateFrom ?? ""}
                 max={draftDates.dateTo || undefined}
-                onChange={(event) => setDraftDates({ ...draftDates, dateFrom: event.target.value })}
+                onChange={(event) => updateDates({ ...draftDates, dateFrom: event.target.value })}
               />
             </label>
             <label className="field">
@@ -2121,7 +2183,7 @@ function ActivityFiltersDialog({
                 type="date"
                 value={draftDates.dateTo ?? ""}
                 min={draftDates.dateFrom || undefined}
-                onChange={(event) => setDraftDates({ ...draftDates, dateTo: event.target.value })}
+                onChange={(event) => updateDates({ ...draftDates, dateTo: event.target.value })}
               />
             </label>
           </div>
@@ -2129,13 +2191,13 @@ function ActivityFiltersDialog({
         </div>
 
         <div className="dialog-actions">
-          <button className="secondary-button" type="button" onClick={() => setDraftDates({ dateFrom: "", dateTo: "" })}>
-            Clear dates
+          <button className="secondary-button" type="button" onClick={clearFilters}>
+            Clear filters
           </button>
           <button className="secondary-button" type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="primary-button" type="button" disabled={dateRangeInvalid} onClick={applyDates}>
+          <button className="primary-button" type="button" disabled={dateRangeInvalid} onClick={applyFilters}>
             Apply
           </button>
         </div>
@@ -2237,86 +2299,6 @@ function ActivitySortDialog({
   );
 }
 
-function ActivityTypeFilterPanel({
-  activityTypes,
-  filters,
-  onChange
-}: {
-  activityTypes: string[];
-  filters: ActivityTypeFiltersValue;
-  onChange: (filters: ActivityTypeFiltersValue) => void;
-}) {
-  const includeSet = new Set(filters.sports);
-  const excludeSet = new Set(filters.excludeSports);
-  if (activityTypes.length === 0) {
-    return null;
-  }
-
-  const toggleInclude = (sport: string) => {
-    const nextSports = includeSet.has(sport)
-      ? filters.sports.filter((item) => item !== sport)
-      : [...filters.sports, sport];
-    onChange({
-      ...filters,
-      sports: nextSports,
-      excludeSports: filters.excludeSports.filter((item) => item !== sport)
-    });
-  };
-  const toggleExclude = (sport: string) => {
-    const nextExcluded = excludeSet.has(sport)
-      ? filters.excludeSports.filter((item) => item !== sport)
-      : [...filters.excludeSports, sport];
-    onChange({
-      ...filters,
-      sports: filters.sports.filter((item) => item !== sport),
-      excludeSports: nextExcluded
-    });
-  };
-  const clearFilters = () => onChange({ ...filters, sports: [], excludeSports: [] });
-  const hasFilters = filters.sports.length > 0 || filters.excludeSports.length > 0;
-
-  return (
-    <section className="panel filter-panel">
-      <div className="filter-header">
-        <div className="panel-heading">Activity types</div>
-        <button className="secondary-button small-button" type="button" disabled={!hasFilters} onClick={clearFilters}>Clear</button>
-      </div>
-      <div className="filter-grid">
-        <div className="filter-group">
-          <div className="filter-label">Show only</div>
-          <div className="chip-list">
-            {activityTypes.map((sport) => (
-              <button
-                key={`include-${sport}`}
-                className={`filter-chip ${includeSet.has(sport) ? "active" : ""}`}
-                type="button"
-                onClick={() => toggleInclude(sport)}
-              >
-                {sport}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="filter-group">
-          <div className="filter-label">Exclude</div>
-          <div className="chip-list">
-            {activityTypes.map((sport) => (
-              <button
-                key={`exclude-${sport}`}
-                className={`filter-chip exclude ${excludeSet.has(sport) ? "active" : ""}`}
-                type="button"
-                onClick={() => toggleExclude(sport)}
-              >
-                {sport}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function ActivityColumnsDialog({
   visibleColumns,
   onApply,
@@ -2403,12 +2385,14 @@ function ActivityTable({
   activities,
   compact = false,
   visibleColumns,
+  activityListSearch,
   onDelete,
   deletingId
 }: {
   activities: Activity[];
   compact?: boolean;
   visibleColumns?: ActivityTableColumnKey[];
+  activityListSearch?: string;
   onDelete?: (activity: Activity) => void;
   deletingId?: string;
 }) {
@@ -2438,7 +2422,7 @@ function ActivityTable({
           {activities.map((activity) => (
             <tr key={activity.id}>
               {showColumn("date") && <td>{formatDate(activity.startTime)}</td>}
-              <td className="activity-name-cell"><Link to={`/activities/${activity.id}`} title={activity.name}>{activity.name}</Link></td>
+              <td className="activity-name-cell"><Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link></td>
               {showColumn("type") && <td className="clip-cell" title={activity.sportType}>{activity.sportType}</td>}
               {showColumn("gear") && <td className="gear-table-cell"><GearChipList gear={activity.gear} compact /></td>}
               {showColumn("distance") && <td>{formatDistance(activity.distanceM)}</td>}
@@ -2464,7 +2448,7 @@ function ActivityTable({
         </tbody>
       </table>
     </div>
-    <ActivityCardList activities={activities} compact={compact} onDelete={onDelete} deletingId={deletingId} />
+    <ActivityCardList activities={activities} compact={compact} activityListSearch={activityListSearch} onDelete={onDelete} deletingId={deletingId} />
     </>
   );
 }
@@ -2472,11 +2456,13 @@ function ActivityTable({
 function ActivityCardList({
   activities,
   compact = false,
+  activityListSearch,
   onDelete,
   deletingId
 }: {
   activities: Activity[];
   compact?: boolean;
+  activityListSearch?: string;
   onDelete?: (activity: Activity) => void;
   deletingId?: string;
 }) {
@@ -2486,7 +2472,7 @@ function ActivityCardList({
         <article className="activity-card" key={activity.id}>
           <div className="activity-card-header">
             <div className="activity-card-title">
-              <Link to={`/activities/${activity.id}`} title={activity.name}>{activity.name}</Link>
+              <Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link>
               <span>{formatDate(activity.startTime)} · {activity.sportType}</span>
             </div>
             {onDelete && (
@@ -2517,13 +2503,66 @@ function ActivityCardList({
   );
 }
 
+function activityDetailPath(id: string, activityListSearch?: string) {
+  const query = activityListSearch?.replace(/^\?/, "");
+  return `/activities/${encodeURIComponent(id)}${query ? `?${query}` : ""}`;
+}
+
+function ActivityNavigation({
+  previousId,
+  nextId,
+  loading,
+  onNavigate
+}: ActivityNavigationData & { loading: boolean; onNavigate: (id: string) => void }) {
+  return (
+    <div className="activity-navigation" role="group" aria-label="Activity navigation" aria-busy={loading}>
+      <button
+        className="icon-button activity-navigation-button"
+        type="button"
+        title="Previous activity"
+        aria-label="Previous activity"
+        disabled={loading || !previousId}
+        onClick={() => {
+          if (previousId) {
+            onNavigate(previousId);
+          }
+        }}
+      >
+        <ChevronLeft size={18} />
+      </button>
+      <button
+        className="icon-button activity-navigation-button"
+        type="button"
+        title="Next activity"
+        aria-label="Next activity"
+        disabled={loading || !nextId}
+        onClick={() => {
+          if (nextId) {
+            onNavigate(nextId);
+          }
+        }}
+      >
+        <ChevronRight size={18} />
+      </button>
+    </div>
+  );
+}
+
 function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
+  const [searchParams] = useSearchParams();
+  const activityListSearch = searchParams.toString();
+  const activityFilters = activityFiltersFromSearchParams(searchParams);
   const [plannedMatchWindowDays, setPlannedMatchWindowDays] = useState(7);
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const activityNavigation = useQuery({
+    queryKey: ["activity-navigation", id, activityListSearch],
+    queryFn: () => api.activityNavigation(id!, activityFilters),
+    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
+  });
   const activitySeries = useQuery({
     queryKey: ["activity-series", id],
     queryFn: () => api.activitySeries(id!, 1200),
@@ -2773,11 +2812,31 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
   const climbMapSegments = climbMapSegmentsFor(displayItem, finalClimbs);
   const selectedClimbProfile = climbProfileFor(displayItem, selectedClimb);
+  const climbPerformanceSamples = samplesForClimbPerformance(confirmedItem.samples, activitySeries.data?.samples);
+  const climbPerformanceByIndex = Object.fromEntries(
+    finalClimbs.map((climb) => {
+      const fallback: ClimbPerformance = climb.paceSPKM === undefined || climb.gapSPKM === undefined
+        ? climbPerformanceFor(climbPerformanceSamples, confirmedItem.laps ?? [], climb)
+        : {};
+      return [climb.index, {
+        paceSPKM: climb.paceSPKM ?? fallback.paceSPKM,
+        gapSPKM: climb.gapSPKM ?? fallback.gapSPKM
+      }];
+    })
+  ) as Record<number, ClimbPerformance>;
+  const selectedClimbPerformance = selectedClimb ? climbPerformanceByIndex[selectedClimb.index] : undefined;
   const isClimbSensitivitySaved = climbSensitivity === configuredClimbSensitivity;
   const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
   const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
   const canSaveClimbSensitivity = !isClimbSensitivitySaved;
-  const feedbackAvailable = Boolean(plannedMatchCandidates.data?.matched?.feedbackCell?.trim());
+  const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
+  const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
+  const writeback = plannedMatchCandidates.data?.writeback;
+  const canRetryWriteback = Boolean(writeback && [
+    writeback.summaryStatus,
+    writeback.intervalsStatus,
+    writeback.feedbackStatus
+  ].some((status) => status === "failed" || status === "canceled" || status === "completed_with_conflicts"));
 
   const handleSelectClimb = (climb: ActivityClimb) => {
     setSelectedClimbIndex((current) => current === climb.index ? undefined : climb.index);
@@ -2804,9 +2863,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   };
   const openMatchDialog = (candidateId?: string) => {
     const nextCandidateId = candidateId ?? plannedMatchCandidates.data?.suggestedId ?? plannedMatchCandidates.data?.candidates[0]?.id;
-    if (!nextCandidateId) {
-      return;
-    }
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
     setMatchPreview(undefined);
@@ -2885,21 +2941,40 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   return (
     <Page
       title={confirmedItem.name}
+      titleAccessory={<GearChipList gear={item.gear} className="activity-title-gear" />}
       eyebrow={`${confirmedItem.sportType} · ${formatDate(confirmedItem.startTime)}`}
       actions={
         <>
+          <ActivityNavigation
+            previousId={activityNavigation.data?.previousId}
+            nextId={activityNavigation.data?.nextId}
+            loading={activityNavigation.isFetching}
+            onNavigate={(nextID) => navigate(activityDetailPath(nextID, activityListSearch))}
+          />
           <ActivityMediaUploadAction
             inputKey={mediaFileInputKey}
             uploading={uploadMedia.isPending}
             onFilesSelected={handleMediaFilesSelected}
           />
+          {isRunningSport(item.sportType) && (
+            <ActivityPlannedMatchAction
+              matched={Boolean(matchedPlannedActivity)}
+              matchedName={matchedPlannedActivity?.name}
+              loading={plannedMatchCandidates.isLoading}
+              working={previewPlannedActivity.isPending || applyPlannedActivity.isPending || unmatchPlannedActivity.isPending}
+              onMatch={() => openMatchDialog()}
+              onUnmatch={() => unmatchPlannedActivity.mutate()}
+            />
+          )}
           <ActivityDetailActions
             activity={item}
             open={actionsOpen}
             deleting={deleteActivity.isPending}
             canExportGPX={canExportGPX}
-            canUnmatchPlanned={Boolean(plannedMatchCandidates.data?.matched)}
-            unmatching={unmatchPlannedActivity.isPending}
+            canOpenCheckIn={Boolean(matchedPlannedActivity)}
+            feedbackAvailable={feedbackAvailable}
+            canRetryWriteback={canRetryWriteback}
+            retryingWriteback={retryWriteback.isPending}
             onToggle={() => setActionsOpen((current) => !current)}
             onRename={() => {
               renameActivity.reset();
@@ -2915,10 +2990,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
               setExportOpen(true);
               setActionsOpen(false);
             }}
-            onUnmatchPlanned={() => {
+            onCheckIn={() => {
+              updateActivityReflection.reset();
+              setCheckInOpen(true);
               setActionsOpen(false);
-              unmatchPlannedActivity.mutate();
             }}
+            onRetryWriteback={() => retryWriteback.mutate()}
             onDelete={handleDelete}
           />
         </>
@@ -2975,24 +3052,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onClose={() => setExportOpen(false)}
         />
       )}
-      <PlannedActivityMatchPanel
-        data={plannedMatchCandidates.data}
-        loading={plannedMatchCandidates.isLoading}
-        error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error ?? updateActivityReflection.error ?? unmatchPlannedActivity.error ?? retryWriteback.error}
-        matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending || updateActivityReflection.isPending}
-        retrying={retryWriteback.isPending}
-        feedbackAvailable={feedbackAvailable}
-        canLoadMore={plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)}
-        windowDays={plannedMatchWindowDays}
-        onMatchHint={openMatchDialog}
-        onOpenMatch={() => openMatchDialog()}
-        onLoadMore={() => setPlannedMatchWindowDays(30)}
-        onOpenCheckIn={() => {
-          updateActivityReflection.reset();
-          setCheckInOpen(true);
-        }}
-        onRetry={() => retryWriteback.mutate()}
-      />
+      {plannedMatchCandidates.error && <div className="error">{plannedMatchCandidates.error instanceof Error ? plannedMatchCandidates.error.message : "Could not load planned activity matches"}</div>}
+      {unmatchPlannedActivity.error && <div className="error">{unmatchPlannedActivity.error instanceof Error ? unmatchPlannedActivity.error.message : "Could not unmatch planned run"}</div>}
+      {retryWriteback.error && <div className="error">{retryWriteback.error instanceof Error ? retryWriteback.error.message : "Could not retry sheet write-back"}</div>}
       <section className="metric-grid">
         <Metric label="Distance" value={formatDistance(item.distanceM)} />
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
@@ -3013,14 +3075,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         }}
         onDelete={handleDeleteNotes}
       />
-
-
-      {(item.gear ?? []).length > 0 && (
-        <section className="panel gear-activity-panel">
-          <div className="panel-heading">Gear</div>
-          <GearChipList gear={item.gear} />
-        </section>
-      )}
 
       {mediaItems.length > 0 ? (
         <ActivityMediaPanel
@@ -3068,6 +3122,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <ActivityClimbsPanel
           climbs={effectiveClimbs}
           selectedClimb={selectedClimb}
+          performanceByIndex={climbPerformanceByIndex}
+          selectedPerformance={selectedClimbPerformance}
           profileData={selectedClimbProfile}
           sensitivityControls={climbSensitivityControls}
           onSelect={handleSelectClimb}
@@ -3417,130 +3473,6 @@ function optionalWatts(value?: number) {
   return value !== undefined ? `${Math.round(value).toLocaleString()} W` : "";
 }
 
-function PlannedActivityMatchPanel({
-  data,
-  loading,
-  error,
-  matching,
-  retrying,
-  feedbackAvailable,
-  canLoadMore,
-  windowDays,
-  onMatchHint,
-  onOpenMatch,
-  onOpenCheckIn,
-  onLoadMore,
-  onRetry
-}: {
-  data?: PlannedActivityMatchResponse;
-  loading: boolean;
-  error: unknown;
-  matching: boolean;
-  retrying: boolean;
-  feedbackAvailable: boolean;
-  canLoadMore: boolean;
-  windowDays: number;
-  onMatchHint: (plannedActivityId: string) => void;
-  onOpenMatch: () => void;
-  onOpenCheckIn: () => void;
-  onLoadMore: () => void;
-  onRetry: () => void;
-}) {
-  const [expanded, setExpanded] = useState(!Boolean(data?.matched));
-  const matched = Boolean(data?.matched);
-
-  useEffect(() => {
-    setExpanded(!matched);
-  }, [matched]);
-
-  if (loading) return null;
-  if (error) return <div className="error">{error instanceof Error ? error.message : "Could not load planned activity matches"}</div>;
-  if (!data) return null;
-  if (!data.matched && data.candidates.length === 0 && !canLoadMore && windowDays === 7) return null;
-  if (data.matched) {
-    return (
-      <section className="panel planned-match-panel">
-        <div className="notes-panel-header">
-          <button
-            className="panel-collapse-toggle"
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <ChevronDown size={17} aria-hidden="true" />
-            <div>
-            <div className="panel-heading">Matched planned run</div>
-            <strong>{data.matched.name}</strong>
-            </div>
-          </button>
-          <button className="secondary-button small-button" type="button" onClick={onOpenCheckIn}>
-            {feedbackAvailable ? "RPE & feedback" : "RPE"}
-          </button>
-        </div>
-        {expanded && (
-          <div className="planned-match-panel-content">
-            {data.matched.notes && <p className="muted">{data.matched.notes}</p>}
-            {data.writeback && (
-              <div className="writeback-status">
-                <p className="muted">Sheet write-back</p>
-                <div>Summary: {writebackStatusLabel(data.writeback.summaryStatus)}</div>
-                {data.writeback.summaryError && <div className="muted">{data.writeback.summaryError}</div>}
-                <div>Structured intervals: {writebackStatusLabel(data.writeback.intervalsStatus)}</div>
-                {data.writeback.intervalsError && <div className="muted">{data.writeback.intervalsError}</div>}
-                <div>How it felt/go: {writebackStatusLabel(data.writeback.feedbackStatus)}</div>
-                {data.writeback.feedbackError && <div className="muted">{data.writeback.feedbackError}</div>}
-                {data.writeback.jobId && data.writeback.jobStatus === "running" && <SyncJobCancelButton job={{ id: data.writeback.jobId, status: data.writeback.jobStatus, cancelRequestedAt: data.writeback.cancelRequestedAt }} compact />}
-                {(data.writeback.summaryStatus === "failed" || data.writeback.summaryStatus === "canceled" || data.writeback.summaryStatus === "completed_with_conflicts" || data.writeback.intervalsStatus === "failed" || data.writeback.intervalsStatus === "canceled" || data.writeback.intervalsStatus === "completed_with_conflicts" || data.writeback.feedbackStatus === "failed" || data.writeback.feedbackStatus === "canceled" || data.writeback.feedbackStatus === "completed_with_conflicts") && (
-                  <button className="secondary-button small-button" type="button" disabled={retrying} onClick={onRetry}>
-                    {retrying ? "Retrying..." : "Retry write-back"}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-    );
-  }
-  const hintedCandidate = data.candidates[0];
-  return (
-    <section className="panel planned-match-panel">
-      <div className="notes-panel-header">
-        <button
-          className="panel-collapse-toggle"
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          <ChevronDown size={17} aria-hidden="true" />
-          <div>
-            <div className="panel-heading">{hintedCandidate ? "Suggested planned run" : "Find planned run"}</div>
-            {hintedCandidate ? <strong>{hintedCandidate.name}</strong> : <span className="muted">No planned run was found within {windowDays} days.</span>}
-          </div>
-        </button>
-        {hintedCandidate && (
-          <div className="notes-actions">
-            <button className="primary-button small-button" type="button" disabled={matching} onClick={() => onMatchHint(hintedCandidate.id)}>
-              {matching ? "Matching..." : "Match"}
-            </button>
-            {(data.candidates.length > 1 || canLoadMore) && (
-              <button className="secondary-button small-button" type="button" disabled={matching} onClick={onOpenMatch}>
-                Other options
-              </button>
-            )}
-          </div>
-        )}
-        {!hintedCandidate && canLoadMore && (
-          <button className="secondary-button small-button" type="button" onClick={onLoadMore}>
-            Load more plans
-          </button>
-        )}
-      </div>
-      {expanded && hintedCandidate?.notes && <p className="muted">{hintedCandidate.notes}</p>}
-    </section>
-  );
-}
-
 function PlannedActivityMatchDialog({
   data,
   selectedCandidateId,
@@ -3882,31 +3814,6 @@ function trainingSheetPreviewStatusLabel(status: "write" | "conflict" | "unchang
   }
 }
 
-function writebackStatusLabel(status: string) {
-  switch (status) {
-    case "completed":
-      return "written";
-    case "completed_with_conflicts":
-      return "existing values preserved";
-    case "completed_with_warnings":
-      return "written with warnings";
-    case "skipped":
-      return "skipped; review needed";
-    case "not_provided":
-      return "not provided";
-    case "not_applicable":
-      return "not applicable";
-    case "running":
-      return "writing...";
-    case "canceled":
-      return "canceled";
-    case "failed":
-      return "failed";
-    default:
-      return status;
-  }
-}
-
 function ActivityNotesPanel({
   notes,
   saving,
@@ -4162,6 +4069,36 @@ function ActivityExportGPXDialog({
   );
 }
 
+function ActivityPlannedMatchAction({
+  matched,
+  matchedName,
+  loading,
+  working,
+  onMatch,
+  onUnmatch
+}: {
+  matched: boolean;
+  matchedName?: string;
+  loading: boolean;
+  working: boolean;
+  onMatch: () => void;
+  onUnmatch: () => void;
+}) {
+  const label = working ? (matched ? "Unmatching" : "Matching") : (matched ? "Unmatch" : "Match");
+  return (
+    <button
+      className="secondary-button"
+      type="button"
+      title={matched ? `Unmatch ${matchedName ?? "planned run"}` : "Match with a planned run"}
+      disabled={loading || working}
+      onClick={matched ? onUnmatch : onMatch}
+    >
+      {matched && <RotateCcw size={16} />}
+      {label}
+    </button>
+  );
+}
+
 function ActivityMediaUploadAction({
   inputKey,
   uploading,
@@ -4380,26 +4317,32 @@ function ActivityDetailActions({
   open,
   deleting,
   canExportGPX,
-  canUnmatchPlanned,
-  unmatching,
+  canOpenCheckIn,
+  feedbackAvailable,
+  canRetryWriteback,
+  retryingWriteback,
   onToggle,
   onRename,
   onNotes,
   onExportGPX,
-  onUnmatchPlanned,
+  onCheckIn,
+  onRetryWriteback,
   onDelete
 }: {
   activity: Activity;
   open: boolean;
   deleting: boolean;
   canExportGPX: boolean;
-  canUnmatchPlanned: boolean;
-  unmatching: boolean;
+  canOpenCheckIn: boolean;
+  feedbackAvailable: boolean;
+  canRetryWriteback: boolean;
+  retryingWriteback: boolean;
   onToggle: () => void;
   onRename: () => void;
   onNotes: () => void;
   onExportGPX: () => void;
-  onUnmatchPlanned: () => void;
+  onCheckIn: () => void;
+  onRetryWriteback: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -4417,6 +4360,12 @@ function ActivityDetailActions({
             <StickyNote size={16} />
             {(activity.notes ?? "").trim() ? "Edit note" : "Add note"}
           </button>
+          {canOpenCheckIn && (
+            <button className="action-menu-item" type="button" role="menuitem" onClick={onCheckIn}>
+              <Timer size={16} />
+              {feedbackAvailable ? "RPE & feedback" : "RPE"}
+            </button>
+          )}
           <button className="action-menu-item" type="button" role="menuitem" disabled={!canExportGPX} onClick={onExportGPX}>
             <Download size={16} />
             Export GPX
@@ -4427,10 +4376,10 @@ function ActivityDetailActions({
               Open original
             </a>
           )}
-          {canUnmatchPlanned && (
-            <button className="action-menu-item" type="button" role="menuitem" disabled={unmatching} onClick={onUnmatchPlanned}>
-              <RotateCcw size={16} />
-              {unmatching ? "Unmatching..." : "Unmatch planned run"}
+          {canRetryWriteback && (
+            <button className="action-menu-item" type="button" role="menuitem" disabled={retryingWriteback} onClick={onRetryWriteback}>
+              <RefreshCw size={16} />
+              {retryingWriteback ? "Retrying..." : "Retry write-back"}
             </button>
           )}
           <button className="action-menu-item danger" type="button" role="menuitem" disabled={deleting} onClick={onDelete}>
@@ -4525,12 +4474,16 @@ function ActivityRenameDialog({
 function ActivityClimbsPanel({
   climbs,
   selectedClimb,
+  performanceByIndex,
+  selectedPerformance,
   profileData,
   sensitivityControls,
   onSelect
 }: {
   climbs: ActivityClimb[];
   selectedClimb?: ActivityClimb;
+  performanceByIndex: Record<number, ClimbPerformance>;
+  selectedPerformance?: ClimbPerformance;
   profileData: ClimbProfilePoint[];
   sensitivityControls?: ReactNode;
   onSelect: (climb: ActivityClimb) => void;
@@ -4551,6 +4504,7 @@ function ActivityClimbsPanel({
           <div className="climb-list">
             {climbs.map((climb) => {
               const active = selectedClimb?.index === climb.index;
+              const performance = performanceByIndex[climb.index];
               return (
                 <button key={climb.index} className={`climb-item ${active ? "active" : ""}`} type="button" aria-pressed={active} onClick={() => onSelect(climb)}>
                   <span className="climb-item-header">
@@ -4562,6 +4516,12 @@ function ActivityClimbsPanel({
                     <span>{formatDistance(climb.distanceM)}</span>
                     <span>{Math.round(climb.elevationGainM).toLocaleString()} m</span>
                   </span>
+                  {(performance.paceSPKM !== undefined || performance.gapSPKM !== undefined) && (
+                    <span className="climb-item-performance">
+                      {performance.paceSPKM !== undefined && <span>Pace {formatPace(performance.paceSPKM)}</span>}
+                      {performance.gapSPKM !== undefined && <span>GAP {formatPace(performance.gapSPKM)}</span>}
+                    </span>
+                  )}
                   <span className="muted">{formatDistanceRange(climb.startDistanceM, climb.endDistanceM)}</span>
                 </button>
               );
@@ -4574,21 +4534,55 @@ function ActivityClimbsPanel({
                 <ClimbStat label="Avg Grade" value={formatGrade(selectedClimb.avgGradePct)} />
                 <ClimbStat label="Distance" value={formatDistance(selectedClimb.distanceM)} />
                 <ClimbStat label="Total Ascent" value={`${Math.round(selectedClimb.elevationGainM).toLocaleString()} m`} />
+                {selectedPerformance?.paceSPKM !== undefined && <ClimbStat label="Pace" value={formatPace(selectedPerformance.paceSPKM)} />}
+                {selectedPerformance?.gapSPKM !== undefined && <ClimbStat label="GAP" value={formatPace(selectedPerformance.gapSPKM)} />}
               </div>
               <div className="climb-profile">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={profileData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" minTickGap={26} />
-                    <YAxis width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
-                    <Tooltip
-                      contentStyle={chartTooltipContentStyle}
-                      labelStyle={chartTooltipLabelStyle}
-                      formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Height above start"]}
-                    />
-                    <Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <div className="climb-profile-header">
+                  <span className="muted">Height above start</span>
+                  <span className="climb-profile-legend" aria-label="Climb profile series">
+                    <span><i className="climb-profile-legend-swatch elevation" /> Elevation</span>
+                    {profileData.some((point) => point.paceSPKM !== undefined) && <span><i className="climb-profile-legend-swatch pace" /> Pace</span>}
+                    {profileData.some((point) => point.gapSPKM !== undefined) && <span><i className="climb-profile-legend-swatch gap" /> GAP</span>}
+                  </span>
+                </div>
+                <div className="climb-profile-chart">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={profileData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" minTickGap={26} />
+                      <YAxis yAxisId="elevation" width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
+                      {(profileData.some((point) => point.paceSPKM !== undefined) || profileData.some((point) => point.gapSPKM !== undefined)) && (
+                        <YAxis
+                          yAxisId="performance"
+                          orientation="right"
+                          width={58}
+                          reversed
+                          domain={["auto", "auto"]}
+                          tickFormatter={(value) => formatPaceMinutesSeconds(Number(value))}
+                        />
+                      )}
+                      <Tooltip
+                        contentStyle={chartTooltipContentStyle}
+                        labelStyle={chartTooltipLabelStyle}
+                        formatter={(value, name) => {
+                          const numericValue = Number(value);
+                          if (name === "Pace" || name === "GAP") {
+                            return [formatPace(numericValue), String(name)];
+                          }
+                          return [`${Math.round(numericValue).toLocaleString()} m`, "Height above start"];
+                        }}
+                      />
+                      <Area yAxisId="elevation" type="monotone" dataKey="elevationM" name="Elevation" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
+                      {profileData.some((point) => point.paceSPKM !== undefined) && (
+                        <Line yAxisId="performance" type="monotone" dataKey="paceSPKM" name="Pace" stroke="#2f6df6" strokeWidth={2} dot={false} connectNulls={false} />
+                      )}
+                      {profileData.some((point) => point.gapSPKM !== undefined) && (
+                        <Line yAxisId="performance" type="monotone" dataKey="gapSPKM" name="GAP" stroke="#c84d4d" strokeWidth={2} dot={false} connectNulls={false} />
+                      )}
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
           )}
@@ -5680,6 +5674,10 @@ function formatHealthDate(date: string) {
   return new Date(year, month - 1, day).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function healthSummaryDateLabel(metric?: DailyHealthMetric) {
+  return formatHealthDate(metric?.date ?? localDateString());
+}
+
 function finiteValue(value?: number) {
   return isFiniteNumber(value) ? value : undefined;
 }
@@ -5743,13 +5741,16 @@ function formatHealthDuration(totalSeconds?: number) {
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
 
-function Page({ title, eyebrow, actions, children }: { title: string; eyebrow?: string; actions?: ReactNode; children: ReactNode }) {
+function Page({ title, titleAccessory, eyebrow, actions, children }: { title: string; titleAccessory?: ReactNode; eyebrow?: string; actions?: ReactNode; children: ReactNode }) {
   return (
     <div className="page">
       <header className="page-header">
-        <div>
+        <div className="page-title">
           {eyebrow && <div className="eyebrow">{eyebrow}</div>}
-          <h1>{title}</h1>
+          <div className="page-title-row">
+            <h1>{title}</h1>
+            {titleAccessory}
+          </div>
         </div>
         {actions && <div className="actions">{actions}</div>}
       </header>
@@ -5773,13 +5774,22 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
   const defaultVisible = availableSeries.filter((series) => series.defaultVisible).map((series) => series.key);
   const initialVisible = defaultVisible.length > 0 ? defaultVisible : availableSeries.slice(0, 1).map((series) => series.key);
   const [visibleSeries, setVisibleSeries] = useState<ActivityChartSeriesKey[]>(initialVisible);
-  const activeSeries = availableSeries.filter((series) => visibleSeries.includes(series.key));
+  const availableKeys = availableSeries.map((series) => series.key);
+  const effectiveVisibleSeries = reconcileVisibleActivitySeries(visibleSeries, availableKeys, initialVisible);
+  const activeSeries = availableSeries.filter((series) => effectiveVisibleSeries.includes(series.key));
+  useEffect(() => {
+    setVisibleSeries((current) => {
+      const next = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      return next.length === current.length && next.every((key, index) => key === current[index]) ? current : next;
+    });
+  }, [availableKeys.join(","), initialVisible.join(",")]);
   const toggleSeries = (key: ActivityChartSeriesKey) => {
     setVisibleSeries((current) => {
-      if (current.includes(key)) {
-        return current.length === 1 ? current : current.filter((item) => item !== key);
+      const selected = reconcileVisibleActivitySeries(current, availableKeys, initialVisible);
+      if (selected.includes(key)) {
+        return selected.length === 1 ? selected : selected.filter((item) => item !== key);
       }
-      return [...current, key];
+      return [...selected, key];
     });
   };
 
@@ -6244,14 +6254,19 @@ function climbProfileFor(activity: Activity, climb?: ActivityClimb): ClimbProfil
   if (!climb) {
     return [];
   }
-  const points = chartDataFor(samplesForClimb(activity, climb))
+  const samples = samplesForClimb(activity, climb);
+  const samplesByIndex = new Map(samples.map((sample) => [sample.index, sample]));
+  const points = chartDataFor(samples)
     .filter((sample) => typeof sample.distanceM === "number" && typeof sample.elevationM === "number")
     .map((sample) => {
       const distanceKm = Math.max(0, (sample.distanceM! - climb.startDistanceM) / 1000);
+      const sourceSample = samplesByIndex.get(sample.index);
       return {
         label: `${distanceKm.toFixed(1)} km`,
         distanceKm,
-        elevationM: sample.elevationM!
+        elevationM: sample.elevationM!,
+        paceSPKM: sample.rawPaceSPKM,
+        gapSPKM: sourceSample ? gapPaceForSample(activity.laps ?? [], sourceSample) : undefined
       };
     });
   return normalizeClimbProfileElevation(points);
@@ -6285,8 +6300,38 @@ function hasActivityFilters(filters: ActivityTypeFiltersValue) {
   );
 }
 
-function hasDateFilters(filters: ActivityTypeFiltersValue) {
-  return Boolean(filters.dateFrom || filters.dateTo);
+function activityFilterCount(filters: ActivityTypeFiltersValue) {
+  return [
+    filters.search?.trim(),
+    filters.dateFrom || filters.dateTo,
+    filters.sports.length > 0 || filters.excludeSports.length > 0
+  ].filter(Boolean).length;
+}
+
+function selectedActivityTypes(filters: ActivityTypeFiltersValue, activityTypes: string[]) {
+  if (filters.sports.length > 0) {
+    const selected = new Set(filters.sports);
+    return activityTypes.filter((sport) => selected.has(sport));
+  }
+  if (filters.excludeSports.length > 0) {
+    const excluded = new Set(filters.excludeSports);
+    return activityTypes.filter((sport) => !excluded.has(sport));
+  }
+  return [...activityTypes];
+}
+
+function activityTypeFiltersForSelection(
+  filters: ActivityTypeFiltersValue,
+  activityTypes: string[],
+  selectedTypes: string[]
+) {
+  const selected = new Set(selectedTypes);
+  const allSelected = activityTypes.every((sport) => selected.has(sport));
+  return {
+    ...filters,
+    sports: allSelected ? [] : activityTypes.filter((sport) => selected.has(sport)),
+    excludeSports: allSelected || selectedTypes.length > 0 ? [] : [...activityTypes]
+  };
 }
 
 function activityFiltersFromSearchParams(params: URLSearchParams): ActivityTypeFiltersValue {
@@ -6713,10 +6758,13 @@ function LoadingRow() {
   return <div className="loading"><Database size={18} /> Loading</div>;
 }
 
-function EmptyState({ title, action }: { title: string; action?: ReactNode }) {
+function EmptyState({ title, message, action }: { title: string; message?: string; action?: ReactNode }) {
   return (
     <div className="empty-state">
-      <span>{title}</span>
+      <div className="empty-state-copy">
+        <span>{title}</span>
+        {message && <span className="muted">{message}</span>}
+      </div>
       {action}
     </div>
   );

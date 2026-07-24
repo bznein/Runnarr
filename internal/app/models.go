@@ -89,6 +89,11 @@ type ActivityListPage struct {
 	HasMore    bool       `json:"hasMore"`
 }
 
+type ActivityNavigation struct {
+	PreviousID string `json:"previousId,omitempty"`
+	NextID     string `json:"nextId,omitempty"`
+}
+
 // ActivitySeries is the bounded display representation of an activity's
 // samples. Full samples remain available to server-side exports and analysis,
 // but clients should use this response for charts and maps.
@@ -246,17 +251,19 @@ type ActivityInterval struct {
 }
 
 type ActivityClimb struct {
-	Index            int     `json:"index"`
-	Difficulty       string  `json:"difficulty"`
-	StartSampleIndex int     `json:"startSampleIndex"`
-	EndSampleIndex   int     `json:"endSampleIndex"`
-	StartDistanceM   float64 `json:"startDistanceM"`
-	EndDistanceM     float64 `json:"endDistanceM"`
-	DistanceM        float64 `json:"distanceM"`
-	ElevationGainM   float64 `json:"elevationGainM"`
-	AvgGradePct      float64 `json:"avgGradePct"`
-	StartElevationM  float64 `json:"startElevationM"`
-	EndElevationM    float64 `json:"endElevationM"`
+	Index            int      `json:"index"`
+	Difficulty       string   `json:"difficulty"`
+	StartSampleIndex int      `json:"startSampleIndex"`
+	EndSampleIndex   int      `json:"endSampleIndex"`
+	StartDistanceM   float64  `json:"startDistanceM"`
+	EndDistanceM     float64  `json:"endDistanceM"`
+	DistanceM        float64  `json:"distanceM"`
+	ElevationGainM   float64  `json:"elevationGainM"`
+	AvgGradePct      float64  `json:"avgGradePct"`
+	StartElevationM  float64  `json:"startElevationM"`
+	EndElevationM    float64  `json:"endElevationM"`
+	PaceSPKM         *float64 `json:"paceSPKM,omitempty"`
+	GapSPKM          *float64 `json:"gapSPKM,omitempty"`
 }
 
 type ActivityMedia struct {

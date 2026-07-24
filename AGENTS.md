@@ -32,7 +32,7 @@ Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in t
 - Unless explicitly told otherwise, open pull requests against `main`.
 - For unrelated new work, fetch the latest `origin/main` and create a fresh branch from it.
 - Before opening a pull request, fetch the latest `origin/main`, update the branch from it, resolve any merge conflicts, run the relevant checks, and only then push/open the PR. If the PR later becomes conflicted, resolve the conflict before pushing again or handing it off.
-- Format pull request descriptions with real Markdown and include a GitHub closing keyword such as `Closes #123` for the issue being addressed.
+- Format pull request descriptions with real Markdown and include a GitHub closing keyword such as `Closes #123` for the issue being addressed. When creating or editing PRs with `gh`, pass a body file or stdin so headings, lists, and blank lines are stored as actual newlines; never submit literal `\n` escapes.
 - Keep unrelated local/user changes intact. Do not revert or overwrite work you did not make.
 - Update `CHANGELOG.md` for user-facing changes and release-relevant fixes.
 - Update `docs/PRD.md` when product scope, requirements, or roadmap decisions change.

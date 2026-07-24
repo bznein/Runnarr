@@ -355,6 +355,8 @@ export type ActivityClimb = {
   avgGradePct: number;
   startElevationM: number;
   endElevationM: number;
+  paceSPKM?: number;
+  gapSPKM?: number;
 };
 
 export type ActivityMedia = {
@@ -458,6 +460,11 @@ export type ActivityListPage = {
   offset: number;
   nextOffset?: number;
   hasMore: boolean;
+};
+
+export type ActivityNavigation = {
+  previousId?: string;
+  nextId?: string;
 };
 
 export type CalendarActivitySummary = {
