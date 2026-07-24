@@ -4,6 +4,7 @@
 
 ### Features
 
+- Planned-run matching candidates now appear in a chronological date-grouped agenda.
 - Health sync controls and activity/job status now live in Settings with the other sync controls.
 - Added Makefile targets for standard backend, frontend, and Playwright checks.
 - Health now shows Garmin sleep score in the summary cards, trend chart, and daily metrics table when available.
@@ -24,6 +25,14 @@
 - Matched training-sheet activities now write summary metrics, structured workout interval tables, and separate athlete feedback/RPE back to Google Sheets with conflict-safe retries and safe warnings for ambiguous interval mappings.
 - Training-sheet matching now accepts optional feedback, partially maps unrepresented structured intervals with warnings, and allows proposed preview values to be edited before write-back.
 - Training-sheet matching now records the default RPE of 5 when the user leaves the RPE slider unchanged.
+
+### Fixes
+
+- Planned-run matching remains retryable when the initial candidate load fails.
+- Planned-run candidate loading no longer carries candidates between activities, and retries now show a busy state.
+- Planned-match previews are cleared and ignored when navigating between activities.
+- Planned-match mutations no longer update a later activity view after navigation.
+- Planned-match callbacks are ignored after editing or closing the matching dialog.
 - Training-sheet feedback write-back now refreshes the feedback cell with the latest saved reflection, queues updates that arrive during another sheet job, and repairs HR cells that were interpreted as time values by the workbook format.
 - Planned activity matching now offers a read-only training-sheet change preview with explicit Apply, conflict visibility, and stale-sheet revalidation before writeback.
 - Training-sheet match previews now render a focused, sheet-like live grid with proposed values in place, formatting when available, and selectable current/proposed cell details.

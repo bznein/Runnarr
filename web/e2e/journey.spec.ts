@@ -96,7 +96,15 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
 
   if (await visibleActivityLink(page, name, mobile).count() === 0) {
     const original = await readFile(gpxPath, "utf8");
+    const fixtureDate = new Date().toISOString().slice(0, 10);
+    // Keep the sequential browser projects at distinct times so navigation
+    // never falls back to UUID ordering for the imported activities.
+    const fixtureMinuteOffset = mobile ? 30 : 0;
     const fixture = original
+      .replace(/2026-07-01T06:(\d{2}):00Z/g, (_, minute) => {
+        const shiftedMinute = Number(minute) + fixtureMinuteOffset;
+        return `${fixtureDate}T06:${String(shiftedMinute).padStart(2, "0")}:00Z`;
+      })
       .replace("<name>Example Morning Run</name>", `<name>${name}</name>`)
       .replace("</gpx>", `<!-- ${projectSlug(projectName)} -->\n</gpx>`);
 
@@ -138,6 +146,94 @@ test.describe("local product journey", () => {
 
     await visibleActivityLink(page, name, mobile).click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
+
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    const plannedMatchDialog = page.getByRole("dialog", { name: "Match planned run" });
+    await expect(plannedMatchDialog).toBeVisible();
+    const agendaDays = plannedMatchDialog.locator(".planned-match-agenda-day");
+    await expect(agendaDays).toHaveCount(3);
+    await expect(agendaDays.nth(0).locator("h3")).toHaveText(/\d{4}/);
+    await expect(agendaDays.nth(1).getByText("E2E Planned Run", { exact: true })).toBeVisible();
+    await expect(agendaDays.nth(1).getByText("E2E Planned Speed Work", { exact: true })).toBeVisible();
+    await expect(agendaDays.nth(1).getByRole("radio")).toHaveCount(2);
+    await expect(agendaDays.nth(2).getByText("E2E Planned Long Run", { exact: true })).toBeVisible();
+    let releasePlannedCandidates = () => {};
+    const plannedCandidatesGate = new Promise<void>((resolve) => {
+      releasePlannedCandidates = resolve;
+    });
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=30", async (route) => {
+      await plannedCandidatesGate;
+      await route.continue();
+    });
+    await plannedMatchDialog.getByRole("button", { name: "Load more plans", exact: true }).click();
+    await expect(plannedMatchDialog).toBeVisible();
+    await expect(plannedMatchDialog.getByRole("status")).toHaveText("Loading more plans…");
+    releasePlannedCandidates();
+    await expect(agendaDays).toHaveCount(4);
+    await expect(plannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=30");
+    if (mobile) {
+      await expectNoHorizontalOverflow(page);
+    }
+    await plannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(plannedMatchDialog).toBeHidden();
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=30", async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "planned candidates unavailable" })
+      });
+    });
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    const failedPlannedMatchDialog = page.getByRole("dialog", { name: "Match planned run" });
+    await failedPlannedMatchDialog.getByRole("button", { name: "Load more plans", exact: true }).click();
+    await expect(failedPlannedMatchDialog).toBeVisible();
+    await expect(failedPlannedMatchDialog.getByText("planned candidates unavailable", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=30");
+    await failedPlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(failedPlannedMatchDialog).toBeHidden();
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    await expect(failedPlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true })).toBeVisible();
+    await failedPlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true }).click();
+    await expect(failedPlannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
+    await failedPlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(failedPlannedMatchDialog).toBeHidden();
+
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=7", async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "initial planned candidates unavailable" })
+      });
+    });
+    await page.reload();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    const initialFailurePlannedMatchDialog = page.getByRole("dialog", { name: "Match planned run" });
+    await expect(initialFailurePlannedMatchDialog.getByText("initial planned candidates unavailable", { exact: true })).toBeVisible();
+    await expect(initialFailurePlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true })).toBeVisible();
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=7");
+    let releaseInitialRetry = () => {};
+    const initialRetryGate = new Promise<void>((resolve) => {
+      releaseInitialRetry = resolve;
+    });
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=7", async (route) => {
+      await initialRetryGate;
+      await route.continue();
+    });
+    await initialFailurePlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true }).click();
+    const retryingPlans = initialFailurePlannedMatchDialog.getByRole("button", { name: "Retrying plans…", exact: true });
+    await expect(retryingPlans).toBeDisabled();
+    await expect(initialFailurePlannedMatchDialog.getByRole("status")).toHaveText("Retrying planned runs…");
+    releaseInitialRetry();
+    await expect(initialFailurePlannedMatchDialog.getByText("E2E Planned Long Run", { exact: true })).toBeVisible();
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=7");
+    await initialFailurePlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(initialFailurePlannedMatchDialog).toBeHidden();
+
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();

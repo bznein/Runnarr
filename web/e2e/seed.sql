@@ -36,12 +36,14 @@ on conflict (user_id, provider, metric_date) do update set
     weight_kg = excluded.weight_kg,
     body_fat_pct = excluded.body_fat_pct;
 
+-- Keep the seeded activities outside the imported E2E GPX times so the
+-- navigation journey has a deterministic Cycling -> imported -> Pool order.
 insert into activities(
     user_id, source, source_id, name, sport_type, start_time,
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-pool-swim', 'E2E Pool Swim', 'Swimming',
-    current_date + time '07:00', 1500, 1800, 1900, '{}'::jsonb
+    current_date + time '05:00', 1500, 1800, 1900, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -80,7 +82,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-cycling-activity', 'E2E Cycling Activity', 'Cycling',
-    current_date + time '06:00', 25000, 3600, 3750, '{}'::jsonb
+    current_date + time '07:00', 25000, 3600, 3750, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -97,7 +99,75 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-run', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A1', current_date, 'E2E Planned Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A1', current_date - 1, 'E2E Planned Run', 'Run', 'pending', '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw
+)
+select id, 'training_sheet', 'e2e-planned-recovery', 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', 'A2', current_date - 2, 'E2E Planned Recovery Run', 'Run', 'pending', '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw
+)
+select id, 'training_sheet', 'e2e-planned-speed', 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', 'A3', current_date - 1, 'E2E Planned Speed Work', 'Run', 'pending', '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw
+)
+select id, 'training_sheet', 'e2e-planned-long', 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', 'A4', current_date + 3, 'E2E Planned Long Run', 'Run', 'pending', '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw
+)
+select id, 'training_sheet', 'e2e-planned-far', 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', 'A5', current_date + 14, 'E2E Planned Far Run', 'Run', 'pending', '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
