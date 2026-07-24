@@ -15,6 +15,7 @@ import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
 import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
+import { plannedMatchPreviewForActivity } from "./plannedMatchPreview";
 import type {
   Activity,
   ActivityClimb,
@@ -2551,6 +2552,8 @@ function ActivityNavigation({
 
 function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
+  const activityIdRef = useRef(id);
+  activityIdRef.current = id;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
@@ -2588,7 +2591,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const previewPlannedActivity = useMutation({
     mutationFn: (draft: PlannedMatchDraft) => api.plannedMatchPreview(id!, draft),
     onSuccess: ({ preview }) => {
-      setMatchPreview(preview);
+      const currentPreview = plannedMatchPreviewForActivity(preview, activityIdRef.current);
+      if (currentPreview) {
+        setMatchPreview(currentPreview);
+      }
     }
   });
   const applyPlannedActivity = useMutation({
@@ -2748,6 +2754,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setNotesOpen(false);
     setMatchOpen(false);
     setMatchCandidateId(undefined);
+    setMatchPreview(undefined);
     setCheckInOpen(false);
     setPlannedMatchWindowDays(7);
     setRetryingPlannedMatchCandidates(false);
@@ -2756,6 +2763,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setPinningMediaId(undefined);
     setAnalysisTab("stats");
     updateActivityNotes.reset();
+    previewPlannedActivity.reset();
+    applyPlannedActivity.reset();
     uploadMedia.reset();
     updateMediaLocation.reset();
     setMediaFileInputKey((key) => key + 1);
