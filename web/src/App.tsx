@@ -2574,6 +2574,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryFn: () => api.plannedMatchCandidates(id!, plannedMatchWindowDays),
     enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet",
     placeholderData: (previousData) => previousData,
+    initialData: plannedMatchWindowDays === 30
+      ? () => queryClient.getQueryData<PlannedActivityMatchResponse>(["planned-match-candidates", id, 7])
+      : undefined,
     refetchInterval: (query) => {
       const writeback = query.state.data?.writeback;
       if (!writeback) {

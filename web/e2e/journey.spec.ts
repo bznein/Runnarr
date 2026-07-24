@@ -96,7 +96,9 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
 
   if (await visibleActivityLink(page, name, mobile).count() === 0) {
     const original = await readFile(gpxPath, "utf8");
+    const fixtureDate = new Date().toISOString().slice(0, 10);
     const fixture = original
+      .replace(/2026-07-01/g, fixtureDate)
       .replace("<name>Example Morning Run</name>", `<name>${name}</name>`)
       .replace("</gpx>", `<!-- ${projectSlug(projectName)} -->\n</gpx>`);
 
@@ -169,6 +171,24 @@ test.describe("local product journey", () => {
     }
     await plannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(plannedMatchDialog).toBeHidden();
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=30", async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "planned candidates unavailable" })
+      });
+    });
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    const failedPlannedMatchDialog = page.getByRole("dialog", { name: "Match planned run" });
+    await failedPlannedMatchDialog.getByRole("button", { name: "Load more plans", exact: true }).click();
+    await expect(failedPlannedMatchDialog).toBeVisible();
+    await expect(failedPlannedMatchDialog.getByText("planned candidates unavailable", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=30");
+    await failedPlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(failedPlannedMatchDialog).toBeHidden();
 
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
