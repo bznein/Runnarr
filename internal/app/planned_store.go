@@ -12,7 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const googleSheetsTokenID = "default"
+const (
+	googleSheetsTokenID             = "default"
+	plannedActivityStatusPending    = "pending"
+	plannedActivityStatusCompleted  = "completed"
+	plannedActivityStatusSuperseded = "superseded"
+)
 
 var (
 	errPlannedMatchInvalid      = errors.New("activity cannot be matched to a planned activity")
@@ -116,6 +121,7 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 			name = excluded.name,
 			sport_type = excluded.sport_type,
 			notes = excluded.notes,
+			status = case when planned_activities.status = 'superseded' then excluded.status else planned_activities.status end,
 			source_url = excluded.source_url,
 			raw = excluded.raw,
 			last_seen_at = now(),
@@ -157,13 +163,32 @@ func (s *Store) PlannedActivityExists(ctx context.Context, source, sourceID stri
 	return exists, err
 }
 
+func (s *Store) SupersedeStaleTrainingSheetPlans(ctx context.Context, workbookID string, planYear int) (int64, error) {
+	workbookID = strings.TrimSpace(workbookID)
+	if workbookID == "" {
+		return 0, fmt.Errorf("training sheet workbook ID is required")
+	}
+	start, end := trainingSheetPlanYearBounds(planYear)
+	result, err := s.db.Exec(ctx, `
+		update planned_activities
+		set status = 'superseded', updated_at = now()
+		where user_id = $1 and source = $2 and workbook_id <> $3
+			and planned_date >= $4::date and planned_date < $5::date
+			and status = 'pending'
+	`, scopedUserID(ctx), trainingSheetProvider, workbookID, start, end)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) ([]PlannedActivity, error) {
 	rows, err := s.db.Query(ctx, `
 		select `+plannedActivityColumns+`
 		from planned_activities
 		where user_id = $1 and planned_date >= $2::date and planned_date < $3::date
 			and planned_date >= current_date
-			and status <> 'completed'
+			and status = 'pending'
 		order by planned_date, plan_cell
 	`, scopedUserID(ctx), from, to)
 	if err != nil {
@@ -352,7 +377,7 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 		}
 		return PlannedActivity{}, errPlannedMatchConflict
 	}
-	if planned.Status != "pending" {
+	if planned.Status != plannedActivityStatusPending {
 		return PlannedActivity{}, errPlannedMatchConflict
 	}
 	if err = updateReflection(); err != nil {
@@ -366,7 +391,7 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 	`, plannedActivityID, activityID, matchedAt, scopedUserID(ctx)); err != nil {
 		return PlannedActivity{}, err
 	}
-	planned.Status = "completed"
+	planned.Status = plannedActivityStatusCompleted
 	planned.MatchedActivityID = activityID
 	planned.MatchedAt = &matchedAt
 	if _, err = tx.Exec(ctx, `
@@ -437,6 +462,11 @@ func (s *Store) GetTrainingSheetPlanYear(ctx context.Context) (int, error) {
 		return time.Now().UTC().Year(), nil
 	}
 	return year, err
+}
+
+func trainingSheetPlanYearBounds(planYear int) (time.Time, time.Time) {
+	start := time.Date(planYear, time.January, 1, 0, 0, 0, 0, time.UTC)
+	return start, start.AddDate(1, 0, 0)
 }
 
 func (s *Store) SetTrainingSheetPlanYear(ctx context.Context, year int) error {

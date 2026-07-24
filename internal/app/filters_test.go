@@ -3,6 +3,7 @@ package app
 import (
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -27,6 +28,20 @@ func TestActivityFilterConditionsSearch(t *testing.T) {
 	}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+}
+
+func TestActivityFilterConditionsHideSupersededTrainingSheetActivities(t *testing.T) {
+	conditions, args := activityFilterConditions(ActivityFilters{IncludeTrainingSheet: true}, 1)
+
+	if len(args) != 0 {
+		t.Fatalf("args = %#v, want no query args", args)
+	}
+	if len(conditions) != 1 || conditions[0] != trainingSheetActivityFilterCondition() {
+		t.Fatalf("conditions = %#v, want training-sheet visibility condition", conditions)
+	}
+	if !strings.Contains(conditions[0], "status in ('completed', 'superseded')") {
+		t.Fatalf("training-sheet condition = %q, want superseded plans hidden", conditions[0])
 	}
 }
 

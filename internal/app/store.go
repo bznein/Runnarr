@@ -2015,13 +2015,7 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 	if !filters.IncludeTrainingSheet {
 		conditions = append(conditions, "source <> 'training_sheet'")
 	} else {
-		conditions = append(conditions, `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
-			select 1 from planned_activities
-			where planned_activities.source = 'training_sheet'
-				and planned_activities.source_id = activities.source_id
-				and planned_activities.user_id = activities.user_id
-				and planned_activities.status = 'completed'
-		)))`)
+		conditions = append(conditions, trainingSheetActivityFilterCondition())
 	}
 	if strings.TrimSpace(filters.Search) != "" {
 		conditions = append(conditions, fmt.Sprintf("coalesce(nullif(local_name, ''), name) ilike $%d", nextArg))
@@ -2048,6 +2042,16 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 		args = append(args, filters.ExcludedSportTypes)
 	}
 	return conditions, args
+}
+
+func trainingSheetActivityFilterCondition() string {
+	return `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
+		select 1 from planned_activities
+		where planned_activities.source = 'training_sheet'
+			and planned_activities.source_id = activities.source_id
+			and planned_activities.user_id = activities.user_id
+			and planned_activities.status in ('` + plannedActivityStatusCompleted + `', '` + plannedActivityStatusSuperseded + `')
+	)))`
 }
 
 func activityOrderBy(sortBy, sortOrder string) string {
