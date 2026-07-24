@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -14,6 +14,8 @@ import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
+import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
+import type { ThemePreference } from "./theme";
 import type {
   Activity,
   ActivityClimb,
@@ -47,7 +49,6 @@ type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
 type HealthDateRange = { from: string; to: string };
 type GearSortBy = "first_used" | "last_used" | "activity_count" | "distance" | "distance_percent";
-type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityAnalysisTab = "stats" | "intervals";
@@ -166,15 +167,6 @@ const activityChartSeries: ActivityChartSeries[] = [
   { key: "cadence", label: "Cadence", color: "#7a4eb2", defaultVisible: false, format: (value) => `${Math.round(value)} spm` }
 ];
 
-function applyThemePreference(preference: ThemePreference) {
-  const root = document.documentElement;
-  if (preference === "system") {
-    delete root.dataset.theme;
-    return;
-  }
-  root.dataset.theme = preference;
-}
-
 type PwaInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -264,6 +256,7 @@ function useSaveUserPreferences(userID?: string) {
 
 export function App() {
   const [themePreference, setThemePreference] = useState<ThemePreference>("system");
+  const [themePreferenceUserID, setThemePreferenceUserID] = useState<string>();
   const pwa = usePwaInstallPrompt();
   const queryClient = useQueryClient();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -276,12 +269,18 @@ export function App() {
   const savePreferences = useSaveUserPreferences(effectiveUserID);
 
   useEffect(() => {
-    applyThemePreference(themePreference);
-  }, [themePreference]);
+    applyThemePreference(themePreferenceForAccount(themePreference, themePreferenceUserID, effectiveUserID));
+  }, [effectiveUserID, themePreference, themePreferenceUserID]);
 
   useEffect(() => {
-    setThemePreference(preferences.data?.themePreference ?? "system");
-  }, [effectiveUserID, preferences.data?.themePreference]);
+    if (!effectiveUserID || !preferences.data) {
+      setThemePreference("system");
+      setThemePreferenceUserID(undefined);
+      return;
+    }
+    setThemePreference(parseThemePreference(preferences.data.themePreference));
+    setThemePreferenceUserID(effectiveUserID);
+  }, [effectiveUserID, preferences.data]);
 
   useEffect(() => {
     if (!effectiveUserID) {
@@ -4971,11 +4970,11 @@ function DisplaySettingsSection({
   return (
     <section className="panel display-panel">
       <div>
-        <div className="panel-heading">Display</div>
-        <p className="muted">Choose how Runnarr follows your browser color settings.</p>
+        <div className="panel-heading">Appearance</div>
+        <p className="muted">Choose a visual palette for this account. Your selection is saved with your account and follows you between devices.</p>
       </div>
       <ThemePreferenceControl value={value} onChange={onChange} />
-      {error && <div className="error">{error.message || "Could not save display preferences"}</div>}
+      {error && <div className="error" role="alert">{error.message || "Could not save appearance preferences"}</div>}
     </section>
   );
 }
@@ -5071,27 +5070,34 @@ function ThemePreferenceControl({
   value: ThemePreference;
   onChange: (preference: ThemePreference) => void;
 }) {
-  const options: Array<{ value: ThemePreference; label: string; icon: JSX.Element }> = [
-    { value: "system", label: "System", icon: <Monitor size={15} /> },
-    { value: "light", label: "Light", icon: <Sun size={15} /> },
-    { value: "dark", label: "Dark", icon: <Moon size={15} /> }
-  ];
-
   return (
-    <div className="segmented-control theme-control" role="group" aria-label="Theme preference">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          className={value === option.value ? "active" : ""}
-          type="button"
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-        >
-          {option.icon}
-          {option.label}
-        </button>
-      ))}
-    </div>
+    <fieldset className="theme-picker">
+      <legend>Color theme</legend>
+      <div className="theme-options">
+        {themeOptions.map((option) => (
+          <label className={`theme-option ${value === option.value ? "active" : ""}`} key={option.value}>
+            <input
+              type="radio"
+              name="runnarr-theme"
+              value={option.value}
+              checked={value === option.value}
+              onChange={() => onChange(option.value)}
+            />
+            <span className="theme-option-card">
+              <span className={`theme-preview theme-preview--${option.value}`} aria-hidden="true">
+                <span className="theme-preview-sidebar" />
+                <span className="theme-preview-page" />
+                <span className="theme-preview-accent" />
+              </span>
+              <span className="theme-option-copy">
+                <strong>{option.label}</strong>
+                <span>{option.description}</span>
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

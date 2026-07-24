@@ -120,7 +120,81 @@
   }
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="ocean"] {
+  color-scheme: light;
+  --color-text: #162a3a;
+  --color-heading: #12304a;
+  --color-text-soft: #27485e;
+  --color-muted: #557083;
+  --color-muted-strong: #3b5c70;
+  --color-page: #f2f7fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f7fafc;
+  --color-surface-soft: #e5f0f7;
+  --color-surface-subtle: #eaf3f8;
+  --color-surface-strong: #d6e7f1;
+  --color-border: #c8dbe7;
+  --color-border-soft: #dceaf2;
+  --color-border-muted: #c2d8e5;
+  --color-border-dialog: #b8cfdf;
+  --color-border-control: #a9c5d6;
+  --color-border-hover: #6fa7c2;
+  --color-sidebar-bg: #153b52;
+  --color-sidebar-text: #f3fbff;
+  --color-sidebar-link: #cde5f0;
+  --color-sidebar-active: #20566f;
+  --color-primary: #197aa1;
+  --color-primary-strong: #12607e;
+  --color-primary-text: #0f5f7f;
+  --color-primary-soft: #e6f5fb;
+  --color-success-soft: #e2f3f5;
+  --color-map-dark: #09202d;
+  --color-marker-dark: #153b52;
+  --shadow-low: 0 1px 2px rgba(13, 47, 65, 0.08);
+  --shadow-dialog: 0 18px 42px rgba(13, 47, 65, 0.24);
+  --shadow-menu: 0 10px 28px rgba(13, 47, 65, 0.18);
+  --color-backdrop: rgba(13, 47, 65, 0.36);
+}
+
+:root[data-theme="sunset"] {
+  color-scheme: light;
+  --color-text: #3b2927;
+  --color-heading: #3f2520;
+  --color-text-soft: #5d4039;
+  --color-muted: #7d645d;
+  --color-muted-strong: #634a43;
+  --color-page: #fcf6ef;
+  --color-surface: #fffdf9;
+  --color-surface-muted: #fff9f3;
+  --color-surface-soft: #f9eadf;
+  --color-surface-subtle: #f8eee6;
+  --color-surface-strong: #f1ded0;
+  --color-border: #eadcd1;
+  --color-border-soft: #f1e5dc;
+  --color-border-muted: #e3d0c2;
+  --color-border-dialog: #ddc6b7;
+  --color-border-control: #d6b9a6;
+  --color-border-hover: #bd8066;
+  --color-sidebar-bg: #4b2d2a;
+  --color-sidebar-text: #fff8f0;
+  --color-sidebar-link: #f4dcd0;
+  --color-sidebar-active: #6c3c34;
+  --color-primary: #c65b40;
+  --color-primary-strong: #96402f;
+  --color-primary-text: #873725;
+  --color-primary-soft: #fff0e7;
+  --color-success-soft: #eaf3df;
+  --color-warning: #9b641d;
+  --color-warning-strong: #c66e23;
+  --color-map-dark: #241916;
+  --color-marker-dark: #4b2d2a;
+  --shadow-low: 0 1px 2px rgba(76, 42, 32, 0.08);
+  --shadow-dialog: 0 18px 42px rgba(76, 42, 32, 0.24);
+  --shadow-menu: 0 10px 28px rgba(76, 42, 32, 0.18);
+  --color-backdrop: rgba(76, 42, 32, 0.34);
+}
+
+:root[data-theme="midnight"] {
   color-scheme: dark;
   --color-text: #e5ece8;
   --color-heading: #f6f7f2;
@@ -2361,12 +2435,16 @@ textarea {
 }
 
 .upload-panel,
-.provider-panel,
-.display-panel {
+.provider-panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.display-panel {
+  display: grid;
+  gap: 18px;
 }
 
 .climb-settings-panel {
@@ -2514,9 +2592,147 @@ textarea {
   color: var(--color-muted);
 }
 
-.theme-control {
-  min-width: min(100%, 360px);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.theme-picker {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.theme-picker legend {
+  margin-bottom: 10px;
+  color: var(--color-muted-strong);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.theme-option {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.theme-option input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.theme-option-card {
+  display: grid;
+  gap: 9px;
+  height: 100%;
+  padding: 9px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-low);
+}
+
+.theme-option:hover .theme-option-card {
+  border-color: var(--color-border-hover);
+}
+
+.theme-option input:focus-visible + .theme-option-card {
+  outline: 3px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.theme-option.active .theme-option-card {
+  border-color: var(--color-primary-strong);
+  background: var(--color-primary-soft);
+  box-shadow: 0 0 0 1px var(--color-primary-strong);
+}
+
+.theme-preview {
+  display: grid;
+  grid-template-columns: 24% 1fr;
+  grid-template-rows: 1fr 10px;
+  height: 54px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--preview-sidebar) 28%, var(--preview-page));
+  border-radius: 5px;
+  background: var(--preview-page);
+}
+
+.theme-preview-sidebar {
+  grid-row: 1 / -1;
+  background: var(--preview-sidebar);
+}
+
+.theme-preview-page {
+  margin: 7px 7px 3px;
+  border-radius: 2px;
+  background: var(--preview-surface);
+}
+
+.theme-preview-accent {
+  margin: 0 7px 5px;
+  border-radius: 2px;
+  background: var(--preview-accent);
+}
+
+.theme-preview--system {
+  --preview-sidebar: #202927;
+  --preview-page: #f5f7f6;
+  --preview-surface: #ffffff;
+  --preview-accent: #2f8f83;
+}
+
+.theme-preview--runnarr {
+  --preview-sidebar: #202927;
+  --preview-page: #f5f7f6;
+  --preview-surface: #ffffff;
+  --preview-accent: #2f8f83;
+}
+
+.theme-preview--ocean {
+  --preview-sidebar: #153b52;
+  --preview-page: #f2f7fb;
+  --preview-surface: #ffffff;
+  --preview-accent: #197aa1;
+}
+
+.theme-preview--sunset {
+  --preview-sidebar: #4b2d2a;
+  --preview-page: #fcf6ef;
+  --preview-surface: #fffdf9;
+  --preview-accent: #c65b40;
+}
+
+.theme-preview--midnight {
+  --preview-sidebar: #0b0f0e;
+  --preview-page: #111614;
+  --preview-surface: #19211e;
+  --preview-accent: #4fb6a8;
+}
+
+.theme-option-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.theme-option-copy strong {
+  color: var(--color-heading);
+  font-size: 13px;
+}
+
+.theme-option-copy > span {
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .diagnostics-panel {
@@ -3011,7 +3227,6 @@ textarea {
 
   .upload-panel,
   .provider-panel,
-  .display-panel,
   .climb-settings-header,
   .health-controls-panel,
   .page-header {
@@ -3022,9 +3237,13 @@ textarea {
   .provider-controls,
   .health-range-controls,
   .health-sync-controls,
-  .theme-control {
+  .theme-options {
     justify-content: flex-start;
     width: 100%;
+  }
+
+  .theme-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .calendar-controls {
@@ -3552,6 +3771,10 @@ textarea {
 
 @media (max-width: 520px) {
   .gear-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-options {
     grid-template-columns: 1fr;
   }
 }
