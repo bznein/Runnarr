@@ -519,6 +519,40 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 	return page, nil
 }
 
+func (s *Store) ActivityNavigation(ctx context.Context, id string, filters ActivityFilters) (ActivityNavigation, error) {
+	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
+	orderBy := activityOrderBy(filters.SortBy, filters.SortOrder)
+	idParam := len(args) + 1
+	args = append(args, id)
+
+	var previousID, nextID sql.NullString
+	err := s.db.QueryRow(ctx, fmt.Sprintf(`
+		select previous_id, next_id
+		from (
+			select activities.id::text as current_id,
+				lag(activities.id::text) over (%s) as previous_id,
+				lead(activities.id::text) over (%s) as next_id
+			from activities%s
+		) ordered_activities
+		where current_id = $%d
+	`, orderBy, orderBy, where, idParam), args...).Scan(&previousID, &nextID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ActivityNavigation{}, nil
+	}
+	if err != nil {
+		return ActivityNavigation{}, err
+	}
+
+	navigation := ActivityNavigation{}
+	if previousID.Valid {
+		navigation.PreviousID = previousID.String
+	}
+	if nextID.Valid {
+		navigation.NextID = nextID.String
+	}
+	return navigation, nil
+}
+
 func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (ActivityCalendar, error) {
 	filters.IncludeTrainingSheet = true
 	userID := scopedUserID(ctx)
@@ -719,7 +753,11 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	if err != nil {
 		return activity, err
 	}
-	activity.Climbs = detectActivityClimbsWithSettings(samples, climbSettings.Settings)
+	activity.Climbs = enrichActivityClimbPerformance(
+		detectActivityClimbsForSport(activity.SportType, samples, climbSettings.Settings),
+		samples,
+		laps,
+	)
 	return activity, nil
 }
 

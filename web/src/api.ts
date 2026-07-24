@@ -2,6 +2,7 @@ import type {
   Activity,
   ActivityClimbPreviewResponse,
   ActivityListPage,
+  ActivityNavigation,
   ActivitySeries,
   ActivityMedia,
   ActivityCalendar,
@@ -207,6 +208,10 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  activityNavigation: (id: string, filters?: ActivityTypeFilters) => {
+    const query = activityFilterQuery(filters);
+    return request<ActivityNavigation>(`/api/activities/${encodeURIComponent(id)}/navigation${query ? `?${query}` : ""}`);
+  },
   activitySeries: (id: string, maxPoints = 1200) => request<ActivitySeries>(`/api/activities/${encodeURIComponent(id)}/series?maxPoints=${maxPoints}`),
   gears: () => request<GearListResponse>("/api/gears"),
   gear: (id: string) => request<GearDetailResponse>(`/api/gears/${id}`),

@@ -1164,6 +1164,15 @@ textarea {
   font-weight: 700;
 }
 
+.climb-item-performance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--color-heading);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .climb-difficulty {
   display: inline-flex;
   align-items: center;
@@ -1230,8 +1239,59 @@ textarea {
 }
 
 .climb-profile {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 240px;
   min-width: 0;
+}
+
+.climb-profile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.climb-profile-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px 12px;
+  color: var(--color-muted-strong);
+  font-size: 11px;
+}
+
+.climb-profile-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.climb-profile-legend-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.climb-profile-legend-swatch.elevation {
+  background: #b7791f;
+}
+
+.climb-profile-legend-swatch.pace {
+  background: #2f6df6;
+}
+
+.climb-profile-legend-swatch.gap {
+  background: #c84d4d;
+}
+
+.climb-profile-chart {
+  min-width: 0;
+  min-height: 0;
 }
 
 .media-panel {
@@ -2232,6 +2292,16 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.activity-navigation {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.activity-navigation-button {
+  width: 40px;
+  min-width: 40px;
 }
 
 .action-menu-wrap {
@@ -3287,6 +3357,11 @@ textarea {
 
   .actions > .media-hidden-input {
     width: 1px;
+  }
+
+  .actions > .activity-navigation {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 
   .gear-sort-control,

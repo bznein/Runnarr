@@ -141,6 +141,34 @@ test.describe("local product journey", () => {
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();
+    const previousActivity = page.getByRole("button", { name: "Previous activity" });
+    await expect(previousActivity).toBeEnabled();
+
+    await previousActivity.click();
+    await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    const cyclingNextActivity = page.getByRole("button", { name: "Next activity" });
+    await expect(cyclingNextActivity).toBeEnabled();
+    await cyclingNextActivity.click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(previousActivity).toBeEnabled();
+
+    let releaseNavigation = () => {};
+    const navigationGate = new Promise<void>((resolve) => {
+      releaseNavigation = resolve;
+    });
+    await page.route("**/api/activities/*/navigation**", async (route) => {
+      await navigationGate;
+      await route.continue();
+    });
+    await previousActivity.click();
+    await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    await expect(cyclingNextActivity).toBeDisabled();
+    releaseNavigation();
+    await expect(cyclingNextActivity).toBeEnabled();
+    await page.unroute("**/api/activities/*/navigation**");
+
+    await cyclingNextActivity.click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
     if (mobile) {
       await expect(page.locator(".mobile-header-title")).toHaveText("Activity");
       await expectNoHorizontalOverflow(page);

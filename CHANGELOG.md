@@ -40,6 +40,8 @@
 
 - Added read-only Garmin gear sync with active/retired gear views, gear detail pages, Garmin mileage, and assigned activity links.
 - Activity list columns can now be toggled, and long activity/gear names are clipped more aggressively to keep the list scannable.
+- Activity detail pages now provide previous/next arrows for browsing activities in the current list order.
+- Activity detail navigation now waits for refreshed neighbor data before allowing another move.
 - Activity list name, type, and date filters now share one filter dialog with a single selectable activity-type list.
 - Activity detail pages now support local-only notes that do not modify provider activities.
 - Activity detail pages can export a GPX track, with an option to include sensor extensions.
@@ -60,6 +62,7 @@
 - `scripts/dev.sh` no longer overwrites a user-provided `RUNNARR_ADMIN_PASSWORD` (including `change-me`); it only auto-generates one when missing, so the login value you set stays valid.
 - Gear list and gear detail pages now support sorting by last used, first used, distance, percent-to-limit, and activity count.
 - Activity route coloring now supports switching between pace and GAP (when lap GAP is available) for segment coloring and legend labels.
+- Climb details now show recorded pace and overlapping lap GAP alongside the elevation profile when those values are available.
 - Added more metric card graphics/icons on dashboard and health pages to improve scanability of steps/energy/sleep/HRV/more core fields.
 - Climb detection settings now live in Settings with persistent preset controls and a temporary per-activity sensitivity override; activity climb detections re-compute after saved changes.
 - Added a new Calendar view with a month-by-month activity grid, month navigation, and clickable activity links.
@@ -67,6 +70,7 @@
 ### Fixes
 
 - Calendar day and month queries now honor the browser timezone at activity date boundaries, including planned entries around midnight, while keeping date-only planned entries on their planned day.
+- Climb detection thresholds and difficulty now account for cycling activities separately from running-style activities.
 - Activity detail planned-run matching now uses a compact Match/Unmatch action, and assigned gear appears as a small chip beside the activity title.
 - Health range changes no longer load the preserved raw Garmin payload for every day, making first-time 30D and 90D views responsive.
 - Activity type filters now use a compact include/exclude control with checkbox bulk actions.
