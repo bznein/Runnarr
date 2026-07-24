@@ -2566,6 +2566,16 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const activityFilters = activityFiltersFromSearchParams(searchParams);
   const [plannedMatchWindowDays, setPlannedMatchWindowDays] = useState(7);
   const [retryingPlannedMatchCandidates, setRetryingPlannedMatchCandidates] = useState(false);
+  const plannedMatchInteractionGenerationRef = useRef(0);
+  const plannedMatchRetryGenerationRef = useRef(0);
+  const invalidatePlannedMatchInteraction = () => {
+    plannedMatchInteractionGenerationRef.current += 1;
+    return plannedMatchInteractionGenerationRef.current;
+  };
+  const invalidatePlannedMatchRetry = () => {
+    plannedMatchRetryGenerationRef.current += 1;
+    return plannedMatchRetryGenerationRef.current;
+  };
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
   const activityNavigation = useQuery({
     queryKey: ["activity-navigation", id, activityListSearch],
@@ -2593,10 +2603,17 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
   });
   const previewPlannedActivity = useMutation({
-    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; draft: PlannedMatchDraft }) =>
+    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; requestGeneration: number; draft: PlannedMatchDraft }) =>
       api.plannedMatchPreview(activityId, draft),
-    onSuccess: ({ preview }, { activityId, activityViewGeneration }) => {
-      if (!plannedMatchRequestIsCurrent(activityId, activityViewGeneration, activityIdRef.current, activityViewRef.current.generation)) {
+    onSuccess: ({ preview }, { activityId, activityViewGeneration, requestGeneration }) => {
+      if (!plannedMatchRequestIsCurrent(
+        activityId,
+        activityViewGeneration,
+        activityIdRef.current,
+        activityViewRef.current.generation,
+        requestGeneration,
+        plannedMatchInteractionGenerationRef.current
+      )) {
         return;
       }
       const currentPreview = plannedMatchPreviewForActivity(preview, activityIdRef.current);
@@ -2606,23 +2623,37 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
   });
   const applyPlannedActivity = useMutation({
-    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; draft: PlannedMatchDraft & { fingerprint: string } }) =>
+    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; requestGeneration: number; draft: PlannedMatchDraft & { fingerprint: string } }) =>
       api.applyPlannedMatchPreview(activityId, draft),
-    onSuccess: async (_result, { activityId, activityViewGeneration }) => {
+    onSuccess: async (_result, { activityId, activityViewGeneration, requestGeneration }) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", activityId] }),
         queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
         queryClient.invalidateQueries({ queryKey: ["activity-calendar"] }),
         queryClient.invalidateQueries({ queryKey: ["activity", activityId] })
       ]);
-      if (!plannedMatchRequestIsCurrent(activityId, activityViewGeneration, activityIdRef.current, activityViewRef.current.generation)) {
+      if (!plannedMatchRequestIsCurrent(
+        activityId,
+        activityViewGeneration,
+        activityIdRef.current,
+        activityViewRef.current.generation,
+        requestGeneration,
+        plannedMatchInteractionGenerationRef.current
+      )) {
         return;
       }
       setMatchPreview(undefined);
       setMatchOpen(false);
     },
-    onError: (_error, { activityId, activityViewGeneration }) => {
-      if (plannedMatchRequestIsCurrent(activityId, activityViewGeneration, activityIdRef.current, activityViewRef.current.generation)) {
+    onError: (_error, { activityId, activityViewGeneration, requestGeneration }) => {
+      if (plannedMatchRequestIsCurrent(
+        activityId,
+        activityViewGeneration,
+        activityIdRef.current,
+        activityViewRef.current.generation,
+        requestGeneration,
+        plannedMatchInteractionGenerationRef.current
+      )) {
         setMatchPreview(undefined);
       }
     }
@@ -2761,6 +2792,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [id, routeUsesGap]);
 
   useEffect(() => {
+    invalidatePlannedMatchInteraction();
+    invalidatePlannedMatchRetry();
     setHighlightedSample(undefined);
     setSelectedClimbIndex(undefined);
     setActionsOpen(false);
@@ -2906,6 +2939,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     updateActivityReflection.mutate({ feedback, rpe });
   };
   const openMatchDialog = (candidateId?: string) => {
+    invalidatePlannedMatchInteraction();
+    invalidatePlannedMatchRetry();
+    setRetryingPlannedMatchCandidates(false);
     const nextCandidateId = candidateId ?? plannedMatchCandidates.data?.suggestedId ?? plannedMatchCandidates.data?.candidates[0]?.id;
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
@@ -2914,10 +2950,17 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setMatchOpen(true);
   };
   const handlePreviewMatch = (draft: PlannedMatchDraft) => {
+    const requestGeneration = invalidatePlannedMatchInteraction();
     applyPlannedActivity.reset();
-    previewPlannedActivity.mutate({ activityId: id!, activityViewGeneration: activityViewRef.current.generation, draft });
+    previewPlannedActivity.mutate({
+      activityId: id!,
+      activityViewGeneration: activityViewRef.current.generation,
+      requestGeneration,
+      draft
+    });
   };
   const resetMatchPreview = () => {
+    invalidatePlannedMatchInteraction();
     setMatchPreview(undefined);
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
@@ -2929,8 +2972,16 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     applyPlannedActivity.mutate({
       activityId: id!,
       activityViewGeneration: activityViewRef.current.generation,
+      requestGeneration: plannedMatchInteractionGenerationRef.current,
       draft: { ...draft, fingerprint: matchPreview.fingerprint }
     });
+  };
+  const closeMatchDialog = () => {
+    invalidatePlannedMatchInteraction();
+    invalidatePlannedMatchRetry();
+    setRetryingPlannedMatchCandidates(false);
+    setMatchPreview(undefined);
+    setMatchOpen(false);
   };
   const handleMediaFilesSelected = (files: File[]) => {
     if (files.length === 0 || uploadMedia.isPending) {
@@ -3087,13 +3138,16 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             if (plannedMatchCandidates.isError) {
               const retryActivityId = id!;
               const retryActivityViewGeneration = activityViewRef.current.generation;
+              const retryGeneration = invalidatePlannedMatchRetry();
               setRetryingPlannedMatchCandidates(true);
               void plannedMatchCandidates.refetch().finally(() => {
                 if (plannedMatchRequestIsCurrent(
                   retryActivityId,
                   retryActivityViewGeneration,
                   activityIdRef.current,
-                  activityViewRef.current.generation
+                  activityViewRef.current.generation,
+                  retryGeneration,
+                  plannedMatchRetryGenerationRef.current
                 )) {
                   setRetryingPlannedMatchCandidates(false);
                 }
@@ -3102,7 +3156,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             }
             setPlannedMatchWindowDays(30);
           }}
-          onClose={() => setMatchOpen(false)}
+          onClose={closeMatchDialog}
         />
       )}
       {checkInOpen && (

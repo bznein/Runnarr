@@ -6,9 +6,13 @@ export function plannedMatchRequestIsCurrent(
   activityId: string,
   activityViewGeneration: number,
   currentActivityId: string | undefined,
-  currentActivityViewGeneration: number
+  currentActivityViewGeneration: number,
+  requestGeneration?: number,
+  currentRequestGeneration?: number
 ): boolean {
-  return plannedMatchActivityIsCurrent(activityId, currentActivityId) && activityViewGeneration === currentActivityViewGeneration;
+  return plannedMatchActivityIsCurrent(activityId, currentActivityId)
+    && activityViewGeneration === currentActivityViewGeneration
+    && (requestGeneration === undefined || requestGeneration === currentRequestGeneration);
 }
 
 export function plannedMatchPreviewForActivity<T extends { activityId: string }>(preview: T, activityId?: string): T | undefined {
