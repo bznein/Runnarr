@@ -20,6 +20,7 @@ import type {
   ActivityInterval,
   ActivityLap,
   ActivityMedia,
+  ActivityNavigation as ActivityNavigationData,
   ActivitySample,
   ActivityWorkoutStep,
   ActivitySortBy,
@@ -1870,7 +1871,13 @@ function ActivitiesPage() {
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
       {activitiesLoaded && activityList.length > 0 && (
         <>
-          <ActivityTable activities={activityList} visibleColumns={visibleColumns} onDelete={handleDelete} deletingId={deleteActivity.variables} />
+          <ActivityTable
+            activities={activityList}
+            visibleColumns={visibleColumns}
+            activityListSearch={searchParams.toString()}
+            onDelete={handleDelete}
+            deletingId={deleteActivity.variables}
+          />
           {activities.hasNextPage && (
             <div className="pagination-actions">
               <button
@@ -2378,12 +2385,14 @@ function ActivityTable({
   activities,
   compact = false,
   visibleColumns,
+  activityListSearch,
   onDelete,
   deletingId
 }: {
   activities: Activity[];
   compact?: boolean;
   visibleColumns?: ActivityTableColumnKey[];
+  activityListSearch?: string;
   onDelete?: (activity: Activity) => void;
   deletingId?: string;
 }) {
@@ -2413,7 +2422,7 @@ function ActivityTable({
           {activities.map((activity) => (
             <tr key={activity.id}>
               {showColumn("date") && <td>{formatDate(activity.startTime)}</td>}
-              <td className="activity-name-cell"><Link to={`/activities/${activity.id}`} title={activity.name}>{activity.name}</Link></td>
+              <td className="activity-name-cell"><Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link></td>
               {showColumn("type") && <td className="clip-cell" title={activity.sportType}>{activity.sportType}</td>}
               {showColumn("gear") && <td className="gear-table-cell"><GearChipList gear={activity.gear} compact /></td>}
               {showColumn("distance") && <td>{formatDistance(activity.distanceM)}</td>}
@@ -2439,7 +2448,7 @@ function ActivityTable({
         </tbody>
       </table>
     </div>
-    <ActivityCardList activities={activities} compact={compact} onDelete={onDelete} deletingId={deletingId} />
+    <ActivityCardList activities={activities} compact={compact} activityListSearch={activityListSearch} onDelete={onDelete} deletingId={deletingId} />
     </>
   );
 }
@@ -2447,11 +2456,13 @@ function ActivityTable({
 function ActivityCardList({
   activities,
   compact = false,
+  activityListSearch,
   onDelete,
   deletingId
 }: {
   activities: Activity[];
   compact?: boolean;
+  activityListSearch?: string;
   onDelete?: (activity: Activity) => void;
   deletingId?: string;
 }) {
@@ -2461,7 +2472,7 @@ function ActivityCardList({
         <article className="activity-card" key={activity.id}>
           <div className="activity-card-header">
             <div className="activity-card-title">
-              <Link to={`/activities/${activity.id}`} title={activity.name}>{activity.name}</Link>
+              <Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link>
               <span>{formatDate(activity.startTime)} · {activity.sportType}</span>
             </div>
             {onDelete && (
@@ -2492,13 +2503,66 @@ function ActivityCardList({
   );
 }
 
+function activityDetailPath(id: string, activityListSearch?: string) {
+  const query = activityListSearch?.replace(/^\?/, "");
+  return `/activities/${encodeURIComponent(id)}${query ? `?${query}` : ""}`;
+}
+
+function ActivityNavigation({
+  previousId,
+  nextId,
+  loading,
+  onNavigate
+}: ActivityNavigationData & { loading: boolean; onNavigate: (id: string) => void }) {
+  return (
+    <div className="activity-navigation" role="group" aria-label="Activity navigation" aria-busy={loading}>
+      <button
+        className="icon-button activity-navigation-button"
+        type="button"
+        title="Previous activity"
+        aria-label="Previous activity"
+        disabled={loading || !previousId}
+        onClick={() => {
+          if (previousId) {
+            onNavigate(previousId);
+          }
+        }}
+      >
+        <ChevronLeft size={18} />
+      </button>
+      <button
+        className="icon-button activity-navigation-button"
+        type="button"
+        title="Next activity"
+        aria-label="Next activity"
+        disabled={loading || !nextId}
+        onClick={() => {
+          if (nextId) {
+            onNavigate(nextId);
+          }
+        }}
+      >
+        <ChevronRight size={18} />
+      </button>
+    </div>
+  );
+}
+
 function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
+  const [searchParams] = useSearchParams();
+  const activityListSearch = searchParams.toString();
+  const activityFilters = activityFiltersFromSearchParams(searchParams);
   const [plannedMatchWindowDays, setPlannedMatchWindowDays] = useState(7);
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
+  const activityNavigation = useQuery({
+    queryKey: ["activity-navigation", id, activityListSearch],
+    queryFn: () => api.activityNavigation(id!, activityFilters),
+    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
+  });
   const activitySeries = useQuery({
     queryKey: ["activity-series", id],
     queryFn: () => api.activitySeries(id!, 1200),
@@ -2881,6 +2945,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       eyebrow={`${confirmedItem.sportType} · ${formatDate(confirmedItem.startTime)}`}
       actions={
         <>
+          <ActivityNavigation
+            previousId={activityNavigation.data?.previousId}
+            nextId={activityNavigation.data?.nextId}
+            loading={activityNavigation.isFetching}
+            onNavigate={(nextID) => navigate(activityDetailPath(nextID, activityListSearch))}
+          />
           <ActivityMediaUploadAction
             inputKey={mediaFileInputKey}
             uploading={uploadMedia.isPending}

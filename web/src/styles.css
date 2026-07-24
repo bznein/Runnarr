@@ -2200,6 +2200,16 @@ textarea {
   gap: 10px;
 }
 
+.activity-navigation {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.activity-navigation-button {
+  width: 40px;
+  min-width: 40px;
+}
+
 .action-menu-wrap {
   position: relative;
 }
@@ -3239,6 +3249,11 @@ textarea {
 
   .actions > .media-hidden-input {
     width: 1px;
+  }
+
+  .actions > .activity-navigation {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 
   .gear-sort-control,
