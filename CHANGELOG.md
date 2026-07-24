@@ -25,6 +25,10 @@
 - Matched training-sheet activities now write summary metrics, structured workout interval tables, and separate athlete feedback/RPE back to Google Sheets with conflict-safe retries and safe warnings for ambiguous interval mappings.
 - Training-sheet matching now accepts optional feedback, partially maps unrepresented structured intervals with warnings, and allows proposed preview values to be edited before write-back.
 - Training-sheet matching now records the default RPE of 5 when the user leaves the RPE slider unchanged.
+
+### Fixes
+
+- Planned-run matching remains retryable when the initial candidate load fails.
 - Training-sheet feedback write-back now refreshes the feedback cell with the latest saved reflection, queues updates that arrive during another sheet job, and repairs HR cells that were interpreted as time values by the workbook format.
 - Planned activity matching now offers a read-only training-sheet change preview with explicit Apply, conflict visibility, and stale-sheet revalidation before writeback.
 - Training-sheet match previews now render a focused, sheet-like live grid with proposed values in place, formatting when available, and selectable current/proposed cell details.

@@ -1,9 +1,13 @@
-import type { PlannedActivity } from "./types";
+import type { PlannedActivity, PlannedActivityMatchResponse } from "./types";
 
 export type PlannedActivityAgendaGroup = {
   plannedDate: string;
   candidates: PlannedActivity[];
 };
+
+export function plannedMatchResponseForDialog(data?: PlannedActivityMatchResponse): PlannedActivityMatchResponse {
+  return data ?? { candidates: [], hasMore: false };
+}
 
 function plannedDateKey(value: string) {
   return value.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? value;

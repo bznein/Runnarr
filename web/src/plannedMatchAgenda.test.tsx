@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { formatPlannedActivityAgendaDate, groupPlannedActivityCandidates, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
+import { formatPlannedActivityAgendaDate, groupPlannedActivityCandidates, plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
 import type { PlannedActivity } from "./types";
 
 function candidate(id: string, plannedDate: string, name = id, notes?: string): PlannedActivity {
@@ -63,5 +63,9 @@ describe("planned activity match agenda", () => {
     expect(markup).toContain("Suggested");
     expect(markup).toContain("Intervals note");
     expect(markup.indexOf("Morning run")).toBeLessThan(markup.indexOf("Long run"));
+  });
+
+  it("keeps the match dialog renderable while the initial candidate request has no data", () => {
+    expect(plannedMatchResponseForDialog()).toEqual({ candidates: [], hasMore: false });
   });
 });

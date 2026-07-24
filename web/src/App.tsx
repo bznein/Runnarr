@@ -14,7 +14,7 @@ import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
-import { PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
+import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
 import type {
   Activity,
   ActivityClimb,
@@ -3035,9 +3035,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onClose={() => setNotesOpen(false)}
         />
       )}
-      {matchOpen && plannedMatchCandidates.data && (
+      {matchOpen && (
         <PlannedActivityMatchDialog
-          data={plannedMatchCandidates.data}
+          data={plannedMatchResponseForDialog(plannedMatchCandidates.data)}
           selectedCandidateId={matchCandidateId}
           canLoadMore={canLoadMorePlans}
           loadMoreLabel={loadMorePlansLabel}

@@ -196,6 +196,25 @@ test.describe("local product journey", () => {
     await failedPlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(failedPlannedMatchDialog).toBeHidden();
 
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=7", async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "initial planned candidates unavailable" })
+      });
+    });
+    await page.reload();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await page.getByRole("button", { name: "Match", exact: true }).click();
+    const initialFailurePlannedMatchDialog = page.getByRole("dialog", { name: "Match planned run" });
+    await expect(initialFailurePlannedMatchDialog.getByText("initial planned candidates unavailable", { exact: true })).toBeVisible();
+    await expect(initialFailurePlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true })).toBeVisible();
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=7");
+    await initialFailurePlannedMatchDialog.getByRole("button", { name: "Retry loading plans", exact: true }).click();
+    await expect(initialFailurePlannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
+    await initialFailurePlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(initialFailurePlannedMatchDialog).toBeHidden();
+
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();
