@@ -323,13 +323,21 @@ test.describe("local product journey", () => {
       await expect(page.locator(".mobile-header-title")).toHaveText("Settings");
       await expect(page.locator('input[type="file"][accept=".gpx,.tcx,.fit"]')).toBeVisible();
     }
+    const themePicker = page.getByRole("group", { name: "Color theme" });
+    await expect(themePicker.getByRole("radio", { name: "Ocean" })).toBeVisible();
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
-      page.getByRole("group", { name: "Theme preference" }).getByRole("button", { name: "Dark" }).click()
+      themePicker.getByRole("radio", { name: "Ocean" }).check()
     ]);
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "ocean");
     await page.reload();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "ocean");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
+      themePicker.getByRole("radio", { name: "Midnight" }).check()
+    ]);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
+    await expect(themePicker.getByRole("radio", { name: "Midnight" })).toBeChecked();
   });
 
   test("keeps navigation and key controls usable on mobile", async ({ page }, testInfo) => {

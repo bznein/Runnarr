@@ -25,7 +25,7 @@ export type User = SessionUser & {
 };
 
 export type UserPreference = {
-  themePreference: "system" | "light" | "dark";
+  themePreference: "system" | "runnarr" | "ocean" | "sunset" | "midnight";
   activityTableColumns?: string[];
   gearSortBy: string;
 };

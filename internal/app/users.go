@@ -313,10 +313,7 @@ func (s *Store) GetUserPreferences(ctx context.Context) (UserPreference, error) 
 }
 
 func (s *Store) UpdateUserPreferences(ctx context.Context, preference UserPreference) error {
-	theme := strings.TrimSpace(preference.ThemePreference)
-	if theme != "light" && theme != "dark" && theme != "system" {
-		theme = "system"
-	}
+	theme := normalizeThemePreference(preference.ThemePreference)
 	gearSort := strings.TrimSpace(preference.GearSortBy)
 	if gearSort == "" {
 		gearSort = "distance_percent"
@@ -331,6 +328,19 @@ func (s *Store) UpdateUserPreferences(ctx context.Context, preference UserPrefer
 		where user_id = $1
 	`, scopedUserID(ctx), theme, columns, gearSort)
 	return err
+}
+
+func normalizeThemePreference(value string) string {
+	switch theme := strings.TrimSpace(value); theme {
+	case "light":
+		return "runnarr"
+	case "dark":
+		return "midnight"
+	case "system", "runnarr", "ocean", "sunset", "midnight":
+		return theme
+	default:
+		return "system"
+	}
 }
 
 const userSelectColumns = `id::text, username, display_name, role, disabled, last_login_at, created_at, updated_at`
