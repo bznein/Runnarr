@@ -635,7 +635,7 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	if err != nil {
 		return activity, err
 	}
-	activity.Climbs = detectActivityClimbsWithSettings(samples, climbSettings.Settings)
+	activity.Climbs = enrichActivityClimbPerformance(detectActivityClimbsWithSettings(samples, climbSettings.Settings), samples, laps)
 	return activity, nil
 }
 

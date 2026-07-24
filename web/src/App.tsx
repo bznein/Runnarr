@@ -12,6 +12,8 @@ import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, 
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
+import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
+import type { ClimbPerformance } from "./climbPerformance";
 import type {
   Activity,
   ActivityClimb,
@@ -75,6 +77,8 @@ type ClimbProfilePoint = {
   label: string;
   distanceKm: number;
   elevationM: number;
+  paceSPKM?: number;
+  gapSPKM?: number;
 };
 type ClimbMapSegment = {
   climb: ActivityClimb;
@@ -2744,6 +2748,19 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
   const climbMapSegments = climbMapSegmentsFor(displayItem, finalClimbs);
   const selectedClimbProfile = climbProfileFor(displayItem, selectedClimb);
+  const climbPerformanceSamples = samplesForClimbPerformance(confirmedItem.samples, activitySeries.data?.samples);
+  const climbPerformanceByIndex = Object.fromEntries(
+    finalClimbs.map((climb) => {
+      const fallback: ClimbPerformance = climb.paceSPKM === undefined || climb.gapSPKM === undefined
+        ? climbPerformanceFor(climbPerformanceSamples, confirmedItem.laps ?? [], climb)
+        : {};
+      return [climb.index, {
+        paceSPKM: climb.paceSPKM ?? fallback.paceSPKM,
+        gapSPKM: climb.gapSPKM ?? fallback.gapSPKM
+      }];
+    })
+  ) as Record<number, ClimbPerformance>;
+  const selectedClimbPerformance = selectedClimb ? climbPerformanceByIndex[selectedClimb.index] : undefined;
   const isClimbSensitivitySaved = climbSensitivity === configuredClimbSensitivity;
   const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
   const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
@@ -3035,6 +3052,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         <ActivityClimbsPanel
           climbs={effectiveClimbs}
           selectedClimb={selectedClimb}
+          performanceByIndex={climbPerformanceByIndex}
+          selectedPerformance={selectedClimbPerformance}
           profileData={selectedClimbProfile}
           sensitivityControls={climbSensitivityControls}
           onSelect={handleSelectClimb}
@@ -4385,12 +4404,16 @@ function ActivityRenameDialog({
 function ActivityClimbsPanel({
   climbs,
   selectedClimb,
+  performanceByIndex,
+  selectedPerformance,
   profileData,
   sensitivityControls,
   onSelect
 }: {
   climbs: ActivityClimb[];
   selectedClimb?: ActivityClimb;
+  performanceByIndex: Record<number, ClimbPerformance>;
+  selectedPerformance?: ClimbPerformance;
   profileData: ClimbProfilePoint[];
   sensitivityControls?: ReactNode;
   onSelect: (climb: ActivityClimb) => void;
@@ -4411,6 +4434,7 @@ function ActivityClimbsPanel({
           <div className="climb-list">
             {climbs.map((climb) => {
               const active = selectedClimb?.index === climb.index;
+              const performance = performanceByIndex[climb.index];
               return (
                 <button key={climb.index} className={`climb-item ${active ? "active" : ""}`} type="button" aria-pressed={active} onClick={() => onSelect(climb)}>
                   <span className="climb-item-header">
@@ -4422,6 +4446,12 @@ function ActivityClimbsPanel({
                     <span>{formatDistance(climb.distanceM)}</span>
                     <span>{Math.round(climb.elevationGainM).toLocaleString()} m</span>
                   </span>
+                  {(performance.paceSPKM !== undefined || performance.gapSPKM !== undefined) && (
+                    <span className="climb-item-performance">
+                      {performance.paceSPKM !== undefined && <span>Pace {formatPace(performance.paceSPKM)}</span>}
+                      {performance.gapSPKM !== undefined && <span>GAP {formatPace(performance.gapSPKM)}</span>}
+                    </span>
+                  )}
                   <span className="muted">{formatDistanceRange(climb.startDistanceM, climb.endDistanceM)}</span>
                 </button>
               );
@@ -4434,21 +4464,55 @@ function ActivityClimbsPanel({
                 <ClimbStat label="Avg Grade" value={formatGrade(selectedClimb.avgGradePct)} />
                 <ClimbStat label="Distance" value={formatDistance(selectedClimb.distanceM)} />
                 <ClimbStat label="Total Ascent" value={`${Math.round(selectedClimb.elevationGainM).toLocaleString()} m`} />
+                {selectedPerformance?.paceSPKM !== undefined && <ClimbStat label="Pace" value={formatPace(selectedPerformance.paceSPKM)} />}
+                {selectedPerformance?.gapSPKM !== undefined && <ClimbStat label="GAP" value={formatPace(selectedPerformance.gapSPKM)} />}
               </div>
               <div className="climb-profile">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={profileData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" minTickGap={26} />
-                    <YAxis width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
-                    <Tooltip
-                      contentStyle={chartTooltipContentStyle}
-                      labelStyle={chartTooltipLabelStyle}
-                      formatter={(value) => [`${Math.round(Number(value)).toLocaleString()} m`, "Height above start"]}
-                    />
-                    <Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <div className="climb-profile-header">
+                  <span className="muted">Height above start</span>
+                  <span className="climb-profile-legend" aria-label="Climb profile series">
+                    <span><i className="climb-profile-legend-swatch elevation" /> Elevation</span>
+                    {profileData.some((point) => point.paceSPKM !== undefined) && <span><i className="climb-profile-legend-swatch pace" /> Pace</span>}
+                    {profileData.some((point) => point.gapSPKM !== undefined) && <span><i className="climb-profile-legend-swatch gap" /> GAP</span>}
+                  </span>
+                </div>
+                <div className="climb-profile-chart">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={profileData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" minTickGap={26} />
+                      <YAxis yAxisId="elevation" width={44} domain={[0, "dataMax"]} tickFormatter={(value) => String(Math.round(Number(value)))} />
+                      {(profileData.some((point) => point.paceSPKM !== undefined) || profileData.some((point) => point.gapSPKM !== undefined)) && (
+                        <YAxis
+                          yAxisId="performance"
+                          orientation="right"
+                          width={58}
+                          reversed
+                          domain={["auto", "auto"]}
+                          tickFormatter={(value) => formatPaceMinutesSeconds(Number(value))}
+                        />
+                      )}
+                      <Tooltip
+                        contentStyle={chartTooltipContentStyle}
+                        labelStyle={chartTooltipLabelStyle}
+                        formatter={(value, name) => {
+                          const numericValue = Number(value);
+                          if (name === "Pace" || name === "GAP") {
+                            return [formatPace(numericValue), String(name)];
+                          }
+                          return [`${Math.round(numericValue).toLocaleString()} m`, "Height above start"];
+                        }}
+                      />
+                      <Area yAxisId="elevation" type="monotone" dataKey="elevationM" name="Elevation" stroke="#b7791f" fill="#f6c432" fillOpacity={0.5} dot={false} />
+                      {profileData.some((point) => point.paceSPKM !== undefined) && (
+                        <Line yAxisId="performance" type="monotone" dataKey="paceSPKM" name="Pace" stroke="#2f6df6" strokeWidth={2} dot={false} connectNulls={false} />
+                      )}
+                      {profileData.some((point) => point.gapSPKM !== undefined) && (
+                        <Line yAxisId="performance" type="monotone" dataKey="gapSPKM" name="GAP" stroke="#c84d4d" strokeWidth={2} dot={false} connectNulls={false} />
+                      )}
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
           )}
@@ -6120,14 +6184,19 @@ function climbProfileFor(activity: Activity, climb?: ActivityClimb): ClimbProfil
   if (!climb) {
     return [];
   }
-  const points = chartDataFor(samplesForClimb(activity, climb))
+  const samples = samplesForClimb(activity, climb);
+  const samplesByIndex = new Map(samples.map((sample) => [sample.index, sample]));
+  const points = chartDataFor(samples)
     .filter((sample) => typeof sample.distanceM === "number" && typeof sample.elevationM === "number")
     .map((sample) => {
       const distanceKm = Math.max(0, (sample.distanceM! - climb.startDistanceM) / 1000);
+      const sourceSample = samplesByIndex.get(sample.index);
       return {
         label: `${distanceKm.toFixed(1)} km`,
         distanceKm,
-        elevationM: sample.elevationM!
+        elevationM: sample.elevationM!,
+        paceSPKM: sample.rawPaceSPKM,
+        gapSPKM: sourceSample ? gapPaceForSample(activity.laps ?? [], sourceSample) : undefined
       };
     });
   return normalizeClimbProfileElevation(points);

@@ -355,6 +355,8 @@ export type ActivityClimb = {
   avgGradePct: number;
   startElevationM: number;
   endElevationM: number;
+  paceSPKM?: number;
+  gapSPKM?: number;
 };
 
 export type ActivityMedia = {
