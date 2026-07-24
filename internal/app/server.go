@@ -376,7 +376,7 @@ func (s *Server) handleActivityClimbsPreview(w http.ResponseWriter, r *http.Requ
 
 	payload := climbPreviewPayload{
 		Climbs: enrichActivityClimbPerformance(
-			detectActivityClimbsWithSettings(activity.Samples, climbDetectionSettingsForSensitivity(body.Sensitivity)),
+			detectActivityClimbsForSport(activity.SportType, activity.Samples, climbDetectionSettingsForSensitivity(body.Sensitivity)),
 			activity.Samples,
 			activity.Laps,
 		),

@@ -98,6 +98,42 @@ func TestDetectActivityClimbsRequiresUsableSamples(t *testing.T) {
 	}
 }
 
+func TestDetectActivityClimbsUsesActivitySpecificRideThreshold(t *testing.T) {
+	samples := climbSamples([][2]float64{
+		{0, 100},
+		{250, 105},
+		{500, 110},
+		{750, 115},
+		{1000, 120},
+	})
+
+	if climbs := detectActivityClimbsForSport("Run", samples, defaultClimbDetectionSettings()); len(climbs) != 0 {
+		t.Fatalf("run climbs = %d, want 0 for a 2%% climb", len(climbs))
+	}
+	if climbs := detectActivityClimbsForSport("Cycling", samples, defaultClimbDetectionSettings()); len(climbs) != 1 {
+		t.Fatalf("cycling climbs = %d, want 1 for a 2%% climb", len(climbs))
+	}
+}
+
+func TestDetectActivityClimbsUsesActivitySpecificDifficulty(t *testing.T) {
+	samples := climbSamples([][2]float64{
+		{0, 100},
+		{250, 117.75},
+		{500, 135.5},
+		{750, 153.25},
+		{1000, 171},
+	})
+
+	runClimbs := detectActivityClimbsForSport("Run", samples, defaultClimbDetectionSettings())
+	if len(runClimbs) != 1 || runClimbs[0].Difficulty != "Hard" {
+		t.Fatalf("run climbs = %#v, want one Hard climb", runClimbs)
+	}
+	cyclingClimbs := detectActivityClimbsForSport("Cycling", samples, defaultClimbDetectionSettings())
+	if len(cyclingClimbs) != 1 || cyclingClimbs[0].Difficulty != "Moderate" {
+		t.Fatalf("cycling climbs = %#v, want one Moderate climb", cyclingClimbs)
+	}
+}
+
 func climbSamples(points [][2]float64) []ActivitySample {
 	samples := make([]ActivitySample, 0, len(points))
 	for index, point := range points {
