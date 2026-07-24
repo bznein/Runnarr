@@ -39,3 +39,25 @@ func TestTrainingSheetPlanYearBoundsAreScopedToOneYear(t *testing.T) {
 		t.Fatalf("end = %v, want start of 2027", end)
 	}
 }
+
+func TestPlannedActivityStatusAfterUnmatchPreservesSupersededWorkbook(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		workbookID string
+		currentID  string
+		wantStatus string
+	}{
+		{name: "replaced training workbook", source: trainingSheetProvider, workbookID: "old", currentID: "new", wantStatus: plannedActivityStatusSuperseded},
+		{name: "current training workbook", source: trainingSheetProvider, workbookID: "current", currentID: "current", wantStatus: plannedActivityStatusPending},
+		{name: "unknown current workbook", source: trainingSheetProvider, workbookID: "old", currentID: "", wantStatus: plannedActivityStatusPending},
+		{name: "other planned source", source: "other", workbookID: "old", currentID: "new", wantStatus: plannedActivityStatusPending},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := plannedActivityStatusAfterUnmatch(tt.source, tt.workbookID, tt.currentID); got != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got, tt.wantStatus)
+			}
+		})
+	}
+}
