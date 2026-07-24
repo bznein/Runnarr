@@ -2573,6 +2573,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryKey: ["planned-match-candidates", id, plannedMatchWindowDays],
     queryFn: () => api.plannedMatchCandidates(id!, plannedMatchWindowDays),
     enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet",
+    placeholderData: (previousData) => previousData,
     refetchInterval: (query) => {
       const writeback = query.state.data?.writeback;
       if (!writeback) {
@@ -2759,6 +2760,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [id, configuredClimbSensitivity]);
 
   useEffect(() => {
+    if (!matchOpen || matchCandidateId || !plannedMatchCandidates.data?.suggestedId) {
+      return;
+    }
+    setMatchCandidateId(plannedMatchCandidates.data.suggestedId);
+  }, [matchOpen, matchCandidateId, plannedMatchCandidates.data?.suggestedId]);
+
+  useEffect(() => {
     const nextValue = clampClimbSensitivity(climbSensitivity);
     const timeout = window.setTimeout(() => setClimbSensitivityPreview(nextValue), 120);
     return () => window.clearTimeout(timeout);
@@ -2833,6 +2841,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const writeback = plannedMatchCandidates.data?.writeback;
+  const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
   const canRetryWriteback = Boolean(writeback && [
     writeback.summaryStatus,
     writeback.intervalsStatus,
@@ -3026,8 +3035,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           data={plannedMatchCandidates.data}
           selectedCandidateId={matchCandidateId}
           canLoadMore={plannedMatchWindowDays === 7 && plannedMatchCandidates.data.hasMore}
+          loadingMore={loadingMorePlans}
           matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending}
-          error={previewPlannedActivity.error ?? applyPlannedActivity.error}
+          error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error}
           preview={matchPreview}
           onSelectCandidate={setMatchCandidateId}
           onPreview={handlePreviewMatch}
@@ -3478,6 +3488,7 @@ function PlannedActivityMatchDialog({
   data,
   selectedCandidateId,
   canLoadMore,
+  loadingMore,
   matching,
   error,
   preview,
@@ -3491,6 +3502,7 @@ function PlannedActivityMatchDialog({
   data: PlannedActivityMatchResponse;
   selectedCandidateId?: string;
   canLoadMore: boolean;
+  loadingMore: boolean;
   matching: boolean;
   error: unknown;
   preview?: TrainingSheetWritebackPreview;
@@ -3563,10 +3575,11 @@ function PlannedActivityMatchDialog({
           candidates={data.candidates ?? []}
           suggestedId={data.suggestedId}
           selectedCandidateId={selectedCandidateId}
-          matching={matching}
+          matching={matching || loadingMore}
           onSelectCandidate={onSelectCandidate}
         />
         {data.candidates.length === 0 && <p className="muted">No planned runs were found for this date.</p>}
+        {loadingMore && <div className="muted" role="status" aria-live="polite">Loading more plans…</div>}
         {selectedCandidate && (
           <>
             <label className="field">
@@ -3609,10 +3622,10 @@ function PlannedActivityMatchDialog({
             <button className="secondary-button" type="button" disabled={matching} onClick={onLoadMore}>Load more plans</button>
           )}
           {preview && (
-            <button className="secondary-button" type="button" disabled={matching} onClick={resetPreview}>Edit</button>
+            <button className="secondary-button" type="button" disabled={matching || loadingMore} onClick={resetPreview}>Edit</button>
           )}
           <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>
-          <button className="primary-button" type="submit" disabled={matching || !selectedCandidateId || !valid}>
+          <button className="primary-button" type="submit" disabled={matching || loadingMore || !selectedCandidateId || !valid}>
             {matching ? (preview ? "Applying..." : "Building preview...") : (preview ? "Apply match & write back" : "Preview changes")}
           </button>
         </div>

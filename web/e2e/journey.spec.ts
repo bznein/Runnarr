@@ -144,11 +144,26 @@ test.describe("local product journey", () => {
     await expect(plannedMatchDialog).toBeVisible();
     const agendaDays = plannedMatchDialog.locator(".planned-match-agenda-day");
     await expect(agendaDays).toHaveCount(3);
-    await expect(agendaDays.nth(0).locator("h3")).toHaveText(/2026/);
+    await expect(agendaDays.nth(0).locator("h3")).toHaveText(/\d{4}/);
     await expect(agendaDays.nth(1).getByText("E2E Planned Run", { exact: true })).toBeVisible();
     await expect(agendaDays.nth(1).getByText("E2E Planned Speed Work", { exact: true })).toBeVisible();
     await expect(agendaDays.nth(1).getByRole("radio")).toHaveCount(2);
     await expect(agendaDays.nth(2).getByText("E2E Planned Long Run", { exact: true })).toBeVisible();
+    let releasePlannedCandidates = () => {};
+    const plannedCandidatesGate = new Promise<void>((resolve) => {
+      releasePlannedCandidates = resolve;
+    });
+    await page.route("**/api/activities/*/planned-match-candidates?windowDays=30", async (route) => {
+      await plannedCandidatesGate;
+      await route.continue();
+    });
+    await plannedMatchDialog.getByRole("button", { name: "Load more plans", exact: true }).click();
+    await expect(plannedMatchDialog).toBeVisible();
+    await expect(plannedMatchDialog.getByRole("status")).toHaveText("Loading more plans…");
+    releasePlannedCandidates();
+    await expect(agendaDays).toHaveCount(4);
+    await expect(plannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
+    await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=30");
     if (mobile) {
       await expectNoHorizontalOverflow(page);
     }
