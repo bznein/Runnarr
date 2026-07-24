@@ -3085,8 +3085,19 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onPreviewReset={resetMatchPreview}
           onLoadMore={() => {
             if (plannedMatchCandidates.isError) {
+              const retryActivityId = id!;
+              const retryActivityViewGeneration = activityViewRef.current.generation;
               setRetryingPlannedMatchCandidates(true);
-              void plannedMatchCandidates.refetch().finally(() => setRetryingPlannedMatchCandidates(false));
+              void plannedMatchCandidates.refetch().finally(() => {
+                if (plannedMatchRequestIsCurrent(
+                  retryActivityId,
+                  retryActivityViewGeneration,
+                  activityIdRef.current,
+                  activityViewRef.current.generation
+                )) {
+                  setRetryingPlannedMatchCandidates(false);
+                }
+              });
               return;
             }
             setPlannedMatchWindowDays(30);

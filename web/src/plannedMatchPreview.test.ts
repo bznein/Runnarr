@@ -7,6 +7,7 @@ describe("planned match preview activity guard", () => {
     expect(plannedMatchActivityIsCurrent("activity-a", "activity-a")).toBe(true);
     expect(plannedMatchRequestIsCurrent("activity-a", 1, "activity-a", 2)).toBe(false);
     expect(plannedMatchRequestIsCurrent("activity-a", 2, "activity-a", 2)).toBe(true);
+    expect(plannedMatchRequestIsCurrent("activity-a", 2, "activity-b", 3)).toBe(false);
   });
 
   it("ignores a preview that resolves after navigating to another activity", () => {
