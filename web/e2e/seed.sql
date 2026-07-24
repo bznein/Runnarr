@@ -36,12 +36,14 @@ on conflict (user_id, provider, metric_date) do update set
     weight_kg = excluded.weight_kg,
     body_fat_pct = excluded.body_fat_pct;
 
+-- Keep the seeded activities around the imported 06:00 GPX activity so the
+-- navigation journey has a deterministic Cycling -> imported -> Pool order.
 insert into activities(
     user_id, source, source_id, name, sport_type, start_time,
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-pool-swim', 'E2E Pool Swim', 'Swimming',
-    current_date + time '07:00', 1500, 1800, 1900, '{}'::jsonb
+    current_date + time '05:00', 1500, 1800, 1900, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -80,7 +82,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-cycling-activity', 'E2E Cycling Activity', 'Cycling',
-    current_date + time '06:00', 25000, 3600, 3750, '{}'::jsonb
+    current_date + time '07:00', 25000, 3600, 3750, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
