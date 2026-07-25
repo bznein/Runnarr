@@ -96,7 +96,15 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
 
   if (await visibleActivityLink(page, name, mobile).count() === 0) {
     const original = await readFile(gpxPath, "utf8");
+    // Keep the sequential browser projects at distinct times so navigation
+    // never falls back to UUID ordering for the imported activities.
+    const fixtureDate = new Date().toISOString().slice(0, 10);
+    const fixtureMinuteOffset = mobile ? 30 : 0;
     const fixture = original
+      .replace(/2026-07-01T06:(\d{2}):00Z/g, (_, minute) => {
+        const shiftedMinute = Number(minute) + fixtureMinuteOffset;
+        return `${fixtureDate}T06:${String(shiftedMinute).padStart(2, "0")}:00Z`;
+      })
       .replace("<name>Example Morning Run</name>", `<name>${name}</name>`)
       .replace("</gpx>", `<!-- ${projectSlug(projectName)} -->\n</gpx>`);
 
@@ -333,13 +341,21 @@ test.describe("local product journey", () => {
       await expect(page.locator(".mobile-header-title")).toHaveText("Settings");
       await expect(page.locator('input[type="file"][accept=".gpx,.tcx,.fit"]')).toBeVisible();
     }
+    const themePicker = page.getByRole("group", { name: "Color theme" });
+    await expect(themePicker.getByRole("radio", { name: "Ocean" })).toBeVisible();
     await Promise.all([
       page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
-      page.getByRole("group", { name: "Theme preference" }).getByRole("button", { name: "Dark" }).click()
+      themePicker.getByRole("radio", { name: "Ocean" }).check()
     ]);
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "ocean");
     await page.reload();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "ocean");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
+      themePicker.getByRole("radio", { name: "Midnight" }).check()
+    ]);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
+    await expect(themePicker.getByRole("radio", { name: "Midnight" })).toBeChecked();
   });
 
   test("keeps navigation and key controls usable on mobile", async ({ page }, testInfo) => {
