@@ -14,6 +14,8 @@ import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
+import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
+import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./plannedMatchPreview";
 import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
 import type { ThemePreference } from "./theme";
 import type {
@@ -2671,6 +2673,12 @@ function ActivityNavigation({
 
 function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const { id } = useParams();
+  const activityIdRef = useRef(id);
+  activityIdRef.current = id;
+  const activityViewRef = useRef({ id, generation: 0 });
+  if (activityViewRef.current.id !== id) {
+    activityViewRef.current = { id, generation: activityViewRef.current.generation + 1 };
+  }
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const activityQueryKey = ["activity", id] as const;
@@ -2678,6 +2686,17 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const activityListSearch = searchParams.toString();
   const activityFilters = activityFiltersFromSearchParams(searchParams);
   const [plannedMatchWindowDays, setPlannedMatchWindowDays] = useState(7);
+  const [retryingPlannedMatchCandidates, setRetryingPlannedMatchCandidates] = useState(false);
+  const plannedMatchInteractionGenerationRef = useRef(0);
+  const plannedMatchRetryGenerationRef = useRef(0);
+  const invalidatePlannedMatchInteraction = () => {
+    plannedMatchInteractionGenerationRef.current += 1;
+    return plannedMatchInteractionGenerationRef.current;
+  };
+  const invalidatePlannedMatchRetry = () => {
+    plannedMatchRetryGenerationRef.current += 1;
+    return plannedMatchRetryGenerationRef.current;
+  };
   const activity = useQuery({ queryKey: activityQueryKey, queryFn: () => api.activity(id!), enabled: Boolean(id) });
   const activityNavigation = useQuery({
     queryKey: ["activity-navigation", id, activityListSearch],
@@ -2693,6 +2712,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryKey: ["planned-match-candidates", id, plannedMatchWindowDays],
     queryFn: () => api.plannedMatchCandidates(id!, plannedMatchWindowDays),
     enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet",
+    initialData: plannedMatchWindowDays === 30
+      ? () => queryClient.getQueryData<PlannedActivityMatchResponse>(["planned-match-candidates", id, 7])
+      : undefined,
     refetchInterval: (query) => {
       const writeback = query.state.data?.writeback;
       if (!writeback) {
@@ -2702,25 +2724,59 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     }
   });
   const previewPlannedActivity = useMutation({
-    mutationFn: (draft: PlannedMatchDraft) => api.plannedMatchPreview(id!, draft),
-    onSuccess: ({ preview }) => {
-      setMatchPreview(preview);
+    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; requestGeneration: number; draft: PlannedMatchDraft }) =>
+      api.plannedMatchPreview(activityId, draft),
+    onSuccess: ({ preview }, { activityId, activityViewGeneration, requestGeneration }) => {
+      if (!plannedMatchRequestIsCurrent(
+        activityId,
+        activityViewGeneration,
+        activityIdRef.current,
+        activityViewRef.current.generation,
+        requestGeneration,
+        plannedMatchInteractionGenerationRef.current
+      )) {
+        return;
+      }
+      const currentPreview = plannedMatchPreviewForActivity(preview, activityIdRef.current);
+      if (currentPreview) {
+        setMatchPreview(currentPreview);
+      }
     }
   });
   const applyPlannedActivity = useMutation({
-    mutationFn: (draft: PlannedMatchDraft & { fingerprint: string }) => api.applyPlannedMatchPreview(id!, draft),
-    onSuccess: async () => {
+    mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; requestGeneration: number; draft: PlannedMatchDraft & { fingerprint: string } }) =>
+      api.applyPlannedMatchPreview(activityId, draft),
+    onSuccess: async (_result, { activityId, activityViewGeneration, requestGeneration }) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] }),
+        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", activityId] }),
         queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
         queryClient.invalidateQueries({ queryKey: ["activity-calendar"] }),
-        queryClient.invalidateQueries({ queryKey: ["activity", id] })
+        queryClient.invalidateQueries({ queryKey: ["activity", activityId] })
       ]);
+      if (!plannedMatchRequestIsCurrent(
+        activityId,
+        activityViewGeneration,
+        activityIdRef.current,
+        activityViewRef.current.generation,
+        requestGeneration,
+        plannedMatchInteractionGenerationRef.current
+      )) {
+        return;
+      }
       setMatchPreview(undefined);
       setMatchOpen(false);
     },
-    onError: () => {
-      setMatchPreview(undefined);
+    onError: (_error, { activityId, activityViewGeneration, requestGeneration }) => {
+      if (plannedMatchRequestIsCurrent(
+        activityId,
+        activityViewGeneration,
+        activityIdRef.current,
+        activityViewRef.current.generation,
+        requestGeneration,
+        plannedMatchInteractionGenerationRef.current
+      )) {
+        setMatchPreview(undefined);
+      }
     }
   });
   const unmatchPlannedActivity = useMutation({
@@ -2857,6 +2913,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [id, routeUsesGap]);
 
   useEffect(() => {
+    invalidatePlannedMatchInteraction();
+    invalidatePlannedMatchRetry();
     setHighlightedSample(undefined);
     setSelectedClimbIndex(undefined);
     setActionsOpen(false);
@@ -2864,19 +2922,30 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setNotesOpen(false);
     setMatchOpen(false);
     setMatchCandidateId(undefined);
+    setMatchPreview(undefined);
     setCheckInOpen(false);
     setPlannedMatchWindowDays(7);
+    setRetryingPlannedMatchCandidates(false);
     setExportOpen(false);
     setSelectedMediaId(undefined);
     setPinningMediaId(undefined);
     setAnalysisTab("stats");
     updateActivityNotes.reset();
+    previewPlannedActivity.reset();
+    applyPlannedActivity.reset();
     uploadMedia.reset();
     updateMediaLocation.reset();
     setMediaFileInputKey((key) => key + 1);
     setClimbSensitivityDraft(configuredClimbSensitivity);
     setClimbSensitivityPreview(configuredClimbSensitivity);
   }, [id, configuredClimbSensitivity]);
+
+  useEffect(() => {
+    if (!matchOpen || matchCandidateId || !plannedMatchCandidates.data?.suggestedId) {
+      return;
+    }
+    setMatchCandidateId(plannedMatchCandidates.data.suggestedId);
+  }, [matchOpen, matchCandidateId, plannedMatchCandidates.data?.suggestedId]);
 
   useEffect(() => {
     const nextValue = clampClimbSensitivity(climbSensitivity);
@@ -2953,6 +3022,14 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const writeback = plannedMatchCandidates.data?.writeback;
+  const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
+  const loadingCandidateRetry = retryingPlannedMatchCandidates;
+  const loadingCandidateRequest = loadingMorePlans || loadingCandidateRetry;
+  const canLoadMorePlans = loadingCandidateRetry || (plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)) || plannedMatchCandidates.isError;
+  const loadMorePlansLabel = plannedMatchCandidates.isError || loadingCandidateRetry
+    ? (loadingCandidateRetry ? "Retrying plans…" : "Retry loading plans")
+    : "Load more plans";
+  const candidateLoadingStatus = loadingCandidateRetry ? "Retrying planned runs…" : "Loading more plans…";
   const canRetryWriteback = Boolean(writeback && [
     writeback.summaryStatus,
     writeback.intervalsStatus,
@@ -2983,6 +3060,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     updateActivityReflection.mutate({ feedback, rpe });
   };
   const openMatchDialog = (candidateId?: string) => {
+    invalidatePlannedMatchInteraction();
+    invalidatePlannedMatchRetry();
+    setRetryingPlannedMatchCandidates(false);
     const nextCandidateId = candidateId ?? plannedMatchCandidates.data?.suggestedId ?? plannedMatchCandidates.data?.candidates[0]?.id;
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
@@ -2991,10 +3071,17 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setMatchOpen(true);
   };
   const handlePreviewMatch = (draft: PlannedMatchDraft) => {
+    const requestGeneration = invalidatePlannedMatchInteraction();
     applyPlannedActivity.reset();
-    previewPlannedActivity.mutate(draft);
+    previewPlannedActivity.mutate({
+      activityId: id!,
+      activityViewGeneration: activityViewRef.current.generation,
+      requestGeneration,
+      draft
+    });
   };
   const resetMatchPreview = () => {
+    invalidatePlannedMatchInteraction();
     setMatchPreview(undefined);
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
@@ -3003,7 +3090,19 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     if (!matchPreview) {
       return;
     }
-    applyPlannedActivity.mutate({ ...draft, fingerprint: matchPreview.fingerprint });
+    applyPlannedActivity.mutate({
+      activityId: id!,
+      activityViewGeneration: activityViewRef.current.generation,
+      requestGeneration: plannedMatchInteractionGenerationRef.current,
+      draft: { ...draft, fingerprint: matchPreview.fingerprint }
+    });
+  };
+  const closeMatchDialog = () => {
+    invalidatePlannedMatchInteraction();
+    invalidatePlannedMatchRetry();
+    setRetryingPlannedMatchCandidates(false);
+    setMatchPreview(undefined);
+    setMatchOpen(false);
   };
   const handleMediaFilesSelected = (files: File[]) => {
     if (files.length === 0 || uploadMedia.isPending) {
@@ -3141,20 +3240,45 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onClose={() => setNotesOpen(false)}
         />
       )}
-      {matchOpen && plannedMatchCandidates.data && (
+      {matchOpen && (
         <PlannedActivityMatchDialog
-          data={plannedMatchCandidates.data}
+          data={plannedMatchResponseForDialog(plannedMatchCandidates.data)}
+          targetDate={localDateString(new Date(confirmedItem.startTime))}
           selectedCandidateId={matchCandidateId}
-          canLoadMore={plannedMatchWindowDays === 7 && plannedMatchCandidates.data.hasMore}
+          canLoadMore={canLoadMorePlans}
+          loadMoreLabel={loadMorePlansLabel}
+          loadingStatus={candidateLoadingStatus}
+          loadingMore={loadingCandidateRequest}
           matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending}
-          error={previewPlannedActivity.error ?? applyPlannedActivity.error}
+          error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error}
           preview={matchPreview}
           onSelectCandidate={setMatchCandidateId}
           onPreview={handlePreviewMatch}
           onApply={handleApplyMatch}
           onPreviewReset={resetMatchPreview}
-          onLoadMore={() => setPlannedMatchWindowDays(30)}
-          onClose={() => setMatchOpen(false)}
+          onLoadMore={() => {
+            if (plannedMatchCandidates.isError) {
+              const retryActivityId = id!;
+              const retryActivityViewGeneration = activityViewRef.current.generation;
+              const retryGeneration = invalidatePlannedMatchRetry();
+              setRetryingPlannedMatchCandidates(true);
+              void plannedMatchCandidates.refetch().finally(() => {
+                if (plannedMatchRequestIsCurrent(
+                  retryActivityId,
+                  retryActivityViewGeneration,
+                  activityIdRef.current,
+                  activityViewRef.current.generation,
+                  retryGeneration,
+                  plannedMatchRetryGenerationRef.current
+                )) {
+                  setRetryingPlannedMatchCandidates(false);
+                }
+              });
+              return;
+            }
+            setPlannedMatchWindowDays(30);
+          }}
+          onClose={closeMatchDialog}
         />
       )}
       {checkInOpen && (
@@ -3596,8 +3720,12 @@ function optionalWatts(value?: number) {
 
 function PlannedActivityMatchDialog({
   data,
+  targetDate,
   selectedCandidateId,
   canLoadMore,
+  loadMoreLabel,
+  loadingStatus,
+  loadingMore,
   matching,
   error,
   preview,
@@ -3609,8 +3737,12 @@ function PlannedActivityMatchDialog({
   onClose
 }: {
   data: PlannedActivityMatchResponse;
+  targetDate: string;
   selectedCandidateId?: string;
   canLoadMore: boolean;
+  loadMoreLabel: string;
+  loadingStatus: string;
+  loadingMore: boolean;
   matching: boolean;
   error: unknown;
   preview?: TrainingSheetWritebackPreview;
@@ -3679,28 +3811,16 @@ function PlannedActivityMatchDialog({
           </button>
         </div>
         <p className="muted">Review the sheet changes before matching and writing them back.</p>
-        <div className="planned-match-candidates">
-          {(data.candidates ?? []).map((candidate) => (
-            <label className="planned-match-candidate" key={candidate.id}>
-              <input
-                type="radio"
-                name="planned-activity"
-                checked={candidate.id === selectedCandidateId}
-                disabled={matching}
-                onChange={() => onSelectCandidate(candidate.id)}
-              />
-              <div>
-                <div className="planned-match-candidate-title">
-                  <strong>{candidate.name}</strong>
-                  {candidate.id === data.suggestedId && <span className="planned-match-badge">Suggested</span>}
-                </div>
-                <div className="planned-match-candidate-meta">{formatDate(candidate.plannedDate)}</div>
-                {candidate.notes && <p className="muted">{candidate.notes}</p>}
-              </div>
-            </label>
-          ))}
-        </div>
+        <PlannedActivityMatchAgenda
+          candidates={data.candidates ?? []}
+          suggestedId={data.suggestedId}
+          selectedCandidateId={selectedCandidateId}
+          targetDate={targetDate}
+          matching={matching || loadingMore}
+          onSelectCandidate={onSelectCandidate}
+        />
         {data.candidates.length === 0 && <p className="muted">No planned runs were found for this date.</p>}
+        {loadingMore && <div className="muted" role="status" aria-live="polite">{loadingStatus}</div>}
         {selectedCandidate && (
           <>
             <label className="field">
@@ -3740,13 +3860,13 @@ function PlannedActivityMatchDialog({
         {error instanceof Error && <div className="error">{error.message}</div>}
         <div className="dialog-actions">
           {canLoadMore && (
-            <button className="secondary-button" type="button" disabled={matching} onClick={onLoadMore}>Load more plans</button>
+            <button className="secondary-button" type="button" disabled={matching || loadingMore} onClick={onLoadMore}>{loadMoreLabel}</button>
           )}
           {preview && (
-            <button className="secondary-button" type="button" disabled={matching} onClick={resetPreview}>Edit</button>
+            <button className="secondary-button" type="button" disabled={matching || loadingMore} onClick={resetPreview}>Edit</button>
           )}
           <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>
-          <button className="primary-button" type="submit" disabled={matching || !selectedCandidateId || !valid}>
+          <button className="primary-button" type="submit" disabled={matching || loadingMore || !selectedCandidateId || !valid}>
             {matching ? (preview ? "Applying..." : "Building preview...") : (preview ? "Apply match & write back" : "Preview changes")}
           </button>
         </div>
