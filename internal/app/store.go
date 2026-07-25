@@ -2129,16 +2129,10 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 			where planned_activities.source = 'training_sheet'
 				and planned_activities.source_id = activities.source_id
 				and planned_activities.user_id = activities.user_id
-				and planned_activities.status = 'completed'
+				and planned_activities.status in ('`+plannedActivityStatusCompleted+`', '`+plannedActivityStatusSuperseded+`')
 			)))`, activityDateExpression, timezoneArg))
 		} else {
-			conditions = append(conditions, `(source <> 'training_sheet' or (date(start_time) >= current_date and not exists (
-			select 1 from planned_activities
-			where planned_activities.source = 'training_sheet'
-				and planned_activities.source_id = activities.source_id
-				and planned_activities.user_id = activities.user_id
-				and planned_activities.status = 'completed'
-			)))`)
+			conditions = append(conditions, trainingSheetActivityFilterCondition())
 		}
 	}
 	if strings.TrimSpace(filters.Search) != "" {
