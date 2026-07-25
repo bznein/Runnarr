@@ -5,6 +5,8 @@
 ### Features
 
 - Planned-run matching candidates now use a vertical calendar timeline with the activity date highlighted.
+- Calendar days with health or activity data now open a day view with daily health details and the day's completed or planned activities.
+- Added account-scoped visual themes with named Runnarr, Ocean, Sunset, and Midnight palettes plus a system option.
 - Health sync controls and activity/job status now live in Settings with the other sync controls.
 - Added Makefile targets for standard backend, frontend, and Playwright checks.
 - Health now shows Garmin sleep score in the summary cards, trend chart, and daily metrics table when available.
@@ -77,6 +79,9 @@
 
 ### Fixes
 
+- Calendar day and month queries now honor the browser timezone at activity date boundaries, including planned entries around midnight, while keeping date-only planned entries on their planned day.
+- Fixed same-year training-sheet replacements leaving stale pending suggestions and duplicate imported planned activities, including after unmatching a plan from a replaced workbook.
+- Climb detection thresholds and difficulty now account for cycling activities separately from running-style activities.
 - Activity detail planned-run matching now uses a compact Match/Unmatch action, and assigned gear appears as a small chip beside the activity title.
 - Health range changes no longer load the preserved raw Garmin payload for every day, making first-time 30D and 90D views responsive.
 - Activity type filters now use a compact include/exclude control with checkbox bulk actions.

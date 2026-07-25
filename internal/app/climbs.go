@@ -140,19 +140,44 @@ type climbPoint struct {
 }
 
 func detectActivityClimbs(samples []ActivitySample) []ActivityClimb {
-	return detectActivityClimbsWithSettings(samples, defaultClimbDetectionSettings())
+	return detectActivityClimbsForSport("", samples, defaultClimbDetectionSettings())
 }
 
 func detectActivityClimbsWithSettings(samples []ActivitySample, settings ClimbDetectionSettings) []ActivityClimb {
+	return detectActivityClimbsForSport("", samples, settings)
+}
+
+func detectActivityClimbsForSport(sportType string, samples []ActivitySample, settings ClimbDetectionSettings) []ActivityClimb {
 	if err := validateClimbDetectionSettings(settings); err != nil {
 		settings = defaultClimbDetectionSettings()
 	}
+	profile := climbProfileForSport(sportType)
+	settings = profile.apply(settings)
 
 	points := climbPointsFromSamples(samples)
 	if len(points) < 2 {
 		return nil
 	}
-	return detectClimbsFromPoints(smoothClimbPoints(points, settings.ClimbSmoothingRadiusM), settings)
+	return detectClimbsFromPoints(smoothClimbPoints(points, settings.ClimbSmoothingRadiusM), settings, profile.difficultyScale)
+}
+
+type climbSportProfile struct {
+	gradeFactor     float64
+	difficultyScale float64
+}
+
+func climbProfileForSport(sportType string) climbSportProfile {
+	if normalizeSport(sportType) == "Cycling" {
+		return climbSportProfile{gradeFactor: 0.8, difficultyScale: 1.8}
+	}
+	return climbSportProfile{gradeFactor: 1, difficultyScale: 1}
+}
+
+func (profile climbSportProfile) apply(settings ClimbDetectionSettings) ClimbDetectionSettings {
+	if profile.gradeFactor > 0 && profile.gradeFactor != 1 {
+		settings.MinClimbAverageGradePct *= profile.gradeFactor
+	}
+	return settings
 }
 
 func climbPointsFromSamples(samples []ActivitySample) []climbPoint {
@@ -205,7 +230,7 @@ func smoothClimbPoints(points []climbPoint, radiusM float64) []climbPoint {
 	return smoothed
 }
 
-func detectClimbsFromPoints(points []climbPoint, settings ClimbDetectionSettings) []ActivityClimb {
+func detectClimbsFromPoints(points []climbPoint, settings ClimbDetectionSettings, difficultyScale float64) []ActivityClimb {
 	climbs := make([]ActivityClimb, 0)
 	lowIndex := 0
 	inClimb := false
@@ -243,19 +268,19 @@ func detectClimbsFromPoints(points []climbPoint, settings ClimbDetectionSettings
 		dipDistance := current.distanceM - points[peakIndex].distanceM
 		dipLoss := points[peakIndex].elevationM - current.elevationM
 		if dipDistance > settings.MaxClimbMergeDipDistanceM || dipLoss > settings.MaxClimbMergeElevationLossM {
-			climbs = appendValidClimb(climbs, points, startIndex, peakIndex, settings)
+			climbs = appendValidClimb(climbs, points, startIndex, peakIndex, settings, difficultyScale)
 			inClimb = false
 			lowIndex = dipLowIndex
 		}
 	}
 
 	if inClimb {
-		climbs = appendValidClimb(climbs, points, startIndex, peakIndex, settings)
+		climbs = appendValidClimb(climbs, points, startIndex, peakIndex, settings, difficultyScale)
 	}
 	return climbs
 }
 
-func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex int, endIndex int, settings ClimbDetectionSettings) []ActivityClimb {
+func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex int, endIndex int, settings ClimbDetectionSettings, difficultyScale float64) []ActivityClimb {
 	if startIndex < 0 || endIndex <= startIndex || endIndex >= len(points) {
 		return climbs
 	}
@@ -269,7 +294,7 @@ func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex in
 	}
 	return append(climbs, ActivityClimb{
 		Index:            len(climbs),
-		Difficulty:       classifyClimb(gain, grade),
+		Difficulty:       classifyClimb(gain, grade, difficultyScale),
 		StartSampleIndex: start.sampleIndex,
 		EndSampleIndex:   end.sampleIndex,
 		StartDistanceM:   start.distanceM,
@@ -282,8 +307,11 @@ func appendValidClimb(climbs []ActivityClimb, points []climbPoint, startIndex in
 	})
 }
 
-func classifyClimb(gainM float64, gradePct float64) string {
-	score := gainM * gradePct
+func classifyClimb(gainM float64, gradePct float64, difficultyScale float64) string {
+	if difficultyScale <= 0 {
+		difficultyScale = 1
+	}
+	score := gainM * gradePct / difficultyScale
 	switch {
 	case score >= 1600:
 		return "Epic"

@@ -313,6 +313,7 @@ type ActivityFilters struct {
 	Search               string
 	DateFrom             time.Time
 	DateTo               time.Time
+	CalendarTimezone     string
 	SortBy               string
 	SortOrder            string
 	SummaryPeriod        string
@@ -465,6 +466,7 @@ type CalendarActivity struct {
 type CalendarDay struct {
 	Date          string             `json:"date"`
 	ActivityCount int                `json:"activityCount"`
+	HasHealthData bool               `json:"hasHealthData"`
 	Activities    []CalendarActivity `json:"activities"`
 }
 
@@ -472,4 +474,10 @@ type ActivityCalendar struct {
 	MonthStart string        `json:"monthStart"`
 	MonthEnd   string        `json:"monthEnd"`
 	Days       []CalendarDay `json:"days"`
+}
+
+type CalendarDayView struct {
+	Date       string             `json:"date"`
+	Health     *DailyHealthMetric `json:"health,omitempty"`
+	Activities []CalendarActivity `json:"activities"`
 }

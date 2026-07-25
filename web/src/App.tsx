@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Sun, Trash2, Upload, X, BatteryCharging, RotateCcw, Monitor } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
 import { divIcon } from "leaflet";
 import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -16,6 +16,8 @@ import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } fro
 import type { ClimbPerformance } from "./climbPerformance";
 import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
 import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./plannedMatchPreview";
+import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
+import type { ThemePreference } from "./theme";
 import type {
   Activity,
   ActivityClimb,
@@ -28,6 +30,7 @@ import type {
   ActivitySortBy,
   ActivityTypeFilters as ActivityTypeFiltersValue,
   AppConfig,
+  CalendarActivitySummary,
   DailyHealthMetric,
   HealthChartPoint,
   Gear,
@@ -49,7 +52,6 @@ type ActivityDateRange = Pick<ActivityTypeFiltersValue, "dateFrom" | "dateTo">;
 type ActivitySort = Required<Pick<ActivityTypeFiltersValue, "sortBy" | "sortOrder">>;
 type HealthDateRange = { from: string; to: string };
 type GearSortBy = "first_used" | "last_used" | "activity_count" | "distance" | "distance_percent";
-type ThemePreference = "system" | "light" | "dark";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
 type ActivityAnalysisTab = "stats" | "intervals";
@@ -168,15 +170,6 @@ const activityChartSeries: ActivityChartSeries[] = [
   { key: "cadence", label: "Cadence", color: "#7a4eb2", defaultVisible: false, format: (value) => `${Math.round(value)} spm` }
 ];
 
-function applyThemePreference(preference: ThemePreference) {
-  const root = document.documentElement;
-  if (preference === "system") {
-    delete root.dataset.theme;
-    return;
-  }
-  root.dataset.theme = preference;
-}
-
 type PwaInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -266,6 +259,7 @@ function useSaveUserPreferences(userID?: string) {
 
 export function App() {
   const [themePreference, setThemePreference] = useState<ThemePreference>("system");
+  const [themePreferenceUserID, setThemePreferenceUserID] = useState<string>();
   const pwa = usePwaInstallPrompt();
   const queryClient = useQueryClient();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
@@ -278,12 +272,18 @@ export function App() {
   const savePreferences = useSaveUserPreferences(effectiveUserID);
 
   useEffect(() => {
-    applyThemePreference(themePreference);
-  }, [themePreference]);
+    applyThemePreference(themePreferenceForAccount(themePreference, themePreferenceUserID, effectiveUserID));
+  }, [effectiveUserID, themePreference, themePreferenceUserID]);
 
   useEffect(() => {
-    setThemePreference(preferences.data?.themePreference ?? "system");
-  }, [effectiveUserID, preferences.data?.themePreference]);
+    if (!effectiveUserID || !preferences.data) {
+      setThemePreference("system");
+      setThemePreferenceUserID(undefined);
+      return;
+    }
+    setThemePreference(parseThemePreference(preferences.data.themePreference));
+    setThemePreferenceUserID(effectiveUserID);
+  }, [effectiveUserID, preferences.data]);
 
   useEffect(() => {
     if (!effectiveUserID) {
@@ -390,6 +390,7 @@ function AuthenticatedApp({
           <Route path="/activities" element={<ActivitiesPage />} />
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
           <Route path="/calendar" element={<ActivityCalendarPage />} />
+          <Route path="/calendar/day/:date" element={<CalendarDayPage />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/gear" element={<GearPage />} />
@@ -425,17 +426,19 @@ function MobileNavigation({
     ? "Activity"
     : location.pathname.startsWith("/activities")
       ? "Activities"
-      : location.pathname.startsWith("/calendar")
-        ? "Calendar"
-        : location.pathname.startsWith("/health")
-          ? "Health"
-          : location.pathname.startsWith("/tools")
-            ? "Tools"
-            : location.pathname.startsWith("/gear")
-              ? "Gear"
-              : location.pathname.startsWith("/settings")
-                ? "Settings"
-                : "Dashboard";
+      : location.pathname.startsWith("/calendar/day/")
+        ? "Day view"
+        : location.pathname.startsWith("/calendar")
+          ? "Calendar"
+          : location.pathname.startsWith("/health")
+            ? "Health"
+            : location.pathname.startsWith("/tools")
+              ? "Tools"
+              : location.pathname.startsWith("/gear")
+                ? "Gear"
+                : location.pathname.startsWith("/settings")
+                  ? "Settings"
+                  : "Dashboard";
 
   return (
     <>
@@ -1909,6 +1912,7 @@ function ActivitiesPage() {
 function ActivityCalendarPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const month = parseCalendarMonth(searchParams.get("month"));
+  const timezone = browserCalendarTimezone();
   const monthRange = calendarMonthRange(month);
   const filters: ActivityTypeFiltersValue = {
     ...emptyActivityTypeFilters,
@@ -1916,11 +1920,12 @@ function ActivityCalendarPage() {
     dateTo: monthRange.end
   };
   const calendar = useQuery({
-    queryKey: ["activity-calendar", month.year, month.month],
-    queryFn: () => api.activityCalendar(filters)
+    queryKey: ["activity-calendar", month.year, month.month, timezone],
+    queryFn: () => api.activityCalendar(filters, timezone)
   });
   const monthLabel = formatCalendarMonthLabel(month);
   const dayByDate = new Map(calendar.data?.days?.map((day) => [day.date, day]) ?? []);
+  const today = localDateString();
   const updateMonth = (nextMonth: CalendarMonth) => {
     const params = new URLSearchParams(searchParams);
     params.set("month", formatCalendarMonth(nextMonth));
@@ -1970,7 +1975,16 @@ function ActivityCalendarPage() {
       }
     >
       <section className="panel">
-        <div className="panel-heading">Monthly activity calendar</div>
+        <div className="calendar-top-bar">
+          <div>
+            <div className="panel-heading">Monthly activity calendar</div>
+            <span className="muted">Open a day to inspect its health data and activities.</span>
+          </div>
+          <Link className="secondary-button small-button" to={`/calendar/day/${today}`}>
+            <CalendarDays size={16} />
+            View today
+          </Link>
+        </div>
         {calendar.isLoading && <LoadingRow />}
         {calendar.error && <div className="error">{calendar.error instanceof Error ? calendar.error.message : "Could not load calendar"}</div>}
         <div className="calendar-weekday-header">
@@ -1984,12 +1998,19 @@ function ActivityCalendarPage() {
               return <div className="calendar-day-cell empty" key={`empty-${index}`} />;
             }
             const hasActivities = entry.dayData && entry.dayData.activityCount > 0;
+            const hasDayView = Boolean(hasActivities || entry.dayData?.hasHealthData);
             return (
               <div
-                className={`calendar-day-cell ${hasActivities ? "calendar-day-cell--active" : ""}`}
+                className={`calendar-day-cell ${hasDayView ? "calendar-day-cell--active" : ""}`}
                 key={entry.date}
               >
-                <div className="calendar-day-number">{entry.day}</div>
+                {hasDayView ? (
+                  <Link className="calendar-day-number calendar-day-link" to={`/calendar/day/${entry.date}`} aria-label={`View ${formatCalendarAgendaDate(entry.date)}`}>
+                    {entry.day}
+                  </Link>
+                ) : (
+                  <div className="calendar-day-number">{entry.day}</div>
+                )}
                 {hasActivities && (
                   <ul className="calendar-day-list">
                     {entry.dayData?.activities.map((activity) => (
@@ -2013,13 +2034,19 @@ function ActivityCalendarPage() {
           {monthCells.filter((entry): entry is NonNullable<typeof entry> => entry !== null).map((entry) => (
             <div className="calendar-agenda-day" key={`agenda-${entry.date}`}>
               <div className="calendar-agenda-day-header">
-                <strong>{formatCalendarAgendaDate(entry.date)}</strong>
+                {(entry.dayData?.activityCount || entry.dayData?.hasHealthData) ? (
+                  <Link className="calendar-day-link" to={`/calendar/day/${entry.date}`}>
+                    <strong>{formatCalendarAgendaDate(entry.date)}</strong>
+                  </Link>
+                ) : (
+                  <strong>{formatCalendarAgendaDate(entry.date)}</strong>
+                )}
                 <span>{entry.dayData?.activityCount ? `${entry.dayData.activityCount} activit${entry.dayData.activityCount === 1 ? "y" : "ies"}` : "No activities"}</span>
               </div>
               {entry.dayData && entry.dayData.activityCount > 0 ? (
                 <ul className="calendar-day-list">
                   {entry.dayData.activities.map((activity) => (
-                    <li key={activity.id} className="calendar-day-activity">
+                    <li key={activity.id} className={`calendar-day-activity${activity.source === "training_sheet" ? " calendar-day-activity--planned" : ""}`}>
                       <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
                       <span className="calendar-day-activity-meta">
                         {activity.sportType}
@@ -2036,6 +2063,100 @@ function ActivityCalendarPage() {
         </div>
       </section>
     </Page>
+  );
+}
+
+function CalendarDayPage() {
+  const { date: routeDate } = useParams();
+  const date = isCalendarDate(routeDate) ? routeDate : "";
+  const timezone = browserCalendarTimezone();
+  const day = useQuery({
+    queryKey: ["calendar-day", date, timezone],
+    queryFn: () => api.calendarDay(date, timezone),
+    enabled: Boolean(date)
+  });
+  const health = day.data?.health;
+  const activities = day.data?.activities ?? [];
+  const future = date > localDateString();
+
+  return (
+    <Page
+      title="Day view"
+      eyebrow={date ? formatCalendarDayLongDate(date) : undefined}
+      actions={
+        <div className="calendar-day-controls">
+          <Link className="secondary-button small-button" to={date ? `/calendar?month=${date.slice(0, 7)}` : "/calendar"}>
+            <ChevronLeft size={16} />
+            Back to calendar
+          </Link>
+        </div>
+      }
+    >
+      {!date && <div className="error">That day is not valid.</div>}
+      {day.isLoading && <LoadingRow />}
+      {day.error && <div className="error">{day.error instanceof Error ? day.error.message : "Could not load day view"}</div>}
+
+      {date && !day.isLoading && !day.error && (
+        <>
+          {health ? (
+            <>
+              <section className="health-summary" aria-label="Daily health">
+                <div className="health-summary-header">
+                  <div className="panel-heading">Health</div>
+                  <span className="muted">Daily Garmin metrics</span>
+                </div>
+                <div className="metric-grid">
+                  {healthMetricCards(health).map((item) => <Metric key={item.label} label={item.label} value={item.value} icon={item.icon} />)}
+                </div>
+              </section>
+              <HealthDayDetail metric={health} />
+            </>
+          ) : (
+            <section className="panel calendar-day-empty-health">
+              <div className="panel-heading">Health</div>
+              <span className="muted">{future ? "Health data is not available for future days." : "No health data recorded for this day."}</span>
+            </section>
+          )}
+
+          <section className="panel calendar-day-activities-panel">
+            <div className="filter-header">
+              <div className="panel-heading">Activities</div>
+              <span className="muted">{activities.length.toLocaleString()}</span>
+            </div>
+            {activities.length > 0 ? (
+              <CalendarDayActivityList activities={activities} />
+            ) : (
+              <div className="calendar-day-empty-activities muted">
+                {future ? "No planned activities for this day." : "No activities recorded for this day."}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </Page>
+  );
+}
+
+function CalendarDayActivityList({ activities }: { activities: CalendarActivitySummary[] }) {
+  return (
+    <ul className="calendar-day-activity-list">
+      {activities.map((activity) => {
+        const metadata = [
+          activity.sportType,
+          activity.distanceM > 0 ? formatDistance(activity.distanceM) : "",
+          activity.movingTimeS > 0 ? formatDuration(activity.movingTimeS) : ""
+        ].filter(Boolean).join(" · ");
+        return (
+          <li key={activity.id} className={`calendar-day-activity-row${activity.source === "training_sheet" ? " calendar-day-activity-row--planned" : ""}`}>
+            <div>
+              <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
+              {metadata && <span className="calendar-day-activity-meta">{metadata}</span>}
+            </div>
+            {activity.source === "training_sheet" && <span className="calendar-day-planned-label">Planned</span>}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -5091,11 +5212,11 @@ function DisplaySettingsSection({
   return (
     <section className="panel display-panel">
       <div>
-        <div className="panel-heading">Display</div>
-        <p className="muted">Choose how Runnarr follows your browser color settings.</p>
+        <div className="panel-heading">Appearance</div>
+        <p className="muted">Choose a visual palette for this account. Your selection is saved with your account and follows you between devices.</p>
       </div>
       <ThemePreferenceControl value={value} onChange={onChange} />
-      {error && <div className="error">{error.message || "Could not save display preferences"}</div>}
+      {error && <div className="error" role="alert">{error.message || "Could not save appearance preferences"}</div>}
     </section>
   );
 }
@@ -5191,27 +5312,34 @@ function ThemePreferenceControl({
   value: ThemePreference;
   onChange: (preference: ThemePreference) => void;
 }) {
-  const options: Array<{ value: ThemePreference; label: string; icon: JSX.Element }> = [
-    { value: "system", label: "System", icon: <Monitor size={15} /> },
-    { value: "light", label: "Light", icon: <Sun size={15} /> },
-    { value: "dark", label: "Dark", icon: <Moon size={15} /> }
-  ];
-
   return (
-    <div className="segmented-control theme-control" role="group" aria-label="Theme preference">
-      {options.map((option) => (
-        <button
-          key={option.value}
-          className={value === option.value ? "active" : ""}
-          type="button"
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-        >
-          {option.icon}
-          {option.label}
-        </button>
-      ))}
-    </div>
+    <fieldset className="theme-picker">
+      <legend>Color theme</legend>
+      <div className="theme-options">
+        {themeOptions.map((option) => (
+          <label className={`theme-option ${value === option.value ? "active" : ""}`} key={option.value}>
+            <input
+              type="radio"
+              name="runnarr-theme"
+              value={option.value}
+              checked={value === option.value}
+              onChange={() => onChange(option.value)}
+            />
+            <span className="theme-option-card">
+              <span className={`theme-preview theme-preview--${option.value}`} aria-hidden="true">
+                <span className="theme-preview-sidebar" />
+                <span className="theme-preview-page" />
+                <span className="theme-preview-accent" />
+              </span>
+              <span className="theme-option-copy">
+                <strong>{option.label}</strong>
+                <span>{option.description}</span>
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -5666,6 +5794,23 @@ function formatCalendarAgendaDate(value: string) {
   return date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+function formatCalendarDayLongDate(value: string) {
+  const date = new Date(`${value}T12:00:00`);
+  return date.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+}
+
+function browserCalendarTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function isCalendarDate(value: string | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const parsed = localDateFromString(value);
+  return Boolean(parsed && formatCalendarDate(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate()) === value);
+}
+
 function calendarMonthRange(month: CalendarMonth) {
   return {
     start: formatCalendarDate(month.year, month.month, 1),
@@ -5768,6 +5913,10 @@ function healthDetailItems(metric: DailyHealthMetric) {
     { label: "Sleep score", value: formatHealthRounded(metric.sleepScore) },
     { label: "Average stress", value: formatHealthRounded(metric.stressAvg) },
     { label: "Maximum stress", value: formatHealthRounded(metric.stressMax) },
+    { label: "Average body battery", value: formatHealthRounded(metric.bodyBatteryAvg) },
+    { label: "Minimum body battery", value: formatHealthRounded(metric.bodyBatteryMin) },
+    { label: "Body battery start", value: formatHealthRounded(metric.bodyBatteryStart) },
+    { label: "Body battery end", value: formatHealthRounded(metric.bodyBatteryEnd) },
     { label: "Body battery gained", value: formatHealthRounded(metric.bodyBatteryGained) },
     { label: "Body battery drained", value: formatHealthRounded(metric.bodyBatteryDrained) },
     { label: "Body battery highest", value: formatHealthRounded(metric.bodyBatteryMax) },

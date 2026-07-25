@@ -51,6 +51,7 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 		progress(map[string]any{"provider": trainingSheetProvider, "kind": "sync", "stage": "Reading worksheets", "sheets": len(tabs)})
 	}
 	processed, saved, skipped := 0, 0, 0
+	historicalSkipped := 0
 	warnings := make([]string, 0)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	for _, tab := range tabs {
@@ -75,6 +76,7 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 				}
 				if !exists {
 					skipped++
+					historicalSkipped++
 					continue
 				}
 			}
@@ -93,7 +95,21 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 			}
 		}
 	}
+	superseded := int64(0)
+	if saved > 0 || (processed == 0 && historicalSkipped > 0 && len(warnings) == 0) {
+		var err error
+		superseded, err = s.store.SupersedeStaleTrainingSheetPlans(ctx, sheetID, planYear)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, err
+		}
+	}
 	payload := map[string]any{"provider": trainingSheetProvider, "kind": "sync", "stage": "Completed", "activities": processed, "processed": processed, "saved": saved, "skipped": skipped, "sheets": len(tabs)}
+	if superseded > 0 {
+		payload["superseded"] = superseded
+	}
 	if len(warnings) > 0 {
 		payload["warnings"] = warnings
 		payload["stage"] = "Completed with warnings"
