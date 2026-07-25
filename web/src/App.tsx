@@ -3024,6 +3024,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {matchOpen && plannedMatchCandidates.data && (
         <PlannedActivityMatchDialog
           data={plannedMatchCandidates.data}
+          targetDate={localDateString(new Date(confirmedItem.startTime))}
           selectedCandidateId={matchCandidateId}
           canLoadMore={plannedMatchWindowDays === 7 && plannedMatchCandidates.data.hasMore}
           matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending}
@@ -3476,6 +3477,7 @@ function optionalWatts(value?: number) {
 
 function PlannedActivityMatchDialog({
   data,
+  targetDate,
   selectedCandidateId,
   canLoadMore,
   matching,
@@ -3489,6 +3491,7 @@ function PlannedActivityMatchDialog({
   onClose
 }: {
   data: PlannedActivityMatchResponse;
+  targetDate: string;
   selectedCandidateId?: string;
   canLoadMore: boolean;
   matching: boolean;
@@ -3563,6 +3566,7 @@ function PlannedActivityMatchDialog({
           candidates={data.candidates ?? []}
           suggestedId={data.suggestedId}
           selectedCandidateId={selectedCandidateId}
+          targetDate={targetDate}
           matching={matching}
           onSelectCandidate={onSelectCandidate}
         />

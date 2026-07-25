@@ -1247,19 +1247,88 @@ textarea {
   gap: 16px;
   max-height: 300px;
   overflow-y: auto;
+  padding: 2px 4px 2px 0;
 }
 
 .planned-match-agenda-day {
+  position: relative;
   display: grid;
-  gap: 8px;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
 }
 
-.planned-match-agenda-date {
+.planned-match-agenda-day:not(:last-child)::after {
+  position: absolute;
+  top: 54px;
+  bottom: -16px;
+  left: 38px;
+  width: 2px;
+  content: "";
+  background: var(--color-border-muted);
+}
+
+.planned-match-agenda-date-rail {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-self: start;
+  flex-direction: column;
+  align-items: center;
+  min-height: 64px;
   margin: 0;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--color-border-muted);
+  padding: 7px 4px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  color: var(--color-heading);
+  background: var(--color-surface-muted);
+  text-align: center;
+}
+
+.planned-match-agenda-day--target .planned-match-agenda-date-rail {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.planned-match-agenda-weekday,
+.planned-match-agenda-month {
+  color: var(--color-muted-strong);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.planned-match-agenda-day-number {
+  margin: 2px 0;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.planned-match-agenda-target {
+  margin-top: 5px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  color: var(--color-primary-strong);
+  background: var(--color-surface);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.planned-match-agenda-day-content {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.planned-match-agenda-full-date {
+  margin: 0;
+  padding: 4px 0 2px;
   color: var(--color-heading);
   font-size: 13px;
+  font-weight: 700;
   line-height: 1.3;
 }
 
@@ -1273,6 +1342,7 @@ textarea {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   gap: 10px;
+  min-width: 0;
   padding: 12px;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -1293,6 +1363,11 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.planned-match-candidate-title strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .planned-match-badge {
@@ -3566,6 +3641,28 @@ textarea {
 @media (max-width: 520px) {
   .gear-grid {
     grid-template-columns: 1fr;
+  }
+
+  .planned-match-agenda-day {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .planned-match-agenda-day:not(:last-child)::after {
+    left: 31px;
+  }
+
+  .planned-match-agenda-date-rail {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  .planned-match-agenda-day-number {
+    font-size: 21px;
+  }
+
+  .planned-match-agenda-target {
+    font-size: 8px;
   }
 }
 

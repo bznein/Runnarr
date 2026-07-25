@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { formatPlannedActivityAgendaDate, groupPlannedActivityCandidates, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
+import { formatPlannedActivityAgendaDate, formatPlannedActivityTimelineDate, groupPlannedActivityCandidates, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
 import type { PlannedActivity } from "./types";
 
 function candidate(id: string, plannedDate: string, name = id, notes?: string): PlannedActivity {
@@ -42,6 +42,14 @@ describe("planned activity match agenda", () => {
     );
   });
 
+  it("formats the compact date rail without shifting date-only values", () => {
+    expect(formatPlannedActivityTimelineDate("2026-07-01")).toEqual({
+      weekday: new Date("2026-07-01T12:00:00").toLocaleDateString(undefined, { weekday: "short" }),
+      month: new Date("2026-07-01T12:00:00").toLocaleDateString(undefined, { month: "short" }),
+      day: "1"
+    });
+  });
+
   it("renders one agenda section per populated date and keeps candidate controls", () => {
     const markup = renderToStaticMarkup(
       <PlannedActivityMatchAgenda
@@ -52,12 +60,15 @@ describe("planned activity match agenda", () => {
         ]}
         suggestedId="two"
         selectedCandidateId="two"
+        targetDate="2026-07-01"
         matching={false}
         onSelectCandidate={vi.fn()}
       />
     );
 
-    expect((markup.match(/class="planned-match-agenda-day"/g) ?? [])).toHaveLength(2);
+    expect((markup.match(/class="planned-match-agenda-day(?: |"|$)/g) ?? [])).toHaveLength(2);
+    expect(markup).toContain("planned-match-agenda-day--target");
+    expect(markup).toContain("Activity date");
     expect((markup.match(/type="radio"/g) ?? [])).toHaveLength(3);
     expect(markup).toContain("Suggested");
     expect(markup).toContain("Intervals note");

@@ -144,7 +144,8 @@ test.describe("local product journey", () => {
     await expect(plannedMatchDialog).toBeVisible();
     const agendaDays = plannedMatchDialog.locator(".planned-match-agenda-day");
     await expect(agendaDays).toHaveCount(3);
-    await expect(agendaDays.nth(0).locator("h3")).toHaveText(/2026/);
+    await expect(agendaDays.nth(1)).toHaveClass(/planned-match-agenda-day--target/);
+    await expect(agendaDays.nth(0).locator(".planned-match-agenda-full-date")).toHaveText(/2026/);
     await expect(agendaDays.nth(1).getByText("E2E Planned Run", { exact: true })).toBeVisible();
     await expect(agendaDays.nth(1).getByText("E2E Planned Speed Work", { exact: true })).toBeVisible();
     await expect(agendaDays.nth(1).getByRole("radio")).toHaveCount(2);
