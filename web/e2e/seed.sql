@@ -99,7 +99,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-run', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A1', current_date - 1, 'E2E Planned Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A1', current_date, 'E2E Planned Run', 'Run', 'pending', '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -133,7 +133,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-speed', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A3', current_date - 1, 'E2E Planned Speed Work', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A3', current_date, 'E2E Planned Speed Work', 'Run', 'pending', '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
