@@ -87,6 +87,7 @@
 - Activity type filters now use a compact include/exclude control with checkbox bulk actions.
 - Activity detail charts now recover when the available metrics change.
 - Health summary cards now show the actual metric date and remain pinned to today's data while chart ranges change.
+- Activity detail charts now use robust display bounds for isolated outliers while preserving raw samples.
 - Planned-run suggestions and matching now only apply to running activities.
 - RPE sliders now use effort-based colors from easy through maximum effort.
 - Hide per-activity climb sensitivity controls for activity types such as swimming, kayaking, and treadmill runs where climbs are not meaningful.
