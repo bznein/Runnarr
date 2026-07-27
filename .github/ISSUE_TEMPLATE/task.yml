@@ -1,0 +1,23 @@
+name: Task or documentation
+description: Track maintenance, documentation, testing, or other non-feature work.
+title: "task: "
+labels:
+  - "type:chore"
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should be changed or made clearer?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and acceptance criteria
+      description: List the files, systems, or observable checks involved.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Add links, constraints, or notes from the original idea.

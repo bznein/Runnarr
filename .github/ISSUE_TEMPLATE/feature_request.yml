@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a user-facing capability or meaningful improvement.
+title: "feature: "
+labels:
+  - "type:feature"
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Who has the problem, and why does it matter?
+      placeholder: When ..., I need ... because ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the behavior that would solve the problem. Avoid prescribing implementation unless it is a constraint.
+      placeholder: Runnarr should ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions that would make this complete.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and non-goals
+      description: Note privacy, provider, migration, compatibility, or scope constraints.
