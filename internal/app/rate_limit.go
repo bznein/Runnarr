@@ -17,9 +17,37 @@ func newLoginRateLimiter() *loginRateLimiter {
 	return &loginRateLimiter{attempts: make(map[string][]time.Time)}
 }
 
-func (l *loginRateLimiter) allow(key string, now time.Time) bool {
+func (l *loginRateLimiter) allowAndRecord(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	attempts, cutoff := l.pruneLocked(key, now)
+	if len(attempts) >= 10 {
+		return false
+	}
+	l.attempts[key] = append(attempts, now)
+	l.cleanupLocked(cutoff)
+	return true
+}
+
+func (l *loginRateLimiter) blocked(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	attempts, cutoff := l.pruneLocked(key, now)
+	l.cleanupLocked(cutoff)
+	return len(attempts) >= 10
+}
+
+func (l *loginRateLimiter) recordFailure(key string, now time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	attempts, cutoff := l.pruneLocked(key, now)
+	if len(attempts) < 10 {
+		l.attempts[key] = append(attempts, now)
+	}
+	l.cleanupLocked(cutoff)
+}
+
+func (l *loginRateLimiter) pruneLocked(key string, now time.Time) ([]time.Time, time.Time) {
 	cutoff := now.Add(-time.Minute)
 	attempts := l.attempts[key][:0]
 	for _, attempt := range l.attempts[key] {
@@ -27,19 +55,19 @@ func (l *loginRateLimiter) allow(key string, now time.Time) bool {
 			attempts = append(attempts, attempt)
 		}
 	}
-	if len(attempts) >= 10 {
-		l.attempts[key] = attempts
-		return false
+	l.attempts[key] = attempts
+	return attempts, cutoff
+}
+
+func (l *loginRateLimiter) cleanupLocked(cutoff time.Time) {
+	if len(l.attempts) <= 10_000 {
+		return
 	}
-	l.attempts[key] = append(attempts, now)
-	if len(l.attempts) > 10_000 {
-		for candidate, values := range l.attempts {
-			if len(values) == 0 || values[len(values)-1].Before(cutoff) {
-				delete(l.attempts, candidate)
-			}
+	for candidate, values := range l.attempts {
+		if len(values) == 0 || values[len(values)-1].Before(cutoff) {
+			delete(l.attempts, candidate)
 		}
 	}
-	return true
 }
 
 func requestClientKey(r *http.Request, trustProxy bool) string {

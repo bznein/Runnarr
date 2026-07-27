@@ -62,7 +62,7 @@ func (s *Server) handleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Google OIDC is not configured")
 		return
 	}
-	if s.loginLimiter != nil && !s.loginLimiter.allow("oidc:"+requestClientKey(r, s.cfg.TrustProxy), time.Now()) {
+	if s.loginLimiter != nil && !s.loginLimiter.allowAndRecord("oidc:"+requestClientKey(r, s.cfg.TrustProxy), time.Now()) {
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "too many login attempts")
 		return
