@@ -64,7 +64,7 @@ async function navigateTo(page: Page, label: string, mobile: boolean) {
   await page.locator(".sidebar").getByRole("link", { name: label, exact: true }).click();
 }
 
-async function login(page: Page, mobile: boolean) {
+async function loginAs(page: Page, username: string, password: string, mobile: boolean) {
   await page.goto("/login");
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password").fill(password);
@@ -79,6 +79,10 @@ async function login(page: Page, mobile: boolean) {
   }
 }
 
+async function login(page: Page, mobile: boolean) {
+  await loginAs(page, username, password, mobile);
+}
+
 async function logout(page: Page, mobile: boolean) {
   if (mobile) {
     const menu = await openMobileMenu(page);
@@ -88,8 +92,8 @@ async function logout(page: Page, mobile: boolean) {
   await page.locator(".sidebar").getByRole("button", { name: "Log out", exact: true }).click();
 }
 
-async function ensureActivityImported(page: Page, projectName: string, mobile: boolean) {
-  const name = activityName(projectName);
+async function ensureActivityImported(page: Page, projectName: string, mobile: boolean, requestedName = activityName(projectName)) {
+  const name = requestedName;
   await page.goto("/activities");
   await expect(page.getByRole("heading", { name: "Activities" })).toBeVisible();
   await expect(visibleActivityContainer(page, mobile)).toBeVisible();
@@ -307,6 +311,48 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name: "E2E Pool Swim" })).toBeVisible();
     await expect(page.locator(".climbs-panel")).toHaveCount(0);
     await expect(page.locator(".climb-sensitivity-details")).toHaveCount(0);
+  });
+
+  test("exits support view to the dashboard from an activity", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const supportUsername = `e2e-support-${projectSlug(testInfo.project.name)}`;
+    const supportPassword = "e2e-support-password-123";
+    const supportActivity = `E2E ${testInfo.project.name} Support Activity`;
+
+    await login(page, mobile);
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+    const userManagement = page.locator(".user-management-panel");
+    const supportUserRow = userManagement.locator("tbody tr").filter({ hasText: supportUsername });
+    if (await supportUserRow.count() === 0) {
+      await userManagement.getByPlaceholder("Username").fill(supportUsername);
+      await userManagement.getByPlaceholder("Display name").fill("E2E Support User");
+      await userManagement.getByPlaceholder("Temporary password").fill(supportPassword);
+      await userManagement.getByRole("button", { name: "Create", exact: true }).click();
+    }
+    await expect(supportUserRow).toBeVisible();
+
+    await logout(page, mobile);
+    await loginAs(page, supportUsername, supportPassword, mobile);
+    await ensureActivityImported(page, testInfo.project.name, mobile, supportActivity);
+    await logout(page, mobile);
+    await login(page, mobile);
+
+    await page.goto("/settings");
+    const adminSupportUserRow = page.locator(".user-management-panel tbody tr").filter({ hasText: supportUsername });
+    await adminSupportUserRow.getByRole("button", { name: "Support view", exact: true }).click();
+    await expect(page.getByText("Read-only support view: E2E Support User", { exact: true })).toBeVisible();
+
+    await page.goto("/activities");
+    await visibleActivityLink(page, supportActivity, mobile).click();
+    await expect(page.getByRole("heading", { name: supportActivity })).toBeVisible();
+    await page.getByRole("button", { name: "Exit support view", exact: true }).click();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    await expect(page.locator(".support-banner")).toHaveCount(0);
+    await expect(page.getByText("Activity not found", { exact: true })).toHaveCount(0);
   });
 
   test("pins an activity photo to a map location", async ({ page }, testInfo) => {
