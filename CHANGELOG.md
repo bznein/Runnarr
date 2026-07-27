@@ -5,6 +5,7 @@
 ### Fixes
 
 - Exiting administrator support view from another user’s activity now returns to the dashboard instead of reloading the invalid activity URL.
+- Login rate limiting now counts failed password attempts without penalizing successful sign-ins.
 
 ## 1.0.0-rc.1 - 2026-07-23
 

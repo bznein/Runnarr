@@ -85,19 +85,36 @@ func TestPublicSameOriginRequest(t *testing.T) {
 	}
 }
 
-func TestLoginRateLimiter(t *testing.T) {
+func TestLoginRateLimiterRecordsAttempts(t *testing.T) {
 	limiter := newLoginRateLimiter()
 	now := time.Unix(100, 0)
 	for i := 0; i < 10; i++ {
-		if !limiter.allow("127.0.0.1", now) {
+		if !limiter.allowAndRecord("127.0.0.1", now) {
 			t.Fatalf("attempt %d was rejected too early", i)
 		}
 	}
-	if limiter.allow("127.0.0.1", now) {
+	if limiter.allowAndRecord("127.0.0.1", now) {
 		t.Fatal("eleventh attempt should be rejected")
 	}
-	if !limiter.allow("127.0.0.1", now.Add(time.Minute+time.Second)) {
+	if !limiter.allowAndRecord("127.0.0.1", now.Add(time.Minute+time.Second)) {
 		t.Fatal("expired attempts should no longer count")
+	}
+}
+
+func TestLoginRateLimiterCountsOnlyFailedAttempts(t *testing.T) {
+	limiter := newLoginRateLimiter()
+	now := time.Unix(100, 0)
+	for i := 0; i < 10; i++ {
+		if limiter.blocked("127.0.0.1", now) {
+			t.Fatalf("successful login %d was blocked before a failure", i)
+		}
+		limiter.recordFailure("127.0.0.1", now)
+	}
+	if !limiter.blocked("127.0.0.1", now) {
+		t.Fatal("eleventh failed login should be blocked")
+	}
+	if limiter.blocked("127.0.0.1", now.Add(time.Minute+time.Second)) {
+		t.Fatal("expired failed attempts should no longer block login")
 	}
 }
 

@@ -186,7 +186,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "local password login is disabled")
 		return
 	}
-	if s.loginLimiter != nil && !s.loginLimiter.allow(requestClientKey(r, s.cfg.TrustProxy), time.Now()) {
+	loginKey := requestClientKey(r, s.cfg.TrustProxy)
+	loginNow := time.Now()
+	if s.loginLimiter != nil && s.loginLimiter.blocked(loginKey, loginNow) {
 		w.Header().Set("Retry-After", "60")
 		writeError(w, http.StatusTooManyRequests, "too many login attempts")
 		return
@@ -197,6 +199,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if s.loginLimiter != nil {
+			s.loginLimiter.recordFailure(loginKey, time.Now())
+		}
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
@@ -206,6 +211,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		hash, err = s.store.PasswordHash(r.Context(), user.ID)
 	}
 	if err != nil || user.Disabled || bcrypt.CompareHashAndPassword([]byte(hash), []byte(body.Password)) != nil {
+		if s.loginLimiter != nil {
+			s.loginLimiter.recordFailure(loginKey, time.Now())
+		}
 		writeError(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
