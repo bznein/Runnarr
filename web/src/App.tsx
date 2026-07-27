@@ -382,7 +382,7 @@ function AuthenticatedApp({
           <div className="support-banner">
             <span>Read-only support view: {session.user?.displayName || session.user?.username}</span>
             <button className="secondary-button small-button" type="button" onClick={() => {
-              void api.stopSupport().then(() => window.location.reload());
+              void api.stopSupport().then(() => window.location.replace("/"));
             }}>Exit support view</button>
           </div>
         )}
