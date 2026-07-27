@@ -23,6 +23,7 @@ This file defines the default operating rules for coding agents working in this 
 - Compose smoke check: `curl -fsS http://localhost:37617/api/session`
 - GitHub operations: `gh` is installed and available for PR, check, issue, and Actions queries.
 - New features and behavior changes should add or update E2E coverage whenever feasible.
+- When asked “what’s next?”, read `docs/ROADMAP.md`, then inspect the current branch, open issues, and open PRs before recommending work. Keep the roadmap’s one-large-project-at-a-time order unless the user explicitly reprioritizes it.
 
 Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in the current environment.
 
