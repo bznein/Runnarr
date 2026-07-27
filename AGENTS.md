@@ -10,6 +10,7 @@ This file defines the default operating rules for coding agents working in this 
 - PostgreSQL migrations live in `internal/app/migrations/` and run at startup.
 - `README.md` describes the product boundary; GitHub issues record product decisions and release scope.
 - `CHANGELOG.md` tracks user-facing and release-relevant changes.
+- `docs/repository-hygiene.md` describes the issue, label, milestone, and review workflow.
 
 ## Standard Commands
 

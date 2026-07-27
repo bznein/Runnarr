@@ -1,0 +1,40 @@
+name: Bug report
+description: Report behavior that is incorrect, broken, or unexpectedly unsafe.
+title: "bug: "
+labels:
+  - "type:bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide enough detail to reproduce or diagnose the problem.
+        A short report from a phone is fine; we can refine it during triage.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+      placeholder: I expected ... but ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: List the smallest set of steps that shows the problem.
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. Observe ...
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include browser/device, deployment mode, or relevant provider details.
+      placeholder: Chrome on Pixel 8 Pro; Docker Compose; Garmin sync
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Add safe-to-share logs or screenshots. Remove credentials and private data.
+      render: text
