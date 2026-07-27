@@ -19,11 +19,15 @@ issues, pull requests, and branch state.
 
 Complete the agreed v1 scope and release checks.
 
-### 2. Repository hygiene
+### 2. Repository hygiene — complete (2026-07-27)
 
-Clean up issue labels, milestones, project fields, issue templates, backlog
-triage, and product documentation. This project includes creating or restoring
-the repository’s product source of truth.
+- [PR #196](https://github.com/bznein/Runnarr/pull/196)
+- Added the issue labels, milestones, issue templates, pull request template,
+  and backlog-triage guide.
+- Classified the open backlog and kept `README.md` as the product boundary;
+  no separate PRD was added.
+- GitHub Projects were evaluated and intentionally left unused for now; the
+  roadmap, labels, and milestones provide the current ordering.
 
 ### 3. Reusable GitHub agent orchestration
 
