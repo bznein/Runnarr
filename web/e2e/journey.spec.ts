@@ -313,6 +313,61 @@ test.describe("local product journey", () => {
     await expect(page.locator(".climb-sensitivity-details")).toHaveCount(0);
   });
 
+  test("excludes a matched planned run from all candidate windows until unmatch", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const plannedName = `E2E ${testInfo.project.name} Match Candidate`;
+    const activityAName = `E2E ${testInfo.project.name} Match Activity A`;
+    const activityCName = `E2E ${testInfo.project.name} Match Activity C`;
+
+    await login(page, mobile);
+    await ensureActivityImported(page, `${testInfo.project.name}-match-a`, mobile, activityAName);
+    await visibleActivityLink(page, activityAName, mobile).click();
+    const activityAID = new URL(page.url()).pathname.split("/").filter(Boolean).at(-1);
+    expect(activityAID).toBeTruthy();
+
+    await ensureActivityImported(page, `${testInfo.project.name}-match-c`, mobile, activityCName);
+    await visibleActivityLink(page, activityCName, mobile).click();
+    const activityCID = new URL(page.url()).pathname.split("/").filter(Boolean).at(-1);
+    expect(activityCID).toBeTruthy();
+
+    const sessionResponse = await page.request.get("/api/session");
+    expect(sessionResponse.ok()).toBe(true);
+    const session = await sessionResponse.json() as { csrfToken: string };
+    const mutationHeaders = { "X-CSRF-Token": session.csrfToken };
+
+    const candidates = async (windowDays: 7 | 30) => {
+      const response = await page.request.get(`/api/activities/${activityCID}/planned-match-candidates?windowDays=${windowDays}`);
+      expect(response.ok()).toBe(true);
+      return response.json() as Promise<{ candidates: Array<{ id: string; name: string }> }>;
+    };
+
+    await page.request.delete(`/api/activities/${activityAID}/planned-match`, { headers: mutationHeaders });
+    const beforeMatch = await candidates(7);
+    const planned = beforeMatch.candidates.find((candidate) => candidate.name === plannedName);
+    expect(planned, `${plannedName} should start as an eligible candidate`).toBeTruthy();
+
+    try {
+      const matchResponse = await page.request.post(`/api/activities/${activityAID}/planned-match`, {
+        headers: mutationHeaders,
+        data: { plannedActivityId: planned!.id }
+      });
+      expect(matchResponse.ok()).toBe(true);
+
+      for (const windowDays of [7, 30] as const) {
+        const afterMatch = await candidates(windowDays);
+        expect(afterMatch.candidates.map((candidate) => candidate.id)).not.toContain(planned!.id);
+      }
+    } finally {
+      const unmatchResponse = await page.request.delete(`/api/activities/${activityAID}/planned-match`, { headers: mutationHeaders });
+      expect(unmatchResponse.ok()).toBe(true);
+    }
+
+    for (const windowDays of [7, 30] as const) {
+      const afterUnmatch = await candidates(windowDays);
+      expect(afterUnmatch.candidates.map((candidate) => candidate.id)).toContain(planned!.id);
+    }
+  });
+
   test("exits support view to the dashboard from an activity", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const supportUsername = `e2e-support-${projectSlug(testInfo.project.name)}`;
