@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- Strength-training activities no longer show distance, pace, or grade-adjusted pace summary metrics.
+- Strength-training activities no longer show distance, elevation, pace, or grade-adjusted pace summary metrics.
 
 ## 1.0.0 - 2026-07-30
 

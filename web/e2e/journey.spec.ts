@@ -584,6 +584,7 @@ test.describe("local product journey", () => {
     await expect(strengthSummary.getByText("Distance", { exact: true })).toHaveCount(0);
     await expect(strengthSummary.getByText("Pace", { exact: true })).toHaveCount(0);
     await expect(strengthSummary.getByText("GAP", { exact: true })).toHaveCount(0);
+    await expect(strengthSummary.getByText("Elevation", { exact: true })).toHaveCount(0);
     await expect(strengthSummary.getByText("Moving Time", { exact: true })).toBeVisible();
 
     await navigateTo(page, "Settings", true);

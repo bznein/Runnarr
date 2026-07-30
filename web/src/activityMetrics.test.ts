@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { supportsDistanceAndPaceMetrics } from "./activityMetrics";
+import { supportsRouteMetrics } from "./activityMetrics";
 
 describe("activity metric visibility", () => {
   it.each([
@@ -9,11 +9,11 @@ describe("activity metric visibility", () => {
     "Weight Training",
     "WeightTraining",
     "Weightlifting"
-  ])("hides distance and pace for %s", (sportType) => {
-    expect(supportsDistanceAndPaceMetrics(sportType)).toBe(false);
+  ])("hides route metrics for %s", (sportType) => {
+    expect(supportsRouteMetrics(sportType)).toBe(false);
   });
 
-  it.each(["Running", "Cycling", "Swimming", "Walking"])("keeps distance and pace for %s", (sportType) => {
-    expect(supportsDistanceAndPaceMetrics(sportType)).toBe(true);
+  it.each(["Running", "Cycling", "Swimming", "Walking"])("keeps route metrics for %s", (sportType) => {
+    expect(supportsRouteMetrics(sportType)).toBe(true);
   });
 });
