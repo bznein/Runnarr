@@ -33,6 +33,14 @@ the layout adapts to smaller phones, tablets, and desktop browsers. See the
 [web and PWA smoke-test checklist](docs/mobile-pwa-smoke-test.md) for browser,
 installability, responsive-layout, and cache checks.
 
+Runnarr keeps a per-user notification inbox for generated or changed workouts,
+Garmin calendar reconciliation, automatic activity matching, and
+training-sheet writeback. Each category can be disabled, kept in-app, or also
+sent as browser push. Push is opt-in per device; subscriptions are encrypted at
+rest, can be renamed, tested, or removed from Settings, and can reach an
+installed phone PWA while the app is closed. iPhone and iPad push requires the
+site to be added to the Home Screen before permission is requested.
+
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 
 For an HTTPS deployment behind Nginx Proxy Manager, see

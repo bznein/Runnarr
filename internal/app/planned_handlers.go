@@ -526,6 +526,7 @@ func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID strin
 	if payload != nil {
 		_ = s.store.UpdateSyncJobProgress(ctx, jobID, payload)
 	}
+	s.publishSheetWritebackNotification(ctx, plannedID, activityID, payload, err)
 	if err != nil {
 		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), payload)
 		return

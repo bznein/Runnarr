@@ -423,7 +423,11 @@ func (s *GarminService) ReconcileWorkouts(ctx context.Context) (WorkoutReconcile
 						return result, err
 					}
 				}
-				result.Actions = append(result.Actions, WorkoutReconcileAction{WorkoutID: workout.ID, Action: "none", Date: workout.ScheduledDate, Status: "scheduled"})
+				action := "none"
+				if schedule.Status != "scheduled" {
+					action = "recover"
+				}
+				result.Actions = append(result.Actions, WorkoutReconcileAction{WorkoutID: workout.ID, Action: action, Date: workout.ScheduledDate, Status: "scheduled"})
 				continue
 			}
 			if schedule.Status == "error" && schedule.ProviderScheduleID == "" && garminScheduleRetryUnsafe(schedule.Error) {

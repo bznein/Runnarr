@@ -592,6 +592,57 @@ export type WorkoutReconcileResult = {
   actions: WorkoutReconcileAction[];
 };
 
+export type NotificationCategory = "workout_changes" | "garmin_calendar" | "activity_matching" | "sheet_writeback";
+export type NotificationMode = "off" | "in_app" | "in_app_push";
+export type NotificationSeverity = "info" | "success" | "warning" | "error";
+
+export type NotificationEvent = {
+  id: string;
+  category: NotificationCategory;
+  kind: string;
+  severity: NotificationSeverity;
+  title: string;
+  body?: string;
+  actionPath: string;
+  createdAt: string;
+};
+
+export type RunnarrNotification = {
+  id: string;
+  category: NotificationCategory;
+  kind: string;
+  severity: NotificationSeverity;
+  title: string;
+  body?: string;
+  actionPath: string;
+  readAt?: string;
+  createdAt: string;
+  lastEventAt: string;
+  eventCount: number;
+  events?: NotificationEvent[];
+};
+
+export type NotificationPage = {
+  notifications: RunnarrNotification[];
+  unreadCount: number;
+  nextCursor?: string;
+};
+
+export type NotificationSettings = {
+  categories: Record<NotificationCategory, NotificationMode>;
+  vapidPublicKey?: string;
+};
+
+export type PushSubscriptionDevice = {
+  id: string;
+  deviceName: string;
+  userAgent?: string;
+  lastSeenAt: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  createdAt: string;
+};
+
 export type CalendarPlanMatch = {
   id: string;
   name: string;

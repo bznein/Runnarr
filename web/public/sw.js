@@ -1,4 +1,4 @@
-const CACHE_NAME = "runnarr-shell-v2";
+const CACHE_NAME = "runnarr-shell-v3";
 const SHELL_URLS = [
   "/",
   "/index.html",
@@ -67,4 +67,48 @@ self.addEventListener("fetch", (event) => {
       })
     );
   }
+});
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data?.json() ?? {};
+  } catch {
+    data = { title: "Runnarr has an update", actionPath: "/notifications" };
+  }
+  const title = data.title || "Runnarr has an update";
+  const actionPath = typeof data.actionPath === "string" && data.actionPath.startsWith("/") && !data.actionPath.startsWith("//")
+    ? data.actionPath
+    : "/notifications";
+  const badgePromise = typeof self.navigator?.setAppBadge === "function" && Number(data.unreadCount) > 0
+    ? self.navigator.setAppBadge(Number(data.unreadCount))
+    : Promise.resolve();
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, {
+      body: data.body || "Open Runnarr for details.",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: data.tag || "runnarr-notification",
+      renotify: true,
+      data: { actionPath, notificationId: data.notificationId || "" }
+    }),
+    badgePromise
+  ]));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const actionPath = event.notification.data?.actionPath || "/notifications";
+  const notificationId = event.notification.data?.notificationId;
+  const navigate = self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
+    const target = new URL(actionPath, self.location.origin);
+    if (notificationId) target.searchParams.set("runnarrNotification", notificationId);
+    const targetURL = target.href;
+    for (const client of clients) {
+      if ("navigate" in client) await client.navigate(targetURL);
+      return client.focus();
+    }
+    return self.clients.openWindow(targetURL);
+  });
+  event.waitUntil(navigate);
 });

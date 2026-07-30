@@ -710,4 +710,83 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name: "E2E Manual Tempo" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
+
+  test("uses notification inbox, links, and category settings", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const notificationID = "00000000-0000-4000-8000-000000000174";
+    const timestamp = "2026-07-30T12:00:00Z";
+    const notification = {
+      id: notificationID,
+      category: "workout_changes",
+      kind: "push_test",
+      severity: "success",
+      title: "Runnarr notifications are working",
+      body: "This event opens notification settings.",
+      actionPath: "/settings?section=notifications",
+      createdAt: timestamp,
+      lastEventAt: timestamp,
+      eventCount: 1
+    };
+
+    await page.route(/\/api\/notifications(?:\/[^?]+)?(?:\?.*)?$/, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (request.method() === "PATCH") {
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ updated: true }) });
+        return;
+      }
+      if (url.pathname === `/api/notifications/${notificationID}`) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...notification,
+            events: [{
+              id: "00000000-0000-4000-8000-000000000175",
+              category: notification.category,
+              kind: notification.kind,
+              severity: notification.severity,
+              title: notification.title,
+              body: notification.body,
+              actionPath: notification.actionPath,
+              createdAt: timestamp
+            }]
+          })
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ notifications: [notification], unreadCount: 1 })
+      });
+    });
+
+    await login(page, mobile);
+    await page.getByRole("button", { name: "1 unread notifications", exact: true }).click();
+    const popover = page.getByRole("dialog", { name: "Recent notifications" });
+    await expect(popover.getByText(notification.title, { exact: true })).toBeVisible();
+    await popover.getByRole("button").filter({ hasText: notification.title }).click();
+    await expect(page).toHaveURL(/\/settings\?section=notifications$/);
+    const settings = page.locator("#notifications");
+    await expect(settings).toBeVisible();
+
+    const activityMatching = settings.getByLabel(/Activity matching/);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/notification-settings") && response.request().method() === "PATCH" && response.ok()),
+      activityMatching.selectOption("off")
+    ]);
+    await expect(activityMatching).toHaveValue("off");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/notification-settings") && response.request().method() === "PATCH" && response.ok()),
+      activityMatching.selectOption("in_app")
+    ]);
+    await expect(activityMatching).toHaveValue("in_app");
+
+    await page.goto("/notifications");
+    await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+    await page.getByText(notification.title, { exact: true }).click();
+    await expect(page.locator(".notification-timeline-event").getByText(notification.body, { exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
 });

@@ -343,6 +343,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			if matchErr != nil {
 				firstErrors = appendGarminSyncError(firstErrors, source, fmt.Errorf("auto-match workout: %w", matchErr))
 			} else if matched {
+				s.store.publishActivityAutoMatchNotification(ctx, activityID, planned)
 				autoMatches = append(autoMatches, map[string]string{
 					"activityId":        activityID,
 					"plannedActivityId": planned.ID,

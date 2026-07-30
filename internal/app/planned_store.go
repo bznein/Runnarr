@@ -157,7 +157,7 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 	if err != nil {
 		return err
 	}
-	return s.UpsertSheetWorkoutForPlanned(ctx, planned)
+	return s.UpsertSheetWorkoutForPlanned(ctx, planned, true)
 }
 
 func (s *Store) PlannedActivityExists(ctx context.Context, source, sourceID string) (bool, error) {
@@ -176,17 +176,58 @@ func (s *Store) SupersedeStaleTrainingSheetPlans(ctx context.Context, workbookID
 		return 0, fmt.Errorf("training sheet workbook ID is required")
 	}
 	start, end := trainingSheetPlanYearBounds(planYear)
-	result, err := s.db.Exec(ctx, `
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `
 		update planned_activities
 		set status = 'superseded', updated_at = now()
 		where user_id = $1 and source = $2 and workbook_id <> $3
 			and planned_date >= $4::date and planned_date < $5::date
 			and status = 'pending'
+		returning id::text
 	`, scopedUserID(ctx), trainingSheetProvider, workbookID, start, end)
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected(), nil
+	plannedIDs := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		plannedIDs = append(plannedIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	workoutIDs := make([]string, 0)
+	for _, plannedID := range plannedIDs {
+		var workoutID string
+		err := tx.QueryRow(ctx, `
+			update workouts set archived_at = now(), garmin_excluded = true, updated_at = now()
+			where user_id = $1 and planned_activity_id = $2 and source = 'training_sheet' and archived_at is null
+			returning id::text
+		`, scopedUserID(ctx), plannedID).Scan(&workoutID)
+		if err == nil {
+			workoutIDs = append(workoutIDs, workoutID)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	for _, workoutID := range workoutIDs {
+		if workout, err := s.GetWorkout(ctx, workoutID); err == nil {
+			s.publishWorkoutChangeNotification(ctx, workout, "archived")
+		}
+	}
+	return int64(len(plannedIDs)), nil
 }
 
 func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) ([]PlannedActivity, error) {

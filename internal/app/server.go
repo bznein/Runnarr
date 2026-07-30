@@ -42,6 +42,7 @@ type Server struct {
 	syncCancels      map[string]context.CancelFunc
 	writebackRetryMu sync.Mutex
 	writebackRetries map[string]struct{}
+	webPush          *webPushService
 	oidcMu           sync.Mutex
 	oidc             *oidcClient
 	loginLimiter     *loginRateLimiter
@@ -74,11 +75,11 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		if user.Disabled {
 			continue
 		}
-		if err := store.BackfillSheetWorkouts(withUserID(context.Background(), user.ID)); err != nil {
+		if err := store.BackfillSheetWorkouts(withUserID(context.Background(), user.ID), false); err != nil {
 			return nil, fmt.Errorf("backfill workouts for %s: %w", user.Username, err)
 		}
 	}
-	return &Server{
+	server := &Server{
 		cfg:              cfg,
 		store:            store,
 		imports:          NewImportService(store),
@@ -88,7 +89,13 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		syncCancels:      make(map[string]context.CancelFunc),
 		writebackRetries: make(map[string]struct{}),
 		loginLimiter:     newLoginRateLimiter(),
-	}, nil
+	}
+	webPush, err := newWebPushService(context.Background(), cfg, store, logger)
+	if err != nil {
+		return nil, err
+	}
+	server.webPush = webPush
+	return server, nil
 }
 
 func (s *Server) Routes() http.Handler {
@@ -119,6 +126,20 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/users/{id}/password", s.handleResetUserPassword)
 			r.Get("/preferences", s.handleGetPreferences)
 			r.Patch("/preferences", s.handleUpdatePreferences)
+			r.Get("/notifications", s.handleListNotifications)
+			r.Delete("/notifications", s.handleClearNotifications)
+			r.Post("/notifications/read-all", s.handleMarkAllNotificationsRead)
+			r.Get("/notifications/{id}", s.handleGetNotification)
+			r.Patch("/notifications/{id}", s.handleUpdateNotification)
+			r.Delete("/notifications/{id}", s.handleDeleteNotification)
+			r.Get("/notification-settings", s.handleGetNotificationSettings)
+			r.Patch("/notification-settings", s.handleUpdateNotificationSettings)
+			r.Get("/push-subscriptions", s.handleListWebPushSubscriptions)
+			r.Post("/push-subscriptions", s.handleCreateWebPushSubscription)
+			r.Delete("/push-subscriptions/current", s.handleDeleteCurrentWebPushSubscription)
+			r.Patch("/push-subscriptions/{id}", s.handleUpdateWebPushSubscription)
+			r.Delete("/push-subscriptions/{id}", s.handleDeleteWebPushSubscription)
+			r.Post("/push-subscriptions/{id}/test", s.handleTestWebPushSubscription)
 			r.Get("/config", s.handleConfig)
 			r.Get("/config/training-sheet", s.handleTrainingSheetConfig)
 			r.Patch("/config/training-sheet", s.handleUpdateTrainingSheetConfig)
@@ -1059,6 +1080,8 @@ func (s *Server) StartBackgroundSync(ctx context.Context) {
 	go s.runGarminScheduledSync(ctx)
 	go s.runGarminWorkoutScheduledSync(ctx)
 	go s.runTrainingSheetScheduledSync(ctx)
+	go s.runWebPushDispatcher(ctx)
+	go s.runNotificationMaintenance(ctx)
 }
 
 func (s *Server) runGarminWorkoutScheduledSync(ctx context.Context) {
@@ -1120,6 +1143,7 @@ func (s *Server) runGarminWorkoutReconcileJob(jobID string) {
 	defer cleanup()
 	result, err := s.garmin.ReconcileWorkouts(ctx)
 	payload := workoutReconcilePayload(result)
+	s.publishGarminWorkoutNotifications(ctx, result, err)
 	if err != nil {
 		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), payload)
 		s.logger.Error("Garmin workout sync", "job_id", jobID, "error", err)

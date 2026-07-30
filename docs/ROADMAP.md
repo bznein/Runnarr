@@ -49,19 +49,19 @@ is a separate integration concern and must not expand the reusable core.
 - [Issue #148](https://github.com/bznein/Runnarr/issues/148)
 - [Issue #151](https://github.com/bznein/Runnarr/issues/151)
 
-### 5. Garmin workout scheduling
+### 5. Garmin workout scheduling — complete
 
 - [Issue #170](https://github.com/bznein/Runnarr/issues/170)
-- Active implementation: parsing, authoring, calendar scheduling, Garmin
+- Added parsing, authoring, calendar scheduling, Garmin
   ownership/reconciliation, activity auto-matching, and the offline testbed.
 
-### 6. User notifications — next
+### 6. User notifications — complete
 
 - [Issue #174](https://github.com/bznein/Runnarr/issues/174)
-- The first required notification is a user-visible event when a workout is
-  newly generated or scheduled. This is the next product issue after #170.
+- Added a per-user inbox with event timelines, category delivery preferences,
+  actionable links, retention controls, and opt-in per-device browser push.
 
-### 7. Course support
+### 7. Course support — next
 
 - [Issue #102](https://github.com/bznein/Runnarr/issues/102)
 

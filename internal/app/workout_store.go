@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -133,7 +134,7 @@ func (s *Store) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	return scanWorkout(s.db.QueryRow(ctx, workoutSelectSQL+` where workouts.id = $1 and workouts.user_id = $2`, id, scopedUserID(ctx)))
 }
 
-func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned PlannedActivity) error {
+func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned PlannedActivity, notify bool) error {
 	if planned.Source != trainingSheetProvider {
 		return nil
 	}
@@ -146,11 +147,24 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 		return err
 	}
 	if !isStructuredWorkoutPrescription(planned.Notes) {
-		_, err = s.db.Exec(ctx, `
+		var archivedID string
+		err = s.db.QueryRow(ctx, `
 			update workouts set archived_at = now(), garmin_excluded = true, updated_at = now()
 			where user_id = $1 and planned_activity_id = $2 and source = 'training_sheet' and archived_at is null
-		`, scopedUserID(ctx), plannedID)
-		return err
+			returning id::text
+		`, scopedUserID(ctx), plannedID).Scan(&archivedID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if notify {
+			if workout, loadErr := s.GetWorkout(ctx, archivedID); loadErr == nil {
+				s.publishWorkoutChangeNotification(ctx, workout, "archived")
+			}
+		}
+		return nil
 	}
 	table := workoutTableFromPlanned(planned)
 	parsed := parseWorkoutPrescription(planned.Notes, table)
@@ -163,7 +177,18 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 		return err
 	}
 	sourceHash := workoutSourceHash(planned.Notes, table)
-	_, err = s.db.Exec(ctx, `
+	var previous struct {
+		ID, Name, SportType, SourceHash, ParseStatus, ScheduledDate string
+	}
+	previousErr := s.db.QueryRow(ctx, `
+		select id::text, name, sport_type, source_hash, parse_status, coalesce(scheduled_date::text, '')
+		from workouts where user_id = $1 and planned_activity_id = $2 and source = 'training_sheet' and archived_at is null
+	`, scopedUserID(ctx), plannedID).Scan(&previous.ID, &previous.Name, &previous.SportType, &previous.SourceHash, &previous.ParseStatus, &previous.ScheduledDate)
+	if previousErr != nil && !errors.Is(previousErr, pgx.ErrNoRows) {
+		return previousErr
+	}
+	var workoutID string
+	err = s.db.QueryRow(ctx, `
 		insert into workouts(
 			user_id, source, planned_activity_id, name, sport_type, source_text, source_hash,
 			definition, parse_status, parse_messages, scheduled_date
@@ -178,12 +203,30 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 			revision = case when workouts.source_hash <> excluded.source_hash then workouts.revision + 1 else workouts.revision end,
 			generated_at = case when workouts.source_hash <> excluded.source_hash then now() else workouts.generated_at end,
 			updated_at = now()
+		returning id::text
 	`, scopedUserID(ctx), plannedID, planned.Name, planned.SportType, planned.Notes, sourceHash,
-		definitionBytes, parsed.Status, messagesBytes, planned.PlannedDate.Format("2006-01-02"))
-	return err
+		definitionBytes, parsed.Status, messagesBytes, planned.PlannedDate.Format("2006-01-02")).Scan(&workoutID)
+	if err != nil {
+		return err
+	}
+	if notify {
+		created := errors.Is(previousErr, pgx.ErrNoRows)
+		changed := created || previous.Name != planned.Name || previous.SportType != planned.SportType || previous.SourceHash != sourceHash ||
+			previous.ParseStatus != parsed.Status || previous.ScheduledDate != planned.PlannedDate.Format("2006-01-02")
+		if changed {
+			if workout, loadErr := s.GetWorkout(ctx, workoutID); loadErr == nil {
+				change := "updated"
+				if created {
+					change = "generated"
+				}
+				s.publishWorkoutChangeNotification(ctx, workout, change)
+			}
+		}
+	}
+	return nil
 }
 
-func (s *Store) BackfillSheetWorkouts(ctx context.Context) error {
+func (s *Store) BackfillSheetWorkouts(ctx context.Context, notify bool) error {
 	rows, err := s.db.Query(ctx, `
 		select id::text, source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
 			feedback_cell, planned_date, name, sport_type, notes, status, source_url, raw,
@@ -215,7 +258,7 @@ func (s *Store) BackfillSheetWorkouts(ctx context.Context) error {
 		return err
 	}
 	for _, planned := range plans {
-		if err := s.UpsertSheetWorkoutForPlanned(ctx, planned); err != nil {
+		if err := s.UpsertSheetWorkoutForPlanned(ctx, planned, notify); err != nil {
 			return err
 		}
 	}

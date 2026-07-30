@@ -21,6 +21,7 @@ import { applyThemePreference, parseThemePreference, themeOptions, themePreferen
 import type { ThemePreference } from "./theme";
 import { chartDisplayDomain } from "./activityChartBounds";
 import { supportsRouteMetrics } from "./activityMetrics";
+import { NotificationBell, NotificationSettingsSection, NotificationsPage, unregisterCurrentPushDevice } from "./notifications";
 import { hasIntervalAnalysis, resolveActivityAnalysisTab } from "./activityAnalysis";
 import type { ActivityAnalysisTab } from "./activityAnalysis";
 import type {
@@ -244,6 +245,16 @@ function mergeUserPreference(current: UserPreference | undefined, updates: Parti
   };
 }
 
+function safeNextPath(value: string) {
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (parsed.origin !== window.location.origin || !value.startsWith("/") || value.startsWith("//")) return "/";
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 function useSaveUserPreferences(userID?: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -270,6 +281,7 @@ export function App() {
   const [themePreferenceUserID, setThemePreferenceUserID] = useState<string>();
   const pwa = usePwaInstallPrompt();
   const queryClient = useQueryClient();
+  const location = useLocation();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const effectiveUserID = session.data?.user?.id;
   const preferences = useQuery({
@@ -311,10 +323,11 @@ export function App() {
   }
 
   if (!session.data?.authenticated) {
+    const next = safeNextPath(`${location.pathname}${location.search}${location.hash}`);
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />} />
       </Routes>
     );
   }
@@ -347,8 +360,35 @@ function AuthenticatedApp({
   const config = useQuery({ queryKey: ["config"], queryFn: api.config });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const storedNext = window.sessionStorage.getItem("runnarrLoginNext");
+    if (!storedNext) return;
+    window.sessionStorage.removeItem("runnarrLoginNext");
+    navigate(safeNextPath(storedNext), { replace: true });
+  }, [navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const notificationID = params.get("runnarrNotification");
+    if (!notificationID) return;
+    params.delete("runnarrNotification");
+    const cleanPath = `${location.pathname}${params.size ? `?${params}` : ""}${location.hash}`;
+    const timeout = window.setTimeout(() => {
+      const markRead = session?.canWrite === false ? Promise.resolve() : api.setNotificationRead(notificationID, true).catch(() => undefined);
+      void markRead.finally(() => {
+        void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        navigate(cleanPath, { replace: true });
+      });
+    });
+    return () => window.clearTimeout(timeout);
+  }, [location.hash, location.pathname, location.search, navigate, queryClient, session?.canWrite]);
   const logout = useMutation({
-    mutationFn: api.logout,
+    mutationFn: async () => {
+      await unregisterCurrentPushDevice();
+      return api.logout();
+    },
     onSuccess: async () => {
       setCsrfToken("");
       await queryClient.invalidateQueries({ queryKey: ["session"] });
@@ -377,6 +417,7 @@ function AuthenticatedApp({
             <strong>{session?.user?.displayName || session?.user?.username}</strong>
             <span>{session?.user?.role === "admin" ? "Administrator" : "User"}</span>
           </div>
+          <NotificationBell canWrite={session?.canWrite !== false} />
           <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
           <button className="nav-button" type="button" onClick={() => logout.mutate()}>
             <LogOut size={18} />
@@ -403,12 +444,13 @@ function AuthenticatedApp({
           <Route path="/workouts" element={<WorkoutsPage />} />
           <Route path="/workouts/new" element={<WorkoutEditorPage />} />
           <Route path="/workouts/:id" element={<WorkoutEditorPage />} />
+          <Route path="/notifications" element={<NotificationsPage canWrite={session?.canWrite !== false} />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/gear" element={<GearPage />} />
           <Route path="/gear/:id" element={<GearDetailPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
-          <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={themePreferenceError} />} />
+          <Route path="/settings" element={<SettingsPage canWrite={session?.canWrite !== false} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={themePreferenceError} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -444,6 +486,8 @@ function MobileNavigation({
           ? "Calendar"
           : location.pathname.startsWith("/workouts")
             ? "Workouts"
+          : location.pathname.startsWith("/notifications")
+            ? "Notifications"
           : location.pathname.startsWith("/health")
             ? "Health"
             : location.pathname.startsWith("/tools")
@@ -462,9 +506,12 @@ function MobileNavigation({
           <span>Runnarr</span>
         </Link>
         <span className="mobile-header-title">{currentLabel}</span>
-        <button className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" onClick={() => setMoreOpen(true)}>
-          <Menu size={19} />
-        </button>
+        <div className="mobile-header-actions">
+          <NotificationBell mobile canWrite={session?.canWrite !== false} />
+          <button className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" onClick={() => setMoreOpen(true)}>
+            <Menu size={19} />
+          </button>
+        </div>
       </header>
       <nav className="mobile-bottom-nav" aria-label="Primary navigation">
         <NavLink to="/" className={({ isActive }) => `mobile-nav-item ${isActive ? "active" : ""}`} end>
@@ -582,7 +629,9 @@ function LoginPage() {
     onSuccess: async (session) => {
       setCsrfToken(session.csrfToken);
       await queryClient.invalidateQueries({ queryKey: ["session"] });
-      navigate("/");
+      const next = safeNextPath(searchParams.get("next") || window.sessionStorage.getItem("runnarrLoginNext") || "/");
+      window.sessionStorage.removeItem("runnarrLoginNext");
+      navigate(next);
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Login failed")
   });
@@ -590,6 +639,10 @@ function LoginPage() {
   const localLoginEnabled = session.data?.localLoginEnabled !== false;
   const googleOIDCEnabled = session.data?.googleOIDCEnabled === true;
   const callbackError = searchParams.get("error");
+  useEffect(() => {
+    const next = searchParams.get("next");
+    if (next) window.sessionStorage.setItem("runnarrLoginNext", safeNextPath(next));
+  }, [searchParams]);
 
   return (
     <div className="login-page">
@@ -3068,6 +3121,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const writeback = plannedMatchCandidates.data?.writeback;
+  useEffect(() => {
+    if (searchParams.get("section") !== "writeback") return;
+    const timeout = window.setTimeout(() => document.getElementById("writeback")?.scrollIntoView({ block: "center" }));
+    return () => window.clearTimeout(timeout);
+  }, [searchParams, writeback]);
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
   const loadingCandidateRetry = retryingPlannedMatchCandidates;
   const loadingCandidateRequest = loadingMorePlans || loadingCandidateRetry;
@@ -3347,6 +3405,15 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {plannedMatchCandidates.error && <div className="error">{plannedMatchCandidates.error instanceof Error ? plannedMatchCandidates.error.message : "Could not load planned activity matches"}</div>}
       {unmatchPlannedActivity.error && <div className="error">{unmatchPlannedActivity.error instanceof Error ? unmatchPlannedActivity.error.message : "Could not unmatch planned run"}</div>}
       {retryWriteback.error && <div className="error">{retryWriteback.error instanceof Error ? retryWriteback.error.message : "Could not retry sheet write-back"}</div>}
+      {writeback && <section id="writeback" className="panel activity-writeback-panel">
+        <div><div className="panel-heading">Training sheet writeback</div><p className="muted">{matchedPlannedActivity?.name || "Matched planned activity"}</p></div>
+        <div className="activity-writeback-statuses">
+          <span>Summary <strong>{writeback.summaryStatus || "pending"}</strong></span>
+          <span>Intervals <strong>{writeback.intervalsStatus || "pending"}</strong></span>
+          <span>Feedback <strong>{writeback.feedbackStatus || "pending"}</strong></span>
+        </div>
+        {canRetryWriteback && <button className="secondary-button small-button" type="button" disabled={retryWriteback.isPending} onClick={() => retryWriteback.mutate()}><RefreshCw size={14} />{retryWriteback.isPending ? "Retrying…" : "Retry writeback"}</button>}
+      </section>}
       <section className="metric-grid">
         {supportsRouteMetrics(item.sportType) && <Metric label="Distance" value={formatDistance(item.distanceM)} />}
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
@@ -4986,6 +5053,7 @@ function WorkoutEditorPage() {
   const { id } = useParams();
   const creating = !id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const workout = useQuery({ queryKey: ["workout", id], queryFn: () => api.workout(id ?? ""), enabled: !creating });
   const config = useQuery({ queryKey: ["workout-config"], queryFn: api.workoutConfig });
@@ -5016,6 +5084,12 @@ function WorkoutEditorPage() {
       setPaceTolerance(config.data.defaultPaceToleranceSeconds);
     }
   }, [config.data, creating, useDefaultTolerance]);
+
+  useEffect(() => {
+    if (searchParams.get("section") !== "garmin" || !workout.data) return;
+    const timeout = window.setTimeout(() => document.getElementById("garmin")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+    return () => window.clearTimeout(timeout);
+  }, [searchParams, workout.data]);
 
   const parse = useMutation({ mutationFn: api.parseWorkout });
   const save = useMutation({
@@ -5109,7 +5183,7 @@ function WorkoutEditorPage() {
           <div className="filter-header"><div className="panel-heading">Steps</div>{parseStatus && <span className={`status ${parseStatus === "error" ? "failed" : parseStatus === "warning" ? "canceled" : "completed"}`}>{parseStatus}</span>}</div>
           {definition ? <WorkoutDefinitionView definition={definition} /> : <div className="muted">Enter a prescription to preview its steps.</div>}
           {parseMessages.length > 0 && <ul className="workout-parse-messages">{parseMessages.map((message, index) => <li key={`${message.message}-${index}`} className={message.level}>{message.message}</li>)}</ul>}
-          <div className="workout-garmin-summary">
+          <div id="garmin" className="workout-garmin-summary">
             <strong>Garmin</strong>
             <span>{garminExcluded ? "Excluded" : current?.garmin.status || (scheduledDate ? "Pending sync" : "Not scheduled")}</span>
             {current?.garmin.providerWorkoutId && <a className="workout-garmin-link" href={`https://connect.garmin.com/modern/workout/${encodeURIComponent(current.garmin.providerWorkoutId)}`} target="_blank" rel="noreferrer">Open in Garmin <ExternalLink size={13} /><span className="sr-only"> workout {current.garmin.providerWorkoutId}</span></a>}
@@ -5173,10 +5247,12 @@ function mutationErrorMessage(error: unknown, fallback: string) {
 }
 
 function SettingsPage({
+  canWrite,
   themePreference,
   onThemePreferenceChange,
   themePreferenceError
 }: {
+  canWrite: boolean;
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
   themePreferenceError?: Error | null;
@@ -5206,14 +5282,15 @@ function SettingsPage({
     .filter((job, index, list) => list.findIndex((item) => item.id === job.id) === index);
 
   useEffect(() => {
-    if (location.hash !== "#import") {
+    const section = new URLSearchParams(location.search).get("section") || (location.hash === "#import" ? "import" : "");
+    if (!section) {
       return;
     }
     const timeout = window.setTimeout(() => {
-      document.getElementById("import")?.scrollIntoView({ block: "start" });
+      document.getElementById(section)?.scrollIntoView({ block: "start" });
     });
     return () => window.clearTimeout(timeout);
-  }, [location.hash]);
+  }, [location.hash, location.search]);
 
   const garminConnect = useMutation({
     mutationFn: api.garminConnect,
@@ -5345,6 +5422,7 @@ function SettingsPage({
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
       <WorkoutSettings />
       <TrainingSheetSettings />
+      <NotificationSettingsSection canWrite={canWrite} />
       <ClimbDetectionSettingsSection />
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} error={themePreferenceError} />
       <UserManagement />
@@ -5404,7 +5482,7 @@ function WorkoutSettings() {
   });
 
   return (
-    <section className="panel workout-settings-panel">
+    <section id="workouts" className="panel workout-settings-panel">
       <div>
         <div className="panel-heading">Garmin workouts</div>
         <p className="muted">Build workouts in Runnarr and schedule the next {config.data?.horizonDays ?? 7} days in Garmin Connect.</p>

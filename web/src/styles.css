@@ -342,6 +342,7 @@ textarea {
 
 .sidebar {
   position: sticky;
+  z-index: 100;
   top: 0;
   display: flex;
   flex-direction: column;
@@ -371,6 +372,268 @@ textarea {
   display: grid;
   gap: 6px;
   margin-top: auto;
+}
+
+.notification-bell {
+  position: relative;
+}
+
+.notification-nav-button {
+  width: 100%;
+}
+
+.notification-badge {
+  min-width: 19px;
+  height: 19px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--color-white);
+  background: var(--color-danger);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 19px;
+  text-align: center;
+}
+
+.notification-popover {
+  position: absolute;
+  z-index: 1300;
+  bottom: 0;
+  left: calc(100% + 12px);
+  width: min(380px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-high);
+}
+
+.notification-popover-heading,
+.notification-card-actions,
+.notification-toolbar,
+.notification-toolbar-actions,
+.push-enable-row,
+.push-device-row,
+.push-device-row > div:last-child,
+.activity-writeback-statuses {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-popover-heading {
+  justify-content: space-between;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.notification-popover-list {
+  max-height: 390px;
+  overflow-y: auto;
+}
+
+.notification-popover-item,
+.notification-card-main,
+.notification-view-all {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notification-popover-item {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.notification-popover-item:hover,
+.notification-popover-item.unread {
+  background: var(--color-surface-subtle);
+}
+
+.notification-popover-item > span:last-child,
+.notification-card-copy,
+.notification-category-row > span,
+.push-device-row > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.notification-popover-item strong,
+.notification-popover-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-popover-item small,
+.notification-popover-item time,
+.notification-card-copy time,
+.notification-timeline-event time,
+.notification-category-row small,
+.push-device-row small {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.notification-view-all {
+  padding: 12px 14px;
+  color: var(--color-primary-strong);
+  font-weight: 700;
+  text-align: center;
+}
+
+.notification-empty {
+  padding: 24px;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.notification-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--color-muted);
+}
+
+.notification-dot.success { background: var(--color-primary-strong); }
+.notification-dot.warning { background: var(--color-warning); }
+.notification-dot.error { background: var(--color-danger); }
+.notification-dot.info { background: var(--color-primary); }
+
+.notification-toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.notification-list,
+.notification-timeline,
+.notification-category-settings,
+.push-device-settings,
+.push-device-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notification-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.notification-card.unread {
+  border-left: 3px solid var(--color-primary);
+}
+
+.notification-card-main {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 16px;
+}
+
+.notification-card-main:hover {
+  background: var(--color-surface-subtle);
+}
+
+.notification-timeline {
+  padding: 0 16px 16px 38px;
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.notification-timeline-event {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 0 2px;
+}
+
+.notification-timeline-event p {
+  margin: 4px 0;
+  color: var(--color-muted-strong);
+}
+
+.notification-card-actions {
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+
+.notification-settings-panel {
+  gap: 18px;
+}
+
+.notification-category-row,
+.push-device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.notification-category-row select {
+  min-width: 150px;
+}
+
+.push-device-settings {
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.push-enable-row input {
+  flex: 1;
+  min-width: 180px;
+}
+
+.push-device-row > div:last-child {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.error-text {
+  color: var(--color-danger-strong) !important;
+}
+
+.activity-writeback-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  scroll-margin-top: 80px;
+}
+
+.activity-writeback-statuses {
+  flex-wrap: wrap;
+}
+
+.activity-writeback-statuses span {
+  display: grid;
+  gap: 2px;
+  min-width: 88px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.activity-writeback-statuses strong {
+  color: var(--color-text);
+  text-transform: capitalize;
+}
+
+#garmin,
+#workouts,
+#notifications {
+  scroll-margin-top: 80px;
 }
 
 .nav-link,
@@ -3874,6 +4137,53 @@ textarea {
 
   .mobile-menu-button {
     margin-left: auto;
+  }
+
+  .mobile-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: auto;
+  }
+
+  .mobile-header-actions .mobile-menu-button {
+    margin-left: 0;
+  }
+
+  .mobile-notification-bell .notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -6px;
+  }
+
+  .mobile-notification-bell .notification-popover {
+    position: fixed;
+    inset: calc(var(--mobile-header-height) + 8px) 12px auto;
+    width: auto;
+    max-height: calc(100svh - var(--mobile-header-height) - var(--mobile-nav-height) - 28px);
+  }
+
+  .notification-toolbar,
+  .notification-category-row,
+  .push-device-row,
+  .activity-writeback-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .notification-category-row select,
+  .push-enable-row input,
+  .push-enable-row button {
+    width: 100%;
+  }
+
+  .push-enable-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .push-device-row > div:last-child {
+    justify-content: flex-start;
   }
 
   .mobile-bottom-nav {
