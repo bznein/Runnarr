@@ -162,11 +162,12 @@ type googleTokenResponse struct {
 }
 
 type googleSheetTab struct {
-	ID          string
-	Title       string
-	RowCount    int
-	ColumnCount int
-	Values      [][]string
+	ID                       string
+	Title                    string
+	RowCount                 int
+	ColumnCount              int
+	Values                   [][]string
+	PlanCellBackgroundColors map[int]string
 }
 
 type googleSpreadsheetResponse struct {
@@ -264,19 +265,19 @@ type googleValueRangeUpdate struct {
 	Values [][]any `json:"values"`
 }
 
-func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL string) (string, []googleSheetTab, error) {
+func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL string) (string, []googleSheetTab, []string, error) {
 	sheetID, _, err := parseTrainingSheetID(sheetURL)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	accessToken, err := s.AccessToken(ctx)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	metadataURL := fmt.Sprintf("https://sheets.googleapis.com/v4/spreadsheets/%s?fields=sheets(properties(sheetId,title,gridProperties))", url.PathEscape(sheetID))
 	metadata, err := googleGET[googleSpreadsheetResponse](ctx, s.client, metadataURL, accessToken)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	tabs := make([]googleSheetTab, 0, len(metadata.Sheets))
 	ranges := make([]string, 0, len(metadata.Sheets))
@@ -294,7 +295,7 @@ func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL str
 		tabs = append(tabs, googleSheetTab{ID: strconv.Itoa(props.SheetID), Title: props.Title, RowCount: rows, ColumnCount: props.GridProperties.ColumnCount})
 	}
 	if len(ranges) == 0 {
-		return sheetID, tabs, nil
+		return sheetID, tabs, nil, nil
 	}
 	query := url.Values{}
 	for _, rangeName := range ranges {
@@ -304,14 +305,63 @@ func (s *GoogleSheetsAuthService) ReadWorkbook(ctx context.Context, sheetURL str
 	valuesURL := fmt.Sprintf("https://sheets.googleapis.com/v4/spreadsheets/%s/values:batchGet?%s", url.PathEscape(sheetID), query.Encode())
 	values, err := googleGET[googleValuesResponse](ctx, s.client, valuesURL, accessToken)
 	if err != nil {
-		return "", nil, fmt.Errorf("read workbook values: %w", err)
+		return "", nil, nil, fmt.Errorf("read workbook values: %w", err)
 	}
 	for index := range tabs {
 		if index < len(values.ValueRanges) {
 			tabs[index].Values = values.ValueRanges[index].Values
 		}
 	}
-	return sheetID, tabs, nil
+
+	formatWarnings := make([]string, 0)
+	formatQuery := url.Values{}
+	formatQuery.Set("includeGridData", "true")
+	formatQuery.Set("fields", "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(effectiveFormat(backgroundColor,backgroundColorStyle)))))")
+	for _, tab := range tabs {
+		formatQuery.Add("ranges", fmt.Sprintf("'%s'!B2:H2", strings.ReplaceAll(tab.Title, "'", "''")))
+	}
+	formatURL := fmt.Sprintf("https://sheets.googleapis.com/v4/spreadsheets/%s?%s", url.PathEscape(sheetID), formatQuery.Encode())
+	formatResponse, formatErr := googleGET[googleSheetPreviewResponse](ctx, s.client, formatURL, accessToken)
+	if formatErr != nil {
+		formatWarnings = append(formatWarnings, fmt.Sprintf("could not read plan-cell formatting; duration-based matching will be unavailable until a later sync: %v", formatErr))
+	} else {
+		applyPlanCellBackgroundColors(tabs, formatResponse)
+	}
+	return sheetID, tabs, formatWarnings, nil
+}
+
+func applyPlanCellBackgroundColors(tabs []googleSheetTab, response googleSheetPreviewResponse) {
+	tabByTitle := make(map[string]int, len(tabs))
+	for index := range tabs {
+		tabByTitle[tabs[index].Title] = index
+	}
+	for _, sheet := range response.Sheets {
+		index, ok := tabByTitle[sheet.Properties.Title]
+		if !ok {
+			continue
+		}
+		colors := make(map[int]string, 7)
+		for column := 1; column <= 7; column++ {
+			colors[column] = "#ffffff"
+		}
+		for _, data := range sheet.Data {
+			for rowOffset, row := range data.RowData {
+				if data.StartRow+rowOffset != 1 {
+					continue
+				}
+				for columnOffset, cell := range row.Values {
+					column := data.StartColumn + columnOffset
+					if column < 1 || column > 7 {
+						continue
+					}
+					if color := googleOpaqueColorHex(cell.EffectiveFormat.BackgroundColor, cell.EffectiveFormat.BackgroundColorStyle); color != "" {
+						colors[column] = color
+					}
+				}
+			}
+		}
+		tabs[index].PlanCellBackgroundColors = colors
+	}
 }
 
 func (s *GoogleSheetsAuthService) ReadRanges(ctx context.Context, sheetID string, ranges []string) ([][][]string, error) {

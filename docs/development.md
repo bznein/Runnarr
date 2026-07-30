@@ -82,6 +82,19 @@ Videos are written for every executed test under `web/test-results/`. Set
 `PLAYWRIGHT_SLOW_MO` to add a delay between browser actions when reviewing
 them, for example `PLAYWRIGHT_SLOW_MO=250 npm run e2e`.
 
+For free-form product exploration against disposable data, start the permanent
+testbed workflow without Playwright driving the browser:
+
+```bash
+make testbed
+```
+
+The command prints the selected URL and local login credentials, then keeps the
+stack running until Ctrl-C. It contains a synthetic multi-sport activity
+history with samples, laps, structured workouts, health history, gear, and
+training plans. Garmin and Google integrations remain disabled. Stopping the
+command removes its isolated containers, network, and volumes.
+
 The browser tests intentionally use local password authentication and local
 fixtures. Garmin Connect, Google OAuth, MFA, and real provider syncs are not
 part of the deterministic CI suite.

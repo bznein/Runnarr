@@ -1,8 +1,8 @@
-import type { PlannedActivity, PlannedActivityMatchResponse } from "./types";
+import type { PlannedActivityMatchCandidate, PlannedActivityMatchResponse } from "./types";
 
 export type PlannedActivityAgendaGroup = {
   plannedDate: string;
-  candidates: PlannedActivity[];
+  candidates: PlannedActivityMatchCandidate[];
 };
 
 export function plannedMatchResponseForDialog(data?: PlannedActivityMatchResponse): PlannedActivityMatchResponse {
@@ -18,7 +18,7 @@ function plannedDateValue(value: string) {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-export function groupPlannedActivityCandidates(candidates: PlannedActivity[]): PlannedActivityAgendaGroup[] {
+export function groupPlannedActivityCandidates(candidates: PlannedActivityMatchCandidate[]): PlannedActivityAgendaGroup[] {
   const groups = new Map<string, PlannedActivityAgendaGroup>();
   for (const candidate of candidates) {
     const plannedDate = plannedDateKey(candidate.plannedDate);
@@ -60,7 +60,7 @@ export function PlannedActivityMatchAgenda({
   matching,
   onSelectCandidate
 }: {
-  candidates: PlannedActivity[];
+  candidates: PlannedActivityMatchCandidate[];
   suggestedId?: string;
   selectedCandidateId?: string;
   targetDate?: string;
@@ -100,9 +100,18 @@ export function PlannedActivityMatchAgenda({
                     <div>
                       <div className="planned-match-candidate-title">
                         <strong>{candidate.name}</strong>
+                        <span
+                          className={`planned-match-score planned-match-score--${candidate.matchLevel}`}
+                          aria-label={`Match score ${candidate.matchScore} out of 100`}
+                        >
+                          {candidate.matchScore}/100
+                        </span>
                         {candidate.id === suggestedId && <span className="planned-match-badge">Suggested</span>}
                       </div>
                       {candidate.notes && <p className="muted">{candidate.notes}</p>}
+                      <div className="planned-match-reasons" aria-label={`Match reasons for ${candidate.name}`}>
+                        {candidate.matchReasons.map((reason) => <span key={reason}>{reason}</span>)}
+                      </div>
                     </div>
                   </label>
                 ))}

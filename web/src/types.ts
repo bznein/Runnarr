@@ -131,6 +131,12 @@ export type PlannedActivity = {
   matchedAt?: string;
 };
 
+export type PlannedActivityMatchCandidate = PlannedActivity & {
+  matchScore: number;
+  matchLevel: "strong" | "possible" | "weak";
+  matchReasons: string[];
+};
+
 export type TrainingSheetPreviewChange = {
   range: string;
   section: "summary" | "intervals" | "feedback";
@@ -219,7 +225,7 @@ export type TrainingSheetWritebackStatus = {
 };
 
 export type PlannedActivityMatchResponse = {
-  candidates: PlannedActivity[];
+  candidates: PlannedActivityMatchCandidate[];
   suggestedId?: string;
   hasMore: boolean;
   matched?: PlannedActivity;

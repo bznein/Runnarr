@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
+
 ### Fixes
 
 - Activity details now hide the Intervals tab when there are no structured intervals or recorded laps.

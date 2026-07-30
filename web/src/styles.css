@@ -1549,6 +1549,42 @@ textarea {
   text-transform: uppercase;
 }
 
+.planned-match-score {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.planned-match-score--strong {
+  color: var(--color-primary-strong);
+  background: var(--color-success-soft);
+}
+
+.planned-match-score--possible {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.planned-match-score--weak {
+  color: var(--color-danger-strong);
+  background: var(--color-danger-soft);
+}
+
+.planned-match-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 5px;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.planned-match-reasons span:not(:last-child)::after {
+  margin-left: 10px;
+  content: "·";
+}
+
 .training-sheet-preview {
   display: grid;
   gap: 8px;

@@ -40,7 +40,7 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 	if err != nil {
 		return nil, err
 	}
-	sheetID, tabs, err := auth.ReadWorkbook(ctx, cfg.SheetURL)
+	sheetID, tabs, readWarnings, err := auth.ReadWorkbook(ctx, cfg.SheetURL)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -52,7 +52,7 @@ func (s *PlannedTrainingSheetService) Sync(ctx context.Context, cfg TrainingShee
 	}
 	processed, saved, skipped := 0, 0, 0
 	historicalSkipped := 0
-	warnings := make([]string, 0)
+	warnings := append([]string(nil), readWarnings...)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	for _, tab := range tabs {
 		if err := ctx.Err(); err != nil {
@@ -174,6 +174,11 @@ func plannedActivitiesFromTab(workbookID string, tab googleSheetTab, weekEnd tim
 		notes := strings.TrimSpace(strings.Join(details[day], "\n\n"))
 		feedbackCell := feedbackCells[day]
 		raw := map[string]any{"sheetTitle": tab.Title, "sheetId": tab.ID, "weekEnding": weekEnd.Format("2006-01-02"), "planCell": cell, "planName": name, "notes": notes, "feedbackCell": feedbackCell, "values": tab.Values}
+		if tab.PlanCellBackgroundColors != nil {
+			if backgroundColor, ok := tab.PlanCellBackgroundColors[column]; ok {
+				raw["planCellBackgroundColor"] = backgroundColor
+			}
+		}
 		if table := workoutTableForDay(tab.Values, day); table != nil {
 			raw["workoutTable"] = table
 		}
