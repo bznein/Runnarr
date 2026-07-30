@@ -87,9 +87,10 @@ async function logout(page: Page, mobile: boolean) {
   if (mobile) {
     const menu = await openMobileMenu(page);
     await menu.getByRole("button", { name: "Log out", exact: true }).click();
-    return;
+  } else {
+    await page.locator(".sidebar").getByRole("button", { name: "Log out", exact: true }).click();
   }
-  await page.locator(".sidebar").getByRole("button", { name: "Log out", exact: true }).click();
+  await expect(page).toHaveURL(/\/login(?:\?|$)/);
 }
 
 async function ensureActivityImported(page: Page, projectName: string, mobile: boolean, requestedName = activityName(projectName)) {

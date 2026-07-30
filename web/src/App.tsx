@@ -324,10 +324,11 @@ export function App() {
 
   if (!session.data?.authenticated) {
     const next = safeNextPath(`${location.pathname}${location.search}${location.hash}`);
+    const loginPath = next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`;
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />} />
+        <Route path="*" element={<Navigate to={loginPath} replace />} />
       </Routes>
     );
   }
@@ -3045,6 +3046,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [climbSensitivity]);
 
   const item = activity.data?.activity;
+  const writeback = plannedMatchCandidates.data?.writeback;
   const intervalAnalysisAvailable = hasIntervalAnalysis(item);
   const visibleAnalysisTab = resolveActivityAnalysisTab(analysisTab, intervalAnalysisAvailable);
   const effectiveClimbs = item ? (climbPreview.data?.climbs ?? item.climbs ?? []) : [];
@@ -3063,6 +3065,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setSelectedClimbIndex(undefined);
     }
   }, [effectiveClimbs, selectedClimbIndex]);
+
+  useEffect(() => {
+    if (searchParams.get("section") !== "writeback") return;
+    const timeout = window.setTimeout(() => document.getElementById("writeback")?.scrollIntoView({ block: "center" }));
+    return () => window.clearTimeout(timeout);
+  }, [searchParams, writeback]);
 
   if (activity.isLoading) {
     return <Page title="Activity"><LoadingRow /></Page>;
@@ -3120,12 +3128,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const canSaveClimbSensitivity = !isClimbSensitivitySaved;
   const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
-  const writeback = plannedMatchCandidates.data?.writeback;
-  useEffect(() => {
-    if (searchParams.get("section") !== "writeback") return;
-    const timeout = window.setTimeout(() => document.getElementById("writeback")?.scrollIntoView({ block: "center" }));
-    return () => window.clearTimeout(timeout);
-  }, [searchParams, writeback]);
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
   const loadingCandidateRetry = retryingPlannedMatchCandidates;
   const loadingCandidateRequest = loadingMorePlans || loadingCandidateRetry;
