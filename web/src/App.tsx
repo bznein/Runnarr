@@ -19,6 +19,7 @@ import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./
 import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
 import type { ThemePreference } from "./theme";
 import { chartDisplayDomain } from "./activityChartBounds";
+import { supportsDistanceAndPaceMetrics } from "./activityMetrics";
 import type {
   Activity,
   ActivityClimb,
@@ -2144,7 +2145,7 @@ function CalendarDayActivityList({ activities }: { activities: CalendarActivityS
       {activities.map((activity) => {
         const metadata = [
           activity.sportType,
-          activity.distanceM > 0 ? formatDistance(activity.distanceM) : "",
+          supportsDistanceAndPaceMetrics(activity.sportType) && activity.distanceM > 0 ? formatDistance(activity.distanceM) : "",
           activity.movingTimeS > 0 ? formatDuration(activity.movingTimeS) : ""
         ].filter(Boolean).join(" · ");
         return (
@@ -2549,7 +2550,7 @@ function ActivityTable({
               <td className="activity-name-cell"><Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link></td>
               {showColumn("type") && <td className="clip-cell" title={activity.sportType}>{activity.sportType}</td>}
               {showColumn("gear") && <td className="gear-table-cell"><GearChipList gear={activity.gear} compact /></td>}
-              {showColumn("distance") && <td>{formatDistance(activity.distanceM)}</td>}
+              {showColumn("distance") && <td>{supportsDistanceAndPaceMetrics(activity.sportType) ? formatDistance(activity.distanceM) : ""}</td>}
               {showColumn("time") && <td>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</td>}
               {showColumn("calories") && <td>{formatCalories(activity.caloriesKcal)}</td>}
               {showColumn("source") && <td><span className="source-pill">{activity.source}</span></td>}
@@ -2592,8 +2593,9 @@ function ActivityCardList({
 }) {
   return (
     <div className={`activity-card-list${compact ? " compact" : ""}`}>
-      {activities.map((activity) => (
-        <article className="activity-card" key={activity.id}>
+      {activities.map((activity) => {
+        const showDistanceAndPace = supportsDistanceAndPaceMetrics(activity.sportType);
+        return <article className="activity-card" key={activity.id}>
           <div className="activity-card-header">
             <div className="activity-card-title">
               <Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link>
@@ -2612,8 +2614,8 @@ function ActivityCardList({
               </button>
             )}
           </div>
-          <div className="activity-card-metrics">
-            <span><strong>{formatDistance(activity.distanceM)}</strong><small>Distance</small></span>
+          <div className={`activity-card-metrics${showDistanceAndPace ? "" : " activity-card-metrics--without-distance"}`}>
+            {showDistanceAndPace && <span><strong>{formatDistance(activity.distanceM)}</strong><small>Distance</small></span>}
             <span><strong>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</strong><small>Time</small></span>
             {!compact && <span><strong>{formatCalories(activity.caloriesKcal) || "—"}</strong><small>Calories</small></span>}
           </div>
@@ -2621,8 +2623,8 @@ function ActivityCardList({
             <GearChipList gear={activity.gear} compact />
             <span className="source-pill">{activity.source}</span>
           </div>
-        </article>
-      ))}
+        </article>;
+      })}
     </div>
   );
 }
@@ -3302,13 +3304,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {unmatchPlannedActivity.error && <div className="error">{unmatchPlannedActivity.error instanceof Error ? unmatchPlannedActivity.error.message : "Could not unmatch planned run"}</div>}
       {retryWriteback.error && <div className="error">{retryWriteback.error instanceof Error ? retryWriteback.error.message : "Could not retry sheet write-back"}</div>}
       <section className="metric-grid">
-        <Metric label="Distance" value={formatDistance(item.distanceM)} />
+        {supportsDistanceAndPaceMetrics(item.sportType) && <Metric label="Distance" value={formatDistance(item.distanceM)} />}
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
-        <Metric label="Pace" value={formatPace(item.avgPaceSPKM)} />
+        {supportsDistanceAndPaceMetrics(item.sportType) && <Metric label="Pace" value={formatPace(item.avgPaceSPKM)} />}
         {item.avgHeartRate !== undefined && <Metric label="Avg HR" value={formatBPM(item.avgHeartRate)} />}
         {item.maxHeartRate !== undefined && <Metric label="Max HR" value={formatBPM(item.maxHeartRate)} />}
         <Metric label="Elevation" value={`${Math.round(item.elevationGainM).toLocaleString()} m`} />
-        {item.avgGradeAdjustedPaceSPKM !== undefined && <Metric label="GAP" value={formatPace(item.avgGradeAdjustedPaceSPKM)} />}
+        {supportsDistanceAndPaceMetrics(item.sportType) && item.avgGradeAdjustedPaceSPKM !== undefined && <Metric label="GAP" value={formatPace(item.avgGradeAdjustedPaceSPKM)} />}
         {item.caloriesKcal !== undefined && <Metric label="Calories" value={formatCalories(item.caloriesKcal)} />}
       </section>
 

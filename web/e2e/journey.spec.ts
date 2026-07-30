@@ -572,6 +572,20 @@ test.describe("local product journey", () => {
     await expect(page.locator(".mobile-header-title")).toHaveText("Activities");
     await expectNoHorizontalOverflow(page);
 
+    const strengthCard = page.locator(".activity-card-list:visible .activity-card").filter({
+      has: page.getByRole("link", { name: "E2E Strength Training", exact: true })
+    });
+    await expect(strengthCard).toBeVisible();
+    await expect(strengthCard.getByText("Distance", { exact: true })).toHaveCount(0);
+    await expect(strengthCard.getByText("Time", { exact: true })).toBeVisible();
+    await strengthCard.getByRole("link", { name: "E2E Strength Training", exact: true }).click();
+
+    const strengthSummary = page.locator(".metric-grid").first();
+    await expect(strengthSummary.getByText("Distance", { exact: true })).toHaveCount(0);
+    await expect(strengthSummary.getByText("Pace", { exact: true })).toHaveCount(0);
+    await expect(strengthSummary.getByText("GAP", { exact: true })).toHaveCount(0);
+    await expect(strengthSummary.getByText("Moving Time", { exact: true })).toBeVisible();
+
     await navigateTo(page, "Settings", true);
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();

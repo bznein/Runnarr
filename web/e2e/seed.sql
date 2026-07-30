@@ -42,13 +42,32 @@ on conflict (user_id, provider, metric_date) do update set
     body_fat_pct = excluded.body_fat_pct;
 
 -- Keep the seeded activities outside the imported E2E GPX times so the
--- navigation journey has a deterministic Cycling -> imported -> Pool order.
+-- navigation journey has a deterministic Cycling -> imported -> Pool -> Strength order.
 insert into activities(
     user_id, source, source_id, name, sport_type, start_time,
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-pool-swim', 'E2E Pool Swim', 'Swimming',
     current_date + time '05:00', 1500, 1800, 1900, '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    start_time = excluded.start_time,
+    distance_m = excluded.distance_m,
+    moving_time_s = excluded.moving_time_s,
+    elapsed_time_s = excluded.elapsed_time_s,
+    raw = excluded.raw;
+
+-- Deliberately include provider-style distance on a strength activity so the
+-- browser journey verifies that distance and derived pace remain hidden.
+insert into activities(
+    user_id, source, source_id, name, sport_type, start_time,
+    distance_m, moving_time_s, elapsed_time_s, raw
+)
+select id, 'e2e', 'e2e-strength-activity', 'E2E Strength Training', 'Strength Training',
+    current_date + time '04:00', 1000, 600, 660, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
