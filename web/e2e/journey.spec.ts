@@ -483,6 +483,10 @@ test.describe("local product journey", () => {
       await expect(page.locator(".calendar-grid")).toBeHidden();
       await expect(page.locator(".mobile-header-title")).toHaveText("Calendar");
     }
+    const visibleCalendarLists = page.locator(".calendar-day-list:visible");
+    await expect(visibleCalendarLists.getByRole("link", { name: "E2E Calendar Matched Run", exact: true })).toBeVisible();
+    await expect(visibleCalendarLists.getByRole("link", { name: "E2E Calendar Planned Run", exact: true })).toHaveCount(0);
+    await expect(page.locator(".calendar-day-match-meta:visible").filter({ hasText: "Matched plan: E2E Calendar Planned Run · Planned for" })).toBeVisible();
 
     const todayDayLink = page.locator(".calendar-day-link:visible").filter({ hasText: String(new Date().getDate()) }).first();
     await expect(todayDayLink).toBeVisible();
@@ -491,6 +495,9 @@ test.describe("local product journey", () => {
     await expect(page.getByText("Daily Garmin metrics", { exact: true })).toBeVisible();
     await expect(page.locator(".metric-grid strong").filter({ hasText: "12,450" })).toBeVisible();
     await expect(page.getByRole("link", { name: "E2E Pool Swim", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "E2E Calendar Matched Run", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "E2E Calendar Planned Run", exact: true })).toHaveCount(0);
+    await expect(page.locator(".calendar-day-match-meta").filter({ hasText: "Matched plan: E2E Calendar Planned Run · Planned for" })).toBeVisible();
     await page.getByRole("link", { name: "Back to calendar", exact: true }).click();
     await expect(page.getByText("Monthly activity calendar", { exact: true })).toBeVisible();
 

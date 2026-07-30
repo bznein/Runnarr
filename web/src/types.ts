@@ -475,6 +475,13 @@ export type CalendarActivitySummary = {
   sportType: string;
   distanceM: number;
   movingTimeS: number;
+  matchedPlan?: CalendarPlanMatch;
+};
+
+export type CalendarPlanMatch = {
+  id: string;
+  name: string;
+  plannedDate: string;
 };
 
 export type CalendarDay = {
