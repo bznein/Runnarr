@@ -181,7 +181,8 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-run', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A1', current_date, 'E2E Planned Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A1', current_date, '2mins E2E Planned Run', 'Run', 'pending',
+    '{"planCellBackgroundColor":"#ffffff"}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -215,7 +216,8 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-speed', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A3', current_date, 'E2E Planned Speed Work', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A3', current_date, 'E2E Planned Speed Work', 'Run', 'pending',
+    '{"planCellBackgroundColor":"#3d85c6","workoutTable":{"rows":[{"label":"5min rep 1"}]}}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -232,7 +234,8 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-long', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A4', current_date + 3, 'E2E Planned Long Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A4', current_date + 3, '2 hours E2E Planned Long Run', 'Run', 'pending',
+    '{"planCellBackgroundColor":"#674ea7"}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set

@@ -713,6 +713,19 @@ func previewGoogleColor(color *googleColor, style *googleColorStyle) string {
 	return fmt.Sprintf("rgba(%d, %d, %d, %.2f)", red, green, blue, alpha)
 }
 
+func googleOpaqueColorHex(color *googleColor, style *googleColorStyle) string {
+	if color == nil && style != nil {
+		color = style.RGBColor
+	}
+	if color == nil {
+		return ""
+	}
+	red := int(math.Round(clampPreviewColor(color.Red) * 255))
+	green := int(math.Round(clampPreviewColor(color.Green) * 255))
+	blue := int(math.Round(clampPreviewColor(color.Blue) * 255))
+	return fmt.Sprintf("#%02x%02x%02x", red, green, blue)
+}
+
 func clampPreviewColor(value float64) float64 {
 	if value < 0 {
 		return 0

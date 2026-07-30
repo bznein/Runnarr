@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { formatPlannedActivityAgendaDate, formatPlannedActivityTimelineDate, groupPlannedActivityCandidates, plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
-import type { PlannedActivity } from "./types";
+import type { PlannedActivityMatchCandidate } from "./types";
 
-function candidate(id: string, plannedDate: string, name = id, notes?: string): PlannedActivity {
+function candidate(id: string, plannedDate: string, name = id, notes?: string, matchScore = 80, matchLevel: PlannedActivityMatchCandidate["matchLevel"] = "strong"): PlannedActivityMatchCandidate {
   return {
     id,
     source: "training_sheet",
@@ -16,7 +16,10 @@ function candidate(id: string, plannedDate: string, name = id, notes?: string): 
     name,
     sportType: "Run",
     notes,
-    status: "pending"
+    status: "pending",
+    matchScore,
+    matchLevel,
+    matchReasons: ["Same day", "Both continuous runs"]
   };
 }
 
@@ -55,11 +58,11 @@ describe("planned activity match agenda", () => {
       <PlannedActivityMatchAgenda
         candidates={[
           candidate("one", "2026-07-01", "Morning run"),
-          candidate("two", "2026-07-01", "Intervals", "Intervals note"),
-          candidate("three", "2026-07-05", "Long run")
+          candidate("two", "2026-07-01", "Intervals", "Intervals note", 65, "possible"),
+          candidate("three", "2026-07-05", "Long run", undefined, 59, "weak")
         ]}
-        suggestedId="two"
-        selectedCandidateId="two"
+        suggestedId="one"
+        selectedCandidateId="one"
         targetDate="2026-07-01"
         matching={false}
         onSelectCandidate={vi.fn()}
@@ -72,6 +75,11 @@ describe("planned activity match agenda", () => {
     expect((markup.match(/type="radio"/g) ?? [])).toHaveLength(3);
     expect((markup.match(/aria-describedby="planned-match-date-2026-07-01"/g) ?? [])).toHaveLength(2);
     expect(markup).toContain("Suggested");
+    expect(markup).toContain("80/100");
+    expect(markup).toContain("Match score 80 out of 100");
+    expect(markup).toContain("Both continuous runs");
+    expect(markup).toContain("planned-match-score--possible");
+    expect(markup).toContain("planned-match-score--weak");
     expect(markup).toContain("Intervals note");
     expect(markup.indexOf("Morning run")).toBeLessThan(markup.indexOf("Long run"));
   });
