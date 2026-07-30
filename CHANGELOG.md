@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.0-rc.2 - 2026-07-30
+
 ### Fixes
 
 - Exiting administrator support view from another user’s activity now returns to the dashboard instead of reloading the invalid activity URL.
