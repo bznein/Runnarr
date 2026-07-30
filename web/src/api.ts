@@ -31,7 +31,12 @@ import type {
   ToolsVdotRequest,
   ToolsVdotResponse,
   User,
-  UserPreference
+  UserPreference,
+  Workout,
+  WorkoutConfig,
+  WorkoutMutation,
+  WorkoutParseResult,
+  WorkoutReconcileResult
 } from "./types";
 
 export class ApiError extends Error {
@@ -290,6 +295,29 @@ export const api = {
   }),
   trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
   plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
+  workoutConfig: () => request<WorkoutConfig>("/api/config/workouts"),
+  updateWorkoutConfig: (body: Partial<WorkoutConfig>) => request<WorkoutConfig>("/api/config/workouts", {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  workouts: (filter = "upcoming") => request<{ workouts: Workout[] }>(`/api/workouts?filter=${encodeURIComponent(filter)}`),
+  workout: (id: string) => request<Workout>(`/api/workouts/${encodeURIComponent(id)}`),
+  parseWorkout: (sourceText: string) => request<WorkoutParseResult>("/api/workouts/parse", {
+    method: "POST",
+    body: JSON.stringify({ sourceText })
+  }),
+  createWorkout: (body: WorkoutMutation) => request<Workout>("/api/workouts", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
+  updateWorkout: (id: string, body: WorkoutMutation) => request<Workout>(`/api/workouts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  duplicateWorkout: (id: string) => request<Workout>(`/api/workouts/${encodeURIComponent(id)}/duplicate`, { method: "POST" }),
+  deleteWorkout: (id: string) => request<{ deleted: boolean; archived: boolean }>(`/api/workouts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  previewWorkoutReconcile: () => request<WorkoutReconcileResult>("/api/workouts/reconcile"),
+  reconcileWorkouts: () => request<{ jobId: string; status: string }>("/api/workouts/reconcile", { method: "POST" }),
   plannedMatchCandidates: (activityID: string, windowDays = 7) => request<PlannedActivityMatchResponse>(`/api/activities/${activityID}/planned-match-candidates?windowDays=${windowDays}`),
   plannedMatchPreview: (activityID: string, body: { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean; overrides?: Record<string, string> }) =>
     request<{ preview: TrainingSheetWritebackPreview }>(`/api/activities/${activityID}/planned-match-preview`, {

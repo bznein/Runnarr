@@ -45,6 +45,7 @@ export RUNNARR_SECRET_KEY="runnarr-e2e-secret-key-change-me"
 export RUNNARR_PUBLIC_MODE="false"
 export RUNNARR_LOCAL_AUTH_ENABLED="true"
 export PLAYWRIGHT_BASE_URL="${RUNNARR_BASE_URL}"
+export RUNNARR_GARMIN_BRIDGE_SCRIPT="/app/garmin_bridge_testbed.py"
 
 compose() {
   docker compose \
@@ -126,7 +127,8 @@ if [ "${TESTBED_MODE}" -eq 1 ]; then
   printf 'URL:      %s\n' "${RUNNARR_BASE_URL}"
   printf 'Username: %s\n' "${E2E_USERNAME}"
   printf 'Password: %s\n' "${E2E_PASSWORD}"
-  printf '\nThis isolated environment contains synthetic activities, plans, health, and gear data.\n'
+  printf '\nThis isolated environment contains synthetic activities, plans, workouts, health, and gear data.\n'
+  printf 'Garmin operations use an offline fake account containing one protected foreign workout.\n'
   printf 'Press Ctrl-C to stop it and remove its containers, network, and volumes.\n\n'
   trap stop_testbed HUP INT TERM
   while true; do

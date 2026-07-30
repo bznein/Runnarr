@@ -237,3 +237,35 @@ func (b stubGarminBridge) ListGear(context.Context, string) (GarminBridgeGearRes
 func (b stubGarminBridge) ListGearActivities(_ context.Context, _ string, _ string, start, _ int) ([]GarminBridgeGearActivity, error) {
 	return b.gearActivityPages[start], nil
 }
+
+func (b stubGarminBridge) ListWorkouts(context.Context, string, int, int) ([]GarminBridgeWorkout, error) {
+	return nil, nil
+}
+
+func (b stubGarminBridge) GetWorkout(context.Context, string, string) (GarminBridgeWorkout, error) {
+	return GarminBridgeWorkout{}, nil
+}
+
+func (b stubGarminBridge) UploadWorkout(context.Context, string, map[string]any) (GarminBridgeWorkout, error) {
+	return GarminBridgeWorkout{}, nil
+}
+
+func (b stubGarminBridge) DeleteWorkout(context.Context, string, string) error {
+	return nil
+}
+
+func (b stubGarminBridge) ListScheduledWorkouts(context.Context, string, int, int) ([]GarminBridgeScheduledWorkout, error) {
+	return nil, nil
+}
+
+func (b stubGarminBridge) GetScheduledWorkout(context.Context, string, string) (GarminBridgeScheduledWorkout, error) {
+	return GarminBridgeScheduledWorkout{}, nil
+}
+
+func (b stubGarminBridge) ScheduleWorkout(context.Context, string, string, string) (GarminBridgeScheduledWorkout, error) {
+	return GarminBridgeScheduledWorkout{}, nil
+}
+
+func (b stubGarminBridge) UnscheduleWorkout(context.Context, string, string) error {
+	return nil
+}

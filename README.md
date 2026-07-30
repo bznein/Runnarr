@@ -1,6 +1,6 @@
 # Runnarr
 
-Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Garmin Connect and local activity files, then presents a private dashboard with activity history, maps, and charts. Multiple local accounts can use one deployment while keeping activity, health, provider, gear, and planning data private to each account.
+Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Garmin Connect and local activity files, presents a private dashboard with activity history, maps, and charts, and builds structured running workouts from training plans or manual prescriptions. Multiple local accounts can use one deployment while keeping activity, health, provider, gear, workout, and planning data private to each account.
 
 The v1 scope covers the existing private activity, health, calendar, gear, tools,
 planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
@@ -81,6 +81,13 @@ Set `DATABASE_URL` to a running Postgres instance before starting the backend ou
 ## Garmin Connect Setup
 
 Garmin Connect sync is configured from Settings after login. Enter your Garmin email/password, and enter an MFA code if Garmin asks for one. Runnarr stores Garmin Connect tokens in the Docker `app-data` volume and does not store your Garmin password.
+
+Garmin workout scheduling is separately opt-in. Runnarr creates reusable
+templates and schedules only the next seven local calendar days. It never
+edits a Garmin workout in place. Unscheduling and cleanup require both the
+locally tracked Garmin ID and the exact per-user Runnarr ownership marker;
+matching names are never treated as ownership, so workouts created outside
+Runnarr are left untouched.
 
 The Garmin integration uses an unofficial Garmin Connect client because Garmin's official Activity API requires approval. If Garmin changes their private endpoints, reconnecting or updating the image dependency may be required.
 

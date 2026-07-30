@@ -66,6 +66,18 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 	}
 	garmin := NewGarminService(cfg, store)
 	garmin.legacyUserID = adminUser.ID
+	users, err := store.ListUsers(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("list users for workout backfill: %w", err)
+	}
+	for _, user := range users {
+		if user.Disabled {
+			continue
+		}
+		if err := store.BackfillSheetWorkouts(withUserID(context.Background(), user.ID)); err != nil {
+			return nil, fmt.Errorf("backfill workouts for %s: %w", user.Username, err)
+		}
+	}
 	return &Server{
 		cfg:              cfg,
 		store:            store,
@@ -110,6 +122,8 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/config", s.handleConfig)
 			r.Get("/config/training-sheet", s.handleTrainingSheetConfig)
 			r.Patch("/config/training-sheet", s.handleUpdateTrainingSheetConfig)
+			r.Get("/config/workouts", s.handleWorkoutConfig)
+			r.Patch("/config/workouts", s.handleUpdateWorkoutConfig)
 			r.Patch("/config/climb-detection", s.handleUpdateClimbDetection)
 			r.Post("/tools/pace", s.handleToolsPace)
 			r.Post("/tools/vdot", s.handleToolsVDOT)
@@ -152,6 +166,15 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/providers/garmin/gear-sync", s.handleGarminGearSync)
 			r.Post("/training-sheet/sync", s.handleTrainingSheetSync)
 			r.Get("/planned-activities", s.handlePlannedActivities)
+			r.Get("/workouts", s.handleListWorkouts)
+			r.Post("/workouts", s.handleCreateWorkout)
+			r.Post("/workouts/parse", s.handleParseWorkout)
+			r.Get("/workouts/reconcile", s.handlePreviewWorkoutReconcile)
+			r.Post("/workouts/reconcile", s.handleWorkoutReconcile)
+			r.Get("/workouts/{id}", s.handleGetWorkout)
+			r.Patch("/workouts/{id}", s.handleUpdateWorkout)
+			r.Delete("/workouts/{id}", s.handleDeleteWorkout)
+			r.Post("/workouts/{id}/duplicate", s.handleDuplicateWorkout)
 			r.Get("/sync-jobs", s.handleSyncJobs)
 			r.Post("/sync-jobs/{jobID}/cancel", s.handleCancelSyncJob)
 		})
@@ -1034,7 +1057,87 @@ func (s *Server) StartBackgroundSync(ctx context.Context) {
 		s.logger.Error("reconcile sync jobs after startup", "error", err)
 	}
 	go s.runGarminScheduledSync(ctx)
+	go s.runGarminWorkoutScheduledSync(ctx)
 	go s.runTrainingSheetScheduledSync(ctx)
+}
+
+func (s *Server) runGarminWorkoutScheduledSync(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	s.runGarminWorkoutScheduledSyncOnce(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runGarminWorkoutScheduledSyncOnce(ctx)
+		}
+	}
+}
+
+func (s *Server) runGarminWorkoutScheduledSyncOnce(ctx context.Context) {
+	users, err := s.store.ListUsers(ctx)
+	if err != nil {
+		s.logger.Error("list users for scheduled Garmin workout sync", "error", err)
+		return
+	}
+	for _, user := range users {
+		if user.Disabled {
+			continue
+		}
+		userCtx := withUserID(ctx, user.ID)
+		if _, err := s.queueGarminWorkoutReconcile(userCtx); err != nil && !errors.Is(err, ErrSyncJobAlreadyRunning) {
+			s.logger.Error("queue scheduled Garmin workout sync", "user_id", user.ID, "error", err)
+		}
+	}
+}
+
+func (s *Server) queueGarminWorkoutReconcile(ctx context.Context) (string, error) {
+	config, err := s.store.GetWorkoutConfig(ctx)
+	if err != nil || !config.SyncEnabled {
+		return "", err
+	}
+	if _, connected, err := s.garmin.Status(ctx); err != nil || !connected {
+		return "", err
+	}
+	jobID, err := s.store.CreateSyncJob(ctx, garminProvider, "workouts")
+	if err != nil {
+		return "", err
+	}
+	go s.runGarminWorkoutReconcileJob(jobID)
+	return jobID, nil
+}
+
+func (s *Server) runGarminWorkoutReconcileJob(jobID string) {
+	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	userID, err := s.store.SyncJobUserID(lookupCtx, jobID)
+	lookupCancel()
+	if err != nil {
+		s.logger.Error("load Garmin workout sync owner", "job_id", jobID, "error", err)
+		return
+	}
+	ctx, cleanup := s.cancellableSyncJobContext(context.Background(), userID, jobID, 15*time.Minute)
+	defer cleanup()
+	result, err := s.garmin.ReconcileWorkouts(ctx)
+	payload := workoutReconcilePayload(result)
+	if err != nil {
+		_ = s.finishSyncJob(ctx, jobID, "failed", err.Error(), payload)
+		s.logger.Error("Garmin workout sync", "job_id", jobID, "error", err)
+		return
+	}
+	if err := s.finishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
+		s.logger.Error("finish Garmin workout sync", "job_id", jobID, "error", err)
+	}
+}
+
+func workoutReconcilePayload(result WorkoutReconcileResult) map[string]any {
+	payload := map[string]any{
+		"enabled": result.Enabled,
+		"from":    result.From,
+		"to":      result.To,
+		"actions": result.Actions,
+	}
+	return payload
 }
 
 func (s *Server) cancellableSyncJobContext(parent context.Context, userID, jobID string, timeout time.Duration) (context.Context, func()) {
@@ -1177,10 +1280,20 @@ func (s *Server) finishGarminSyncJob(ctx context.Context, jobID string, opts Gar
 	if gearErr != nil {
 		s.logger.Error("garmin gear refresh after activity sync", "job_id", jobID, "error", gearErr)
 	}
+	queueGarminAutoMatchWritebacks(s, ctx, payload)
 	if err := s.finishSyncJob(ctx, jobID, "completed", "", payload); err != nil {
 		return nil, err
 	}
 	return payload, nil
+}
+
+func queueGarminAutoMatchWritebacks(s *Server, ctx context.Context, payload map[string]any) {
+	matches, _ := payload["autoMatches"].([]map[string]string)
+	for _, match := range matches {
+		if match["source"] == trainingSheetProvider {
+			s.queueTrainingSheetWriteback(ctx, match["plannedActivityId"], match["activityId"])
+		}
+	}
 }
 
 func (s *Server) runGarminScheduledHealthSyncOnce(ctx context.Context) {

@@ -246,7 +246,10 @@ func (s *Server) handleApplyPlannedMatchPreview(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "could not apply planned activity match")
 		return
 	}
-	jobID := s.queueTrainingSheetWriteback(r.Context(), planned.ID, activityID)
+	jobID := ""
+	if planned.Source == trainingSheetProvider {
+		jobID = s.queueTrainingSheetWriteback(r.Context(), planned.ID, activityID)
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"planned": planned, "writebackJobId": jobID, "status": "running"})
 }
 
@@ -273,7 +276,10 @@ func (s *Server) handleMatchPlannedActivity(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "could not match planned activity")
 		return
 	}
-	jobID := s.queueTrainingSheetWriteback(r.Context(), planned.ID, chi.URLParam(r, "id"))
+	jobID := ""
+	if planned.Source == trainingSheetProvider {
+		jobID = s.queueTrainingSheetWriteback(r.Context(), planned.ID, chi.URLParam(r, "id"))
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"planned": planned, "writebackJobId": jobID})
 }
 
@@ -500,6 +506,9 @@ func (s *Server) finishTrainingSheetSyncJob(ctx context.Context, jobID string, c
 		return payload, err
 	}
 	_ = s.finishSyncJob(ctx, jobID, "completed", "", payload)
+	if _, err := s.queueGarminWorkoutReconcile(ctx); err != nil && !errors.Is(err, ErrSyncJobAlreadyRunning) {
+		s.logger.Error("queue Garmin workout sync after training sheet sync", "job_id", jobID, "error", err)
+	}
 	return payload, nil
 }
 

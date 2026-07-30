@@ -165,7 +165,7 @@ func TestSuggestedPlannedActivityRequiresStrongClearWinner(t *testing.T) {
 
 func TestPlannedActivityMatchCandidateJSONShape(t *testing.T) {
 	candidate := PlannedActivityMatchCandidate{
-		PlannedActivity:   PlannedActivity{ID: "planned-1", Name: "Easy run"},
+		PlannedActivity:   PlannedActivity{ID: "planned-1", Name: "Easy run", WorkoutID: "workout-1"},
 		MatchScore:        80,
 		MatchLevel:        plannedMatchLevelStrong,
 		MatchReasons:      []string{"same day"},
@@ -179,7 +179,7 @@ func TestPlannedActivityMatchCandidateJSONShape(t *testing.T) {
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		t.Fatalf("unmarshal candidate: %v", err)
 	}
-	if decoded["id"] != "planned-1" || decoded["matchScore"] != float64(80) || decoded["matchLevel"] != plannedMatchLevelStrong {
+	if decoded["id"] != "planned-1" || decoded["workoutId"] != "workout-1" || decoded["matchScore"] != float64(80) || decoded["matchLevel"] != plannedMatchLevelStrong {
 		t.Fatalf("candidate JSON = %#v", decoded)
 	}
 	if _, ok := decoded["PlannedActivity"]; ok {

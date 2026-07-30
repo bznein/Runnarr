@@ -198,6 +198,30 @@ on conflict (user_id, source, source_id) do update set
     matched_at = excluded.matched_at,
     raw = excluded.raw;
 
+insert into workouts(
+    id, user_id, source, planned_activity_id, name, sport_type, source_text, source_hash,
+    definition, parse_status, parse_messages, scheduled_date, garmin_excluded, revision
+)
+select '00000000-0000-4000-8000-000000000173'::uuid, planned.user_id, 'training_sheet', planned.id,
+    'E2E Calendar Planned Run', 'Run', '48mins easy', 'e2e-completed-plan-workout',
+    '{"version":1,"sportType":"Run","estimatedDurationS":2880,"steps":[
+      {"order":1,"kind":"work","endCondition":{"type":"time","value":2880,"unit":"seconds"},"target":{"type":"none"}}
+    ]}'::jsonb,
+    'ready', '[]'::jsonb, planned.planned_date, true, 1
+from planned_activities planned
+join users on users.id = planned.user_id
+where users.username = :'e2e_username' and planned.source_id = 'e2e-calendar-planned-run'
+on conflict (id) do update set
+    planned_activity_id = excluded.planned_activity_id,
+    name = excluded.name,
+    source_text = excluded.source_text,
+    source_hash = excluded.source_hash,
+    definition = excluded.definition,
+    scheduled_date = excluded.scheduled_date,
+    garmin_excluded = true,
+    archived_at = null,
+    updated_at = now();
+
 -- Keep a structured-interval fixture for the Activity Detail tab journey.
 insert into activity_workouts(
     activity_id, provider, provider_workout_id, name, sport_type, steps, raw
@@ -345,3 +369,78 @@ on conflict (user_id, source, source_id) do update set
     matched_activity_id = null,
     matched_at = null,
     raw = excluded.raw;
+
+insert into workouts(
+    id, user_id, source, planned_activity_id, name, sport_type, source_text, source_hash,
+    definition, parse_status, parse_messages, scheduled_date, revision
+)
+select '00000000-0000-4000-8000-000000000170'::uuid, planned.user_id, 'training_sheet', planned.id,
+    'E2E Planned Speed Work', 'Run', '10mins warm up//4x5mins@4:00(90secs)//10mins cool down',
+    'e2e-sheet-workout',
+    '{"version":1,"sportType":"Run","estimatedDurationS":2490,"steps":[
+      {"order":1,"kind":"warmup","endCondition":{"type":"time","value":600,"unit":"seconds"},"target":{"type":"none"}},
+      {"order":2,"kind":"repeat","repeatCount":4,"skipLastRecovery":true,"target":{"type":"none"},"children":[
+        {"order":1,"kind":"work","endCondition":{"type":"time","value":300,"unit":"seconds"},"target":{"type":"pace","paceSecondsPerKM":240}},
+        {"order":2,"kind":"recovery","endCondition":{"type":"time","value":90,"unit":"seconds"},"target":{"type":"none"}}
+      ]},
+      {"order":3,"kind":"cooldown","endCondition":{"type":"time","value":600,"unit":"seconds"},"target":{"type":"none"}}
+    ]}'::jsonb,
+    'ready', '[]'::jsonb, planned.planned_date, 1
+from planned_activities planned
+join users on users.id = planned.user_id
+where users.username = :'e2e_username' and planned.source = 'training_sheet' and planned.source_id = 'e2e-planned-speed'
+on conflict (id) do update set
+    planned_activity_id = excluded.planned_activity_id,
+    name = excluded.name,
+    source_text = excluded.source_text,
+    source_hash = excluded.source_hash,
+    definition = excluded.definition,
+    parse_status = excluded.parse_status,
+    parse_messages = excluded.parse_messages,
+    scheduled_date = excluded.scheduled_date,
+    archived_at = null,
+    updated_at = now();
+
+insert into planned_activities(
+    id, user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, notes, status, raw
+)
+select '00000000-0000-4000-8000-000000000171'::uuid, id, 'manual',
+    'workout:00000000-0000-4000-8000-000000000172', '', '', '', '', current_date + 40,
+    'E2E Manual Tempo', 'Run', '', 'pending', '{"fixture":"e2e-workout"}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    status = 'pending',
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
+
+insert into workouts(
+    id, user_id, source, planned_activity_id, name, sport_type, source_text, source_hash,
+    definition, parse_status, parse_messages, scheduled_date, revision
+)
+select '00000000-0000-4000-8000-000000000172'::uuid, id, 'manual',
+    '00000000-0000-4000-8000-000000000171'::uuid, 'E2E Manual Tempo', 'Run',
+    '12mins warm up//20mins@4:15//8mins cool down', 'e2e-manual-workout',
+    '{"version":1,"sportType":"Run","estimatedDurationS":2400,"steps":[
+      {"order":1,"kind":"warmup","endCondition":{"type":"time","value":720,"unit":"seconds"},"target":{"type":"none"}},
+      {"order":2,"kind":"work","endCondition":{"type":"time","value":1200,"unit":"seconds"},"target":{"type":"pace","paceSecondsPerKM":255}},
+      {"order":3,"kind":"cooldown","endCondition":{"type":"time","value":480,"unit":"seconds"},"target":{"type":"none"}}
+    ]}'::jsonb,
+    'ready', '[]'::jsonb, current_date + 40, 1
+from users
+where username = :'e2e_username'
+on conflict (id) do update set
+    planned_activity_id = excluded.planned_activity_id,
+    name = excluded.name,
+    source_text = excluded.source_text,
+    source_hash = excluded.source_hash,
+    definition = excluded.definition,
+    parse_status = excluded.parse_status,
+    parse_messages = excluded.parse_messages,
+    scheduled_date = excluded.scheduled_date,
+    archived_at = null,
+    updated_at = now();

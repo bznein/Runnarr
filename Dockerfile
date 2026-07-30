@@ -19,10 +19,11 @@ WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates tzdata \
   && rm -rf /var/lib/apt/lists/* \
-  && pip install --no-cache-dir garminconnect curl_cffi
+  && pip install --no-cache-dir 'garminconnect[workout]==0.3.8'
 COPY --from=api-build /out/runnarr /app/runnarr
 COPY --from=web-build /src/web/dist /app/web/dist
 COPY internal/app/garmin_bridge.py /app/garmin_bridge.py
+COPY internal/app/garmin_bridge_testbed.py /app/garmin_bridge_testbed.py
 RUN addgroup --system --gid 10001 runnarr \
   && adduser --system --uid 10001 --gid 10001 --home /app runnarr \
   && mkdir -p /app/data \

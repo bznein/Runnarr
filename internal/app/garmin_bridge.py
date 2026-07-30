@@ -305,6 +305,73 @@ def normalize_workout(payload):
     }
 
 
+def normalize_managed_workout(payload):
+    if not isinstance(payload, dict):
+        payload = {}
+    workout_id = first_value(payload, ("workoutId", "id"))
+    return {
+        "id": str(workout_id or "").strip(),
+        "name": str(first_value(payload, ("workoutName", "name")) or "").strip(),
+        "description": str(first_value(payload, ("description",)) or "").strip(),
+        "raw": payload,
+    }
+
+
+def workout_list_response(payload):
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get("workouts") or payload.get("items") or []
+    else:
+        items = []
+    if not isinstance(items, list):
+        items = []
+    return {"workouts": [normalize_managed_workout(item) for item in items if isinstance(item, dict)]}
+
+
+def scheduled_workout_id(payload):
+    if not isinstance(payload, dict):
+        return None
+    workout_id = first_value(payload, ("workoutId",))
+    if workout_id not in (None, ""):
+        return workout_id
+    workout = payload.get("workout")
+    if isinstance(workout, dict):
+        return first_value(workout, ("workoutId", "id"))
+    return None
+
+
+def scheduled_workout_items(payload):
+    items = []
+
+    def visit(value):
+        if isinstance(value, dict):
+            schedule_id = first_value(value, ("workoutScheduleId", "scheduledWorkoutId"))
+            workout_id = scheduled_workout_id(value)
+            if schedule_id not in (None, "") and workout_id not in (None, ""):
+                items.append(value)
+                return
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return items
+
+
+def normalize_scheduled_workout(payload):
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "id": str(first_value(payload, ("workoutScheduleId", "scheduledWorkoutId")) or "").strip(),
+        "workoutId": str(scheduled_workout_id(payload) or "").strip(),
+        "date": str(first_value(payload, ("date", "calendarDate", "startDate")) or "").strip()[:10],
+        "raw": payload,
+    }
+
+
 def normalize_interval(item, fallback_index, laps_by_index, repeat_counts):
     if not isinstance(item, dict):
         return None
@@ -748,6 +815,64 @@ def main():
         if not gear_id:
             raise RuntimeError("missing gearId")
         print(json.dumps(gear_activities_response(client, gear_id, request.get("start"), request.get("limit"))))
+        return
+
+    if action == "workouts":
+        start = int(request.get("start") or 0)
+        limit = int(request.get("limit") or 100)
+        print(json.dumps(workout_list_response(client.get_workouts(start, limit))))
+        return
+
+    if action == "workout":
+        workout_id = str(request.get("workoutId") or "").strip()
+        if not workout_id:
+            raise RuntimeError("missing workoutId")
+        print(json.dumps(normalize_managed_workout(client.get_workout_by_id(workout_id))))
+        return
+
+    if action == "upload-workout":
+        workout = request.get("workout")
+        if not isinstance(workout, dict):
+            raise RuntimeError("missing workout")
+        print(json.dumps(normalize_managed_workout(client.upload_workout(workout))))
+        return
+
+    if action == "delete-workout":
+        workout_id = str(request.get("workoutId") or "").strip()
+        if not workout_id:
+            raise RuntimeError("missing workoutId")
+        client.delete_workout(workout_id)
+        print(json.dumps({"ok": True}))
+        return
+
+    if action == "scheduled-workouts":
+        year = int(request.get("year") or 0)
+        month = int(request.get("month") or 0)
+        payload = client.get_scheduled_workouts(year, month)
+        print(json.dumps({"scheduled": [normalize_scheduled_workout(item) for item in scheduled_workout_items(payload)]}))
+        return
+
+    if action == "scheduled-workout":
+        scheduled_workout_id = str(request.get("scheduledWorkoutId") or "").strip()
+        if not scheduled_workout_id:
+            raise RuntimeError("missing scheduledWorkoutId")
+        print(json.dumps(normalize_scheduled_workout(client.get_scheduled_workout_by_id(scheduled_workout_id))))
+        return
+
+    if action == "schedule-workout":
+        workout_id = str(request.get("workoutId") or "").strip()
+        date = str(request.get("date") or "").strip()
+        if not workout_id or not date:
+            raise RuntimeError("missing workoutId or date")
+        print(json.dumps(normalize_scheduled_workout(client.schedule_workout(workout_id, date))))
+        return
+
+    if action == "unschedule-workout":
+        scheduled_workout_id = str(request.get("scheduledWorkoutId") or "").strip()
+        if not scheduled_workout_id:
+            raise RuntimeError("missing scheduledWorkoutId")
+        client.unschedule_workout(scheduled_workout_id)
+        print(json.dumps({"ok": True}))
         return
 
     raise RuntimeError(f"unsupported action: {action}")

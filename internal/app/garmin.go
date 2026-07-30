@@ -44,6 +44,14 @@ type GarminBridge interface {
 	FetchHealthDay(ctx context.Context, tokenStore, date string) (GarminBridgeHealthDay, error)
 	ListGear(ctx context.Context, tokenStore string) (GarminBridgeGearResponse, error)
 	ListGearActivities(ctx context.Context, tokenStore, gearID string, start, limit int) ([]GarminBridgeGearActivity, error)
+	ListWorkouts(ctx context.Context, tokenStore string, start, limit int) ([]GarminBridgeWorkout, error)
+	GetWorkout(ctx context.Context, tokenStore, workoutID string) (GarminBridgeWorkout, error)
+	UploadWorkout(ctx context.Context, tokenStore string, payload map[string]any) (GarminBridgeWorkout, error)
+	DeleteWorkout(ctx context.Context, tokenStore, workoutID string) error
+	ListScheduledWorkouts(ctx context.Context, tokenStore string, year, month int) ([]GarminBridgeScheduledWorkout, error)
+	GetScheduledWorkout(ctx context.Context, tokenStore, scheduledWorkoutID string) (GarminBridgeScheduledWorkout, error)
+	ScheduleWorkout(ctx context.Context, tokenStore, workoutID, date string) (GarminBridgeScheduledWorkout, error)
+	UnscheduleWorkout(ctx context.Context, tokenStore, scheduledWorkoutID string) error
 }
 
 type GarminBridgeProfile struct {
@@ -127,6 +135,20 @@ type GarminBridgeGearActivity struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
 	StartTime *time.Time     `json:"startTime"`
+	Raw       map[string]any `json:"raw"`
+}
+
+type GarminBridgeWorkout struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Raw         map[string]any `json:"raw"`
+}
+
+type GarminBridgeScheduledWorkout struct {
+	ID        string         `json:"id"`
+	WorkoutID string         `json:"workoutId"`
+	Date      string         `json:"date"`
 	Raw       map[string]any `json:"raw"`
 }
 
@@ -242,6 +264,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 	imported := 0
 	failed := 0
 	skippedExcluded := 0
+	autoMatches := make([]map[string]string, 0)
 	firstErrors := make([]string, 0, 5)
 	for index, source := range activities {
 		if err := ctx.Err(); err != nil {
@@ -300,7 +323,8 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if _, err := s.store.SaveImportedActivity(ctx, garminProvider, source.ID, nil, importedActivity); err != nil {
+		activityID, err := s.store.SaveImportedActivity(ctx, garminProvider, source.ID, nil, importedActivity)
+		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
@@ -313,6 +337,18 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			firstErrors = appendGarminSyncError(firstErrors, source, err)
 			report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
 			continue
+		}
+		if importedActivity.Workout != nil && importedActivity.Workout.ProviderWorkoutID != "" {
+			planned, matched, matchErr := s.store.AutoMatchManagedWorkout(ctx, activityID, importedActivity.Workout.ProviderWorkoutID)
+			if matchErr != nil {
+				firstErrors = appendGarminSyncError(firstErrors, source, fmt.Errorf("auto-match workout: %w", matchErr))
+			} else if matched {
+				autoMatches = append(autoMatches, map[string]string{
+					"activityId":        activityID,
+					"plannedActivityId": planned.ID,
+					"source":            planned.Source,
+				})
+			}
 		}
 		imported++
 		report(map[string]any{"provider": garminProvider, "stage": "Importing Garmin activities", "activities": len(activities), "processed": processed, "imported": imported, "failed": failed, "skippedExcluded": skippedExcluded, "firstErrors": firstErrors, "oldest": oldest.Format("2006-01-02")})
@@ -329,6 +365,7 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		"firstErrors":     firstErrors,
 		"oldest":          oldest.Format("2006-01-02"),
 		"allData":         opts.AllData,
+		"autoMatches":     autoMatches,
 	}, nil
 }
 
@@ -832,6 +869,131 @@ func (b PythonGarminBridge) ListGearActivities(ctx context.Context, tokenStore, 
 		"limit":      limit,
 	}, &response)
 	return response.Activities, err
+}
+
+func (b PythonGarminBridge) ListWorkouts(ctx context.Context, tokenStore string, start, limit int) ([]GarminBridgeWorkout, error) {
+	var response struct {
+		Workouts []GarminBridgeWorkout `json:"workouts"`
+	}
+	err := b.run(ctx, map[string]any{
+		"action":     "workouts",
+		"tokenStore": tokenStore,
+		"start":      start,
+		"limit":      limit,
+	}, &response)
+	return response.Workouts, err
+}
+
+func (b PythonGarminBridge) GetWorkout(ctx context.Context, tokenStore, workoutID string) (GarminBridgeWorkout, error) {
+	var response GarminBridgeWorkout
+	err := b.run(ctx, map[string]any{
+		"action":     "workout",
+		"tokenStore": tokenStore,
+		"workoutId":  workoutID,
+	}, &response)
+	return response, err
+}
+
+func (b PythonGarminBridge) UploadWorkout(ctx context.Context, tokenStore string, payload map[string]any) (GarminBridgeWorkout, error) {
+	var response GarminBridgeWorkout
+	err := b.run(ctx, map[string]any{
+		"action":     "upload-workout",
+		"tokenStore": tokenStore,
+		"workout":    payload,
+	}, &response)
+	return response, err
+}
+
+func (b PythonGarminBridge) DeleteWorkout(ctx context.Context, tokenStore, workoutID string) error {
+	var response struct {
+		OK bool `json:"ok"`
+	}
+	return b.run(ctx, map[string]any{
+		"action":     "delete-workout",
+		"tokenStore": tokenStore,
+		"workoutId":  workoutID,
+	}, &response)
+}
+
+func (b PythonGarminBridge) ListScheduledWorkouts(ctx context.Context, tokenStore string, year, month int) ([]GarminBridgeScheduledWorkout, error) {
+	var response struct {
+		Scheduled []GarminBridgeScheduledWorkout `json:"scheduled"`
+	}
+	err := b.run(ctx, map[string]any{
+		"action":     "scheduled-workouts",
+		"tokenStore": tokenStore,
+		"year":       year,
+		"month":      month,
+	}, &response)
+	for index := range response.Scheduled {
+		response.Scheduled[index] = normalizeGarminScheduledWorkout(response.Scheduled[index])
+	}
+	return response.Scheduled, err
+}
+
+func (b PythonGarminBridge) GetScheduledWorkout(ctx context.Context, tokenStore, scheduledWorkoutID string) (GarminBridgeScheduledWorkout, error) {
+	var response GarminBridgeScheduledWorkout
+	err := b.run(ctx, map[string]any{
+		"action":             "scheduled-workout",
+		"tokenStore":         tokenStore,
+		"scheduledWorkoutId": scheduledWorkoutID,
+	}, &response)
+	return normalizeGarminScheduledWorkout(response), err
+}
+
+func (b PythonGarminBridge) ScheduleWorkout(ctx context.Context, tokenStore, workoutID, date string) (GarminBridgeScheduledWorkout, error) {
+	var response GarminBridgeScheduledWorkout
+	err := b.run(ctx, map[string]any{
+		"action":     "schedule-workout",
+		"tokenStore": tokenStore,
+		"workoutId":  workoutID,
+		"date":       date,
+	}, &response)
+	return normalizeGarminScheduledWorkout(response), err
+}
+
+func normalizeGarminScheduledWorkout(response GarminBridgeScheduledWorkout) GarminBridgeScheduledWorkout {
+	if response.ID == "" {
+		response.ID = garminRawWorkoutID(response.Raw["workoutScheduleId"])
+		if response.ID == "" {
+			response.ID = garminRawWorkoutID(response.Raw["scheduledWorkoutId"])
+		}
+	}
+	if response.WorkoutID == "" {
+		response.WorkoutID = garminRawWorkoutID(response.Raw["workoutId"])
+		if response.WorkoutID == "" {
+			if workout, ok := response.Raw["workout"].(map[string]any); ok {
+				response.WorkoutID = garminRawWorkoutID(workout["workoutId"])
+				if response.WorkoutID == "" {
+					response.WorkoutID = garminRawWorkoutID(workout["id"])
+				}
+			}
+		}
+	}
+	if response.Date == "" {
+		for _, key := range []string{"date", "calendarDate", "startDate"} {
+			value := strings.TrimSpace(fmt.Sprint(response.Raw[key]))
+			if value != "" && value != "<nil>" {
+				if len(value) > 10 {
+					value = value[:10]
+				}
+				response.Date = value
+				break
+			}
+		}
+	}
+	return response
+}
+
+func (b PythonGarminBridge) UnscheduleWorkout(ctx context.Context, tokenStore, scheduledWorkoutID string) error {
+	var response struct {
+		OK bool `json:"ok"`
+	}
+	return b.run(ctx, map[string]any{
+		"action":             "unschedule-workout",
+		"tokenStore":         tokenStore,
+		"scheduledWorkoutId": scheduledWorkoutID,
+	}, &response)
 }
 
 func (b PythonGarminBridge) run(ctx context.Context, request map[string]any, response any) error {
