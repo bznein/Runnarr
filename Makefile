@@ -1,6 +1,6 @@
 GOCACHE ?= /tmp/runnarr-go-cache
 
-.PHONY: all check test test-race vet fmt-check web-test web-build e2e
+.PHONY: all check test test-race vet fmt-check web-test web-build e2e testbed
 
 all: check
 
@@ -26,3 +26,6 @@ web-build:
 
 e2e:
 	cd web && npm run e2e
+
+testbed:
+	cd web && npm run testbed
