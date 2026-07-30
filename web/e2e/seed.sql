@@ -60,6 +60,25 @@ on conflict (user_id, source, source_id) do update set
     elapsed_time_s = excluded.elapsed_time_s,
     raw = excluded.raw;
 
+-- Keep a lap-only fixture for the Intervals fallback journey.
+insert into activity_laps(
+    activity_id, lap_index, start_time, elapsed_time_s, moving_time_s,
+    distance_m, avg_pace_s_per_km, raw
+)
+select activity.id, 0, activity.start_time, 1900, 1800, 1500, 1200, '{}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-pool-swim'
+on conflict (activity_id, lap_index) do update set
+    start_time = excluded.start_time,
+    elapsed_time_s = excluded.elapsed_time_s,
+    moving_time_s = excluded.moving_time_s,
+    distance_m = excluded.distance_m,
+    avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+    raw = excluded.raw;
+
 -- Deliberately include provider-style distance on a strength activity so the
 -- browser journey verifies that distance and derived pace remain hidden.
 insert into activities(
@@ -116,6 +135,45 @@ on conflict (user_id, source, source_id) do update set
     distance_m = excluded.distance_m,
     moving_time_s = excluded.moving_time_s,
     elapsed_time_s = excluded.elapsed_time_s,
+    raw = excluded.raw;
+
+-- Keep a structured-interval fixture for the Activity Detail tab journey.
+insert into activity_workouts(
+    activity_id, provider, provider_workout_id, name, sport_type, steps, raw
+)
+select activity.id, 'e2e', 'e2e-structured-ride', 'E2E Structured Ride',
+    'Cycling', '[]'::jsonb, '{}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-cycling-activity'
+on conflict (activity_id) do update set
+    provider = excluded.provider,
+    provider_workout_id = excluded.provider_workout_id,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    steps = excluded.steps,
+    raw = excluded.raw,
+    updated_at = now();
+
+insert into activity_intervals(
+    activity_id, interval_index, category, provider_type,
+    elapsed_time_s, moving_time_s, distance_m, avg_pace_s_per_km, raw
+)
+select activity.id, 0, 'active', 'ride', 900, 900, 6000, 150, '{}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-cycling-activity'
+on conflict (activity_id, interval_index) do update set
+    category = excluded.category,
+    provider_type = excluded.provider_type,
+    elapsed_time_s = excluded.elapsed_time_s,
+    moving_time_s = excluded.moving_time_s,
+    distance_m = excluded.distance_m,
+    avg_pace_s_per_km = excluded.avg_pace_s_per_km,
     raw = excluded.raw;
 
 insert into planned_activities(

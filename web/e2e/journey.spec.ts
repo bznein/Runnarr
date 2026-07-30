@@ -240,17 +240,26 @@ test.describe("local product journey", () => {
     await expect(initialFailurePlannedMatchDialog).toBeHidden();
 
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Stats" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Intervals" })).toHaveCount(0);
+    await expect(page.getByText("Activity graph", { exact: true })).toBeVisible();
     const previousActivity = page.getByRole("button", { name: "Previous activity" });
     await expect(previousActivity).toBeEnabled();
 
     await previousActivity.click();
     await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    const cyclingIntervalsTab = page.getByRole("tab", { name: "Intervals" });
+    await expect(cyclingIntervalsTab).toBeVisible();
+    await cyclingIntervalsTab.click();
+    await expect(cyclingIntervalsTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator(".activity-intervals-panel").getByText("Intervals", { exact: true })).toBeVisible();
     const cyclingNextActivity = page.getByRole("button", { name: "Next activity" });
     await expect(cyclingNextActivity).toBeEnabled();
     await cyclingNextActivity.click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Intervals" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Stats" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByText("Activity graph", { exact: true })).toBeVisible();
     await expect(previousActivity).toBeEnabled();
 
     let releaseNavigation = () => {};
@@ -311,6 +320,11 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name: "E2E Pool Swim" })).toBeVisible();
     await expect(page.locator(".climbs-panel")).toHaveCount(0);
     await expect(page.locator(".climb-sensitivity-details")).toHaveCount(0);
+    const swimmingIntervalsTab = page.getByRole("tab", { name: "Intervals" });
+    await expect(swimmingIntervalsTab).toBeVisible();
+    await swimmingIntervalsTab.click();
+    await expect(page.getByText("Laps", { exact: true })).toBeVisible();
+    await expect(page.getByText("No structured workout steps were provided; showing recorded laps.", { exact: true })).toBeVisible();
   });
 
   test("excludes a matched planned run from all candidate windows until unmatch", async ({ page }, testInfo) => {
