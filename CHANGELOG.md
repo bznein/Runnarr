@@ -2,12 +2,7 @@
 
 ## Unreleased
 
-### Fixes
-
-- Exiting administrator support view from another user’s activity now returns to the dashboard instead of reloading the invalid activity URL.
-- Login rate limiting now counts failed password attempts without penalizing successful sign-ins.
-
-## 1.0.0-rc.1 - 2026-07-23
+## 1.0.0 - 2026-07-30
 
 ### Features
 
@@ -37,6 +32,8 @@
 
 ### Fixes
 
+- Exiting administrator support view from another user’s activity now returns to the dashboard instead of reloading the invalid activity URL.
+- Login rate limiting now counts failed password attempts without penalizing successful sign-ins.
 - Planned-run matching remains retryable when the initial candidate load fails.
 - Planned-run candidate loading no longer carries candidates between activities, and retries now show a busy state.
 - Planned-match previews are cleared and ignored when navigating between activities.

@@ -11,13 +11,13 @@ issues, pull requests, and branch state.
 
 ## Order
 
-### 1. 1.0.0 release
+### 1. 1.0.0 release — complete (2026-07-30)
 
 - [Issue #76](https://github.com/bznein/Runnarr/issues/76)
 - [PR #155](https://github.com/bznein/Runnarr/pull/155)
 - [PR #158](https://github.com/bznein/Runnarr/pull/158)
 
-Complete the agreed v1 scope and release checks.
+Completed the agreed v1 scope and release checks.
 
 ### 2. Repository hygiene — complete (2026-07-27)
 
