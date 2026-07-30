@@ -1,5 +1,10 @@
 \set ON_ERROR_STOP on
 
+update user_settings
+set training_sheet_sheet_url = 'https://docs.google.com/spreadsheets/d/e2e-workbook/edit',
+    training_sheet_enabled = false
+where user_id = (select id from users where username = :'e2e_username');
+
 insert into daily_health_metrics(
     user_id, provider, metric_date, steps, total_calories_kcal,
     active_calories_kcal, resting_heart_rate_bpm, avg_heart_rate_bpm,
@@ -170,6 +175,27 @@ select id, 'training_sheet', 'e2e-planned-far', 'e2e-workbook', 'e2e-sheet',
     'E2E Plan', 'A5', current_date + 14, 'E2E Planned Far Run', 'Run', 'pending', '{}'::jsonb
 from users
 where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw
+)
+select users.id, 'training_sheet', fixture.source_id, 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', fixture.plan_cell, current_date + 3, fixture.name, 'Run', 'pending', '{}'::jsonb
+from users
+cross join (values
+    ('e2e-workbook:e2e-sheet:A6', 'A6', 'E2E chromium Match Candidate'),
+    ('e2e-workbook:e2e-sheet:A7', 'A7', 'E2E mobile-chromium Match Candidate')
+) as fixture(source_id, plan_cell, name)
+where users.username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
     planned_date = excluded.planned_date,
     name = excluded.name,
