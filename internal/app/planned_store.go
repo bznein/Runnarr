@@ -17,7 +17,16 @@ const (
 	plannedActivityStatusPending    = "pending"
 	plannedActivityStatusCompleted  = "completed"
 	plannedActivityStatusSuperseded = "superseded"
+	plannedMatchDefaultWindowDays   = 7
+	plannedMatchMaxWindowDays       = 180
 )
+
+var plannedMatchWindowDays = map[int]struct{}{
+	7:   {},
+	30:  {},
+	90:  {},
+	180: {},
+}
 
 var (
 	errPlannedMatchInvalid      = errors.New("activity cannot be matched to a planned activity")
@@ -218,8 +227,8 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	if err := s.db.QueryRow(ctx, `select source, date(start_time), sport_type from activities where id = $1 and user_id = $2`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate, &activitySportType); err != nil {
 		return PlannedActivityMatchResponse{}, err
 	}
-	if windowDays != 7 && windowDays != 30 {
-		windowDays = 7
+	if _, ok := plannedMatchWindowDays[windowDays]; !ok {
+		windowDays = plannedMatchDefaultWindowDays
 	}
 	response := PlannedActivityMatchResponse{Candidates: make([]PlannedActivity, 0)}
 	if activitySource == trainingSheetProvider {
@@ -255,15 +264,16 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	if err := rows.Err(); err != nil {
 		return response, err
 	}
-	if windowDays == 7 {
+	if windowDays < plannedMatchMaxWindowDays {
 		if err := s.db.QueryRow(ctx, `
 			select exists(
 				select 1
 				from planned_activities
-				where user_id = $3 and status = 'pending'
+				where user_id = $4 and status = 'pending'
+					and planned_date between ($1::date - $3::int) and ($1::date + $3::int)
 					and (planned_date < ($1::date - $2::int) or planned_date > ($1::date + $2::int))
 			)
-		`, activityDate, windowDays, scopedUserID(ctx)).Scan(&response.HasMore); err != nil {
+		`, activityDate, windowDays, plannedMatchMaxWindowDays, scopedUserID(ctx)).Scan(&response.HasMore); err != nil {
 			return response, err
 		}
 	}

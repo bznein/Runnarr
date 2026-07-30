@@ -5,6 +5,18 @@ export type PlannedActivityAgendaGroup = {
   candidates: PlannedActivity[];
 };
 
+export const plannedMatchWindowDays = [7, 30, 90, 180] as const;
+
+export function nextPlannedMatchWindowDays(current: number) {
+  const currentIndex = plannedMatchWindowDays.findIndex((days) => days === current);
+  return currentIndex >= 0 ? plannedMatchWindowDays[currentIndex + 1] : undefined;
+}
+
+export function previousPlannedMatchWindowDays(current: number) {
+  const currentIndex = plannedMatchWindowDays.findIndex((days) => days === current);
+  return currentIndex > 0 ? plannedMatchWindowDays[currentIndex - 1] : undefined;
+}
+
 export function plannedMatchResponseForDialog(data?: PlannedActivityMatchResponse): PlannedActivityMatchResponse {
   return data ?? { candidates: [], hasMore: false };
 }

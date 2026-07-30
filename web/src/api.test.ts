@@ -80,4 +80,16 @@ describe("shared backend API contract", () => {
     expect(requestURL).toContain("sortBy=distance");
     expect(requestURL).toContain("sortOrder=asc");
   });
+
+  it("requests the selected bounded planned-match window", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      candidates: [],
+      hasMore: true
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.plannedMatchCandidates("activity-1", 90);
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/activities/activity-1/planned-match-candidates?windowDays=90");
+  });
 });

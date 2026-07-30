@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { formatPlannedActivityAgendaDate, formatPlannedActivityTimelineDate, groupPlannedActivityCandidates, plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
+import { formatPlannedActivityAgendaDate, formatPlannedActivityTimelineDate, groupPlannedActivityCandidates, nextPlannedMatchWindowDays, plannedMatchResponseForDialog, PlannedActivityMatchAgenda, previousPlannedMatchWindowDays } from "./plannedMatchAgenda";
 import type { PlannedActivity } from "./types";
 
 function candidate(id: string, plannedDate: string, name = id, notes?: string): PlannedActivity {
@@ -21,6 +21,19 @@ function candidate(id: string, plannedDate: string, name = id, notes?: string): 
 }
 
 describe("planned activity match agenda", () => {
+  it("expands candidate history through bounded windows", () => {
+    expect(nextPlannedMatchWindowDays(7)).toBe(30);
+    expect(nextPlannedMatchWindowDays(30)).toBe(90);
+    expect(nextPlannedMatchWindowDays(90)).toBe(180);
+    expect(nextPlannedMatchWindowDays(180)).toBeUndefined();
+    expect(nextPlannedMatchWindowDays(365)).toBeUndefined();
+
+    expect(previousPlannedMatchWindowDays(180)).toBe(90);
+    expect(previousPlannedMatchWindowDays(90)).toBe(30);
+    expect(previousPlannedMatchWindowDays(30)).toBe(7);
+    expect(previousPlannedMatchWindowDays(7)).toBeUndefined();
+  });
+
   it("groups candidates by calendar date in chronological order", () => {
     const candidates = [
       candidate("later", "2026-07-05T00:00:00Z"),

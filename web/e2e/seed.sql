@@ -207,6 +207,23 @@ insert into planned_activities(
     user_id, source, source_id, workbook_id, sheet_id, sheet_title,
     plan_cell, planned_date, name, sport_type, status, raw
 )
+select id, 'training_sheet', 'e2e-planned-historical', 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', 'A8', current_date - 60, 'E2E Planned Historical Run', 'Run', 'pending', '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = null,
+    matched_at = null,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw
+)
 select users.id, 'training_sheet', fixture.source_id, 'e2e-workbook', 'e2e-sheet',
     'E2E Plan', fixture.plan_cell, current_date + 3, fixture.name, 'Run', 'pending', '{}'::jsonb
 from users

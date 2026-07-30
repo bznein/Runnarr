@@ -121,14 +121,9 @@ func (s *Server) handlePlannedActivities(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handlePlannedMatchCandidates(w http.ResponseWriter, r *http.Request) {
-	windowDays := 7
-	switch r.URL.Query().Get("windowDays") {
-	case "", "7":
-		windowDays = 7
-	case "30":
-		windowDays = 30
-	default:
-		writeError(w, http.StatusBadRequest, "windowDays must be 7 or 30")
+	windowDays, err := parsePlannedMatchWindowDays(r.URL.Query().Get("windowDays"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	response, err := s.store.PlannedActivityMatchCandidates(r.Context(), chi.URLParam(r, "id"), windowDays)
@@ -141,6 +136,21 @@ func (s *Server) handlePlannedMatchCandidates(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func parsePlannedMatchWindowDays(raw string) (int, error) {
+	switch raw {
+	case "", "7":
+		return 7, nil
+	case "30":
+		return 30, nil
+	case "90":
+		return 90, nil
+	case "180":
+		return 180, nil
+	default:
+		return 0, errors.New("windowDays must be one of 7, 30, 90, or 180")
+	}
 }
 
 type plannedActivityMatchRequest struct {

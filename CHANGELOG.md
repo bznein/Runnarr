@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- Planned-run matching can now progressively expand its bounded candidate search from 7 days through 30, 90, and 180 days.
 - Strength-training activities no longer show distance, elevation, pace, or grade-adjusted pace summary metrics.
 
 ## 1.0.0 - 2026-07-30

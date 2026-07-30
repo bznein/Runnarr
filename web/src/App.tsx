@@ -14,7 +14,7 @@ import type { PaceDisplayScale } from "./paceDisplay";
 import { reconcileVisibleActivitySeries } from "./activityChartSeries";
 import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } from "./climbPerformance";
 import type { ClimbPerformance } from "./climbPerformance";
-import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
+import { nextPlannedMatchWindowDays, plannedMatchResponseForDialog, PlannedActivityMatchAgenda, previousPlannedMatchWindowDays } from "./plannedMatchAgenda";
 import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./plannedMatchPreview";
 import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
 import type { ThemePreference } from "./theme";
@@ -2711,12 +2711,13 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryFn: () => api.activitySeries(id!, 1200),
     enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
   });
+  const previousPlannedMatchWindow = previousPlannedMatchWindowDays(plannedMatchWindowDays);
   const plannedMatchCandidates = useQuery({
     queryKey: ["planned-match-candidates", id, plannedMatchWindowDays],
     queryFn: () => api.plannedMatchCandidates(id!, plannedMatchWindowDays),
     enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet",
-    initialData: plannedMatchWindowDays === 30
-      ? () => queryClient.getQueryData<PlannedActivityMatchResponse>(["planned-match-candidates", id, 7])
+    initialData: previousPlannedMatchWindow !== undefined
+      ? () => queryClient.getQueryData<PlannedActivityMatchResponse>(["planned-match-candidates", id, previousPlannedMatchWindow])
       : undefined,
     refetchInterval: (query) => {
       const writeback = query.state.data?.writeback;
@@ -3025,10 +3026,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const writeback = plannedMatchCandidates.data?.writeback;
-  const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
+  const nextPlannedMatchWindow = nextPlannedMatchWindowDays(plannedMatchWindowDays);
+  const loadingMorePlans = plannedMatchWindowDays > 7 && plannedMatchCandidates.isFetching;
   const loadingCandidateRetry = retryingPlannedMatchCandidates;
   const loadingCandidateRequest = loadingMorePlans || loadingCandidateRetry;
-  const canLoadMorePlans = loadingCandidateRetry || (plannedMatchWindowDays === 7 && Boolean(plannedMatchCandidates.data?.hasMore)) || plannedMatchCandidates.isError;
+  const canLoadMorePlans = loadingCandidateRetry || (nextPlannedMatchWindow !== undefined && Boolean(plannedMatchCandidates.data?.hasMore)) || plannedMatchCandidates.isError;
   const loadMorePlansLabel = plannedMatchCandidates.isError || loadingCandidateRetry
     ? (loadingCandidateRetry ? "Retrying plans…" : "Retry loading plans")
     : "Load more plans";
@@ -3279,7 +3281,9 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
               });
               return;
             }
-            setPlannedMatchWindowDays(30);
+            if (nextPlannedMatchWindow !== undefined) {
+              setPlannedMatchWindowDays(nextPlannedMatchWindow);
+            }
           }}
           onClose={closeMatchDialog}
         />

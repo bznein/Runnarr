@@ -177,6 +177,10 @@ test.describe("local product journey", () => {
     await expect(agendaDays).toHaveCount(4);
     await expect(plannedMatchDialog.getByText("E2E Planned Far Run", { exact: true })).toBeVisible();
     await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=30");
+    await expect(plannedMatchDialog.getByText("E2E Planned Historical Run", { exact: true })).toHaveCount(0);
+    await plannedMatchDialog.getByRole("button", { name: "Load more plans", exact: true }).click();
+    await expect(agendaDays).toHaveCount(5);
+    await expect(plannedMatchDialog.getByText("E2E Planned Historical Run", { exact: true })).toBeVisible();
     if (mobile) {
       await expectNoHorizontalOverflow(page);
     }
@@ -335,7 +339,7 @@ test.describe("local product journey", () => {
     const session = await sessionResponse.json() as { csrfToken: string };
     const mutationHeaders = { "X-CSRF-Token": session.csrfToken };
 
-    const candidates = async (windowDays: 7 | 30) => {
+    const candidates = async (windowDays: 7 | 30 | 90 | 180) => {
       const response = await page.request.get(`/api/activities/${activityCID}/planned-match-candidates?windowDays=${windowDays}`);
       expect(response.ok()).toBe(true);
       return response.json() as Promise<{ candidates: Array<{ id: string; name: string }> }>;
@@ -353,7 +357,7 @@ test.describe("local product journey", () => {
       });
       expect(matchResponse.ok()).toBe(true);
 
-      for (const windowDays of [7, 30] as const) {
+      for (const windowDays of [7, 30, 90, 180] as const) {
         const afterMatch = await candidates(windowDays);
         expect(afterMatch.candidates.map((candidate) => candidate.id)).not.toContain(planned!.id);
       }
@@ -362,7 +366,7 @@ test.describe("local product journey", () => {
       expect(unmatchResponse.ok()).toBe(true);
     }
 
-    for (const windowDays of [7, 30] as const) {
+    for (const windowDays of [7, 30, 90, 180] as const) {
       const afterUnmatch = await candidates(windowDays);
       expect(afterUnmatch.candidates.map((candidate) => candidate.id)).toContain(planned!.id);
     }
