@@ -454,13 +454,20 @@ type WeeklyBucket struct {
 }
 
 type CalendarActivity struct {
-	ID          string    `json:"id"`
-	Source      string    `json:"source"`
-	Name        string    `json:"name"`
-	StartTime   time.Time `json:"startTime"`
-	SportType   string    `json:"sportType"`
-	DistanceM   float64   `json:"distanceM"`
-	MovingTimeS int       `json:"movingTimeS"`
+	ID          string             `json:"id"`
+	Source      string             `json:"source"`
+	Name        string             `json:"name"`
+	StartTime   time.Time          `json:"startTime"`
+	SportType   string             `json:"sportType"`
+	DistanceM   float64            `json:"distanceM"`
+	MovingTimeS int                `json:"movingTimeS"`
+	MatchedPlan *CalendarPlanMatch `json:"matchedPlan,omitempty"`
+}
+
+type CalendarPlanMatch struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	PlannedDate string `json:"plannedDate"`
 }
 
 type CalendarDay struct {

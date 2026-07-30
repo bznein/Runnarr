@@ -42,7 +42,8 @@ on conflict (user_id, provider, metric_date) do update set
     body_fat_pct = excluded.body_fat_pct;
 
 -- Keep the seeded activities outside the imported E2E GPX times so the
--- navigation journey has a deterministic Cycling -> imported -> Pool -> Strength order.
+-- navigation journey has a deterministic Cycling -> imported -> Pool -> Strength
+-- -> calendar-match order.
 insert into activities(
     user_id, source, source_id, name, sport_type, start_time,
     distance_m, moving_time_s, elapsed_time_s, raw
@@ -135,6 +136,66 @@ on conflict (user_id, source, source_id) do update set
     distance_m = excluded.distance_m,
     moving_time_s = excluded.moving_time_s,
     elapsed_time_s = excluded.elapsed_time_s,
+    raw = excluded.raw;
+
+insert into activities(
+    user_id, source, source_id, name, sport_type, start_time,
+    distance_m, moving_time_s, elapsed_time_s, raw
+)
+select id, 'e2e', 'e2e-calendar-matched-run', 'E2E Calendar Matched Run', 'Run',
+    current_date + time '03:00', 8000, 2880, 3000, '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    start_time = excluded.start_time,
+    distance_m = excluded.distance_m,
+    moving_time_s = excluded.moving_time_s,
+    elapsed_time_s = excluded.elapsed_time_s,
+    raw = excluded.raw;
+
+-- Model the training-sheet activity row created by a real plan import. Once
+-- matched, this future placeholder must stay hidden while its provenance is
+-- attached to the completed activity on the actual completion date.
+insert into activities(
+    user_id, source, source_id, name, sport_type, start_time,
+    distance_m, moving_time_s, elapsed_time_s, raw
+)
+select id, 'training_sheet', 'e2e-calendar-planned-run', 'E2E Calendar Planned Run', 'Run',
+    current_date + 1, 0, 0, 0, '{}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    start_time = excluded.start_time,
+    distance_m = excluded.distance_m,
+    moving_time_s = excluded.moving_time_s,
+    elapsed_time_s = excluded.elapsed_time_s,
+    raw = excluded.raw;
+
+insert into planned_activities(
+    user_id, source, source_id, workbook_id, sheet_id, sheet_title,
+    plan_cell, planned_date, name, sport_type, status, raw,
+    matched_activity_id, matched_at
+)
+select users.id, 'training_sheet', 'e2e-calendar-planned-run', 'e2e-workbook', 'e2e-sheet',
+    'E2E Plan', 'A0', current_date + 1, 'E2E Calendar Planned Run', 'Run', 'completed', '{}'::jsonb,
+    matched_activity.id, now()
+from users
+join activities matched_activity
+    on matched_activity.user_id = users.id
+    and matched_activity.source = 'e2e'
+    and matched_activity.source_id = 'e2e-calendar-matched-run'
+where users.username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    planned_date = excluded.planned_date,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    status = excluded.status,
+    matched_activity_id = excluded.matched_activity_id,
+    matched_at = excluded.matched_at,
     raw = excluded.raw;
 
 -- Keep a structured-interval fixture for the Activity Detail tab journey.

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"database/sql"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -168,6 +169,24 @@ func TestCalendarTimezoneFilterUsesCalendarDatesForActivityBounds(t *testing.T) 
 	wantArgs := []any{"user-1", "America/Los_Angeles", "2026-07-01", "2026-07-02"}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+}
+
+func TestCalendarPlanMatchPreservesPlanProvenance(t *testing.T) {
+	match := calendarPlanMatch(
+		sql.NullString{String: "plan-1", Valid: true},
+		sql.NullString{String: "Long run", Valid: true},
+		sql.NullTime{Time: time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC), Valid: true},
+	)
+	if match == nil {
+		t.Fatal("match = nil, want calendar plan provenance")
+	}
+	if match.ID != "plan-1" || match.Name != "Long run" || match.PlannedDate != "2026-07-28" {
+		t.Fatalf("match = %#v", match)
+	}
+
+	if got := calendarPlanMatch(sql.NullString{}, sql.NullString{}, sql.NullTime{}); got != nil {
+		t.Fatalf("incomplete match = %#v, want nil", got)
 	}
 }
 

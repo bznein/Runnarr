@@ -16,6 +16,7 @@ import { climbPerformanceFor, gapPaceForSample, samplesForClimbPerformance } fro
 import type { ClimbPerformance } from "./climbPerformance";
 import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./plannedMatchAgenda";
 import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./plannedMatchPreview";
+import { calendarPlanMatchDescription } from "./calendarPlanMatch";
 import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
 import type { ThemePreference } from "./theme";
 import { chartDisplayDomain } from "./activityChartBounds";
@@ -2025,6 +2026,11 @@ function ActivityCalendarPage() {
                           {activity.sportType}
                           {activity.sportType && activity.movingTimeS > 0 && ` · ${formatDuration(activity.movingTimeS)}`}
                         </span>
+                        {activity.matchedPlan && (
+                          <span className="calendar-day-match-meta">
+                            {calendarPlanMatchDescription(activity.matchedPlan, entry.date, formatCalendarAgendaDate)}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -2055,6 +2061,11 @@ function ActivityCalendarPage() {
                         {activity.sportType}
                         {activity.sportType && activity.movingTimeS > 0 && ` · ${formatDuration(activity.movingTimeS)}`}
                       </span>
+                      {activity.matchedPlan && (
+                        <span className="calendar-day-match-meta">
+                          {calendarPlanMatchDescription(activity.matchedPlan, entry.date, formatCalendarAgendaDate)}
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -2127,7 +2138,7 @@ function CalendarDayPage() {
               <span className="muted">{activities.length.toLocaleString()}</span>
             </div>
             {activities.length > 0 ? (
-              <CalendarDayActivityList activities={activities} />
+              <CalendarDayActivityList activities={activities} date={date} />
             ) : (
               <div className="calendar-day-empty-activities muted">
                 {future ? "No planned activities for this day." : "No activities recorded for this day."}
@@ -2140,7 +2151,7 @@ function CalendarDayPage() {
   );
 }
 
-function CalendarDayActivityList({ activities }: { activities: CalendarActivitySummary[] }) {
+function CalendarDayActivityList({ activities, date }: { activities: CalendarActivitySummary[]; date: string }) {
   return (
     <ul className="calendar-day-activity-list">
       {activities.map((activity) => {
@@ -2154,6 +2165,11 @@ function CalendarDayActivityList({ activities }: { activities: CalendarActivityS
             <div>
               <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
               {metadata && <span className="calendar-day-activity-meta">{metadata}</span>}
+              {activity.matchedPlan && (
+                <span className="calendar-day-match-meta">
+                  {calendarPlanMatchDescription(activity.matchedPlan, date, formatCalendarAgendaDate)}
+                </span>
+              )}
             </div>
             {activity.source === "training_sheet" && <span className="calendar-day-planned-label">Planned</span>}
           </li>

@@ -574,8 +574,16 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 			start_time,
 			sport_type,
 			coalesce(distance_m, 0),
-			coalesce(moving_time_s, 0)
+			coalesce(moving_time_s, 0),
+			matched_plan.matched_plan_id,
+			matched_plan.matched_plan_name,
+			matched_plan.matched_plan_date
 		from activities
+		left join lateral (
+			select id::text as matched_plan_id, name as matched_plan_name, planned_date as matched_plan_date
+			from planned_activities
+			where matched_activity_id = activities.id and user_id = activities.user_id
+		) matched_plan on true
 		`+where+`
 		order by day, start_time
 	`, dayExpression), args...)
@@ -588,9 +596,13 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 	for rows.Next() {
 		var day time.Time
 		var item CalendarActivity
-		if err := rows.Scan(&day, &item.ID, &item.Source, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS); err != nil {
+		var matchedPlanID, matchedPlanName sql.NullString
+		var matchedPlanDate sql.NullTime
+		if err := rows.Scan(&day, &item.ID, &item.Source, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS,
+			&matchedPlanID, &matchedPlanName, &matchedPlanDate); err != nil {
 			return ActivityCalendar{}, err
 		}
+		item.MatchedPlan = calendarPlanMatch(matchedPlanID, matchedPlanName, matchedPlanDate)
 		dayKey := day.Format("2006-01-02")
 		activityByDay[dayKey] = append(activityByDay[dayKey], item)
 	}
@@ -654,8 +666,16 @@ func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string
 			start_time,
 			sport_type,
 			coalesce(distance_m, 0),
-			coalesce(moving_time_s, 0)
+			coalesce(moving_time_s, 0),
+			matched_plan.matched_plan_id,
+			matched_plan.matched_plan_name,
+			matched_plan.matched_plan_date
 		from activities
+		left join lateral (
+			select id::text as matched_plan_id, name as matched_plan_name, planned_date as matched_plan_date
+			from planned_activities
+			where matched_activity_id = activities.id and user_id = activities.user_id
+		) matched_plan on true
 		`+where+`
 		order by start_time
 	`, args...)
@@ -667,9 +687,13 @@ func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string
 	activities := make([]CalendarActivity, 0)
 	for rows.Next() {
 		var activity CalendarActivity
-		if err := rows.Scan(&activity.ID, &activity.Source, &activity.Name, &activity.StartTime, &activity.SportType, &activity.DistanceM, &activity.MovingTimeS); err != nil {
+		var matchedPlanID, matchedPlanName sql.NullString
+		var matchedPlanDate sql.NullTime
+		if err := rows.Scan(&activity.ID, &activity.Source, &activity.Name, &activity.StartTime, &activity.SportType, &activity.DistanceM, &activity.MovingTimeS,
+			&matchedPlanID, &matchedPlanName, &matchedPlanDate); err != nil {
 			return CalendarDayView{}, err
 		}
+		activity.MatchedPlan = calendarPlanMatch(matchedPlanID, matchedPlanName, matchedPlanDate)
 		activities = append(activities, activity)
 	}
 	if err := rows.Err(); err != nil {
@@ -690,6 +714,17 @@ func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string
 		Health:     health,
 		Activities: activities,
 	}, nil
+}
+
+func calendarPlanMatch(id, name sql.NullString, plannedDate sql.NullTime) *CalendarPlanMatch {
+	if !id.Valid || !plannedDate.Valid {
+		return nil
+	}
+	return &CalendarPlanMatch{
+		ID:          id.String,
+		Name:        name.String,
+		PlannedDate: plannedDate.Time.Format("2006-01-02"),
+	}
 }
 
 func normalizeActivityPage(limit, offset int) (int, int) {
