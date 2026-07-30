@@ -21,6 +21,8 @@ import { applyThemePreference, parseThemePreference, themeOptions, themePreferen
 import type { ThemePreference } from "./theme";
 import { chartDisplayDomain } from "./activityChartBounds";
 import { supportsRouteMetrics } from "./activityMetrics";
+import { hasIntervalAnalysis, resolveActivityAnalysisTab } from "./activityAnalysis";
+import type { ActivityAnalysisTab } from "./activityAnalysis";
 import type {
   Activity,
   ActivityClimb,
@@ -57,7 +59,6 @@ type HealthDateRange = { from: string; to: string };
 type GearSortBy = "first_used" | "last_used" | "activity_count" | "distance" | "distance_percent";
 type ActivityTableColumnKey = "date" | "type" | "gear" | "distance" | "time" | "calories" | "source";
 type ActivityChartSeriesKey = "elevationM" | "heartRate" | "paceSPKM" | "power" | "cadence";
-type ActivityAnalysisTab = "stats" | "intervals";
 type PlannedMatchDraft = { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean; overrides?: Record<string, string> };
 type ActivityChartPoint = {
   index: number;
@@ -2973,7 +2974,15 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [climbSensitivity]);
 
   const item = activity.data?.activity;
+  const intervalAnalysisAvailable = hasIntervalAnalysis(item);
+  const visibleAnalysisTab = resolveActivityAnalysisTab(analysisTab, intervalAnalysisAvailable);
   const effectiveClimbs = item ? (climbPreview.data?.climbs ?? item.climbs ?? []) : [];
+
+  useEffect(() => {
+    if (analysisTab !== visibleAnalysisTab) {
+      setAnalysisTab(visibleAnalysisTab);
+    }
+  }, [analysisTab, visibleAnalysisTab]);
 
   useEffect(() => {
     if (selectedClimbIndex === undefined) {
@@ -3396,25 +3405,27 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
 
       <div className="activity-analysis-tabs" role="tablist" aria-label="Activity analysis">
         <button
-          className={analysisTab === "stats" ? "active" : ""}
+          className={visibleAnalysisTab === "stats" ? "active" : ""}
           type="button"
           role="tab"
-          aria-selected={analysisTab === "stats"}
+          aria-selected={visibleAnalysisTab === "stats"}
           onClick={() => setAnalysisTab("stats")}
         >
           Stats
         </button>
-        <button
-          className={analysisTab === "intervals" ? "active" : ""}
-          type="button"
-          role="tab"
-          aria-selected={analysisTab === "intervals"}
-          onClick={() => setAnalysisTab("intervals")}
-        >
-          Intervals
-        </button>
+        {intervalAnalysisAvailable && (
+          <button
+            className={visibleAnalysisTab === "intervals" ? "active" : ""}
+            type="button"
+            role="tab"
+            aria-selected={visibleAnalysisTab === "intervals"}
+            onClick={() => setAnalysisTab("intervals")}
+          >
+            Intervals
+          </button>
+        )}
       </div>
-      {analysisTab === "stats" ? (
+      {visibleAnalysisTab === "stats" ? (
         <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
       ) : (
         <ActivityIntervalsPanel activity={displayItem} />

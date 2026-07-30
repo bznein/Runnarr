@@ -33,11 +33,19 @@ type PlannedActivity struct {
 }
 
 type PlannedActivityMatchResponse struct {
-	Candidates  []PlannedActivity             `json:"candidates"`
-	SuggestedID string                        `json:"suggestedId,omitempty"`
-	HasMore     bool                          `json:"hasMore"`
-	Matched     *PlannedActivity              `json:"matched,omitempty"`
-	Writeback   *TrainingSheetWritebackStatus `json:"writeback,omitempty"`
+	Candidates  []PlannedActivityMatchCandidate `json:"candidates"`
+	SuggestedID string                          `json:"suggestedId,omitempty"`
+	HasMore     bool                            `json:"hasMore"`
+	Matched     *PlannedActivity                `json:"matched,omitempty"`
+	Writeback   *TrainingSheetWritebackStatus   `json:"writeback,omitempty"`
+}
+
+type PlannedActivityMatchCandidate struct {
+	PlannedActivity
+	MatchScore        int      `json:"matchScore"`
+	MatchLevel        string   `json:"matchLevel"`
+	MatchReasons      []string `json:"matchReasons"`
+	suggestionBlocked bool
 }
 
 type GoogleSheetsStatus struct {

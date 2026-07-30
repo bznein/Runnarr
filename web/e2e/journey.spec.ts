@@ -158,10 +158,23 @@ test.describe("local product journey", () => {
     await expect(agendaDays).toHaveCount(3);
     await expect(agendaDays.nth(1)).toHaveClass(/planned-match-agenda-day--target/);
     await expect(agendaDays.nth(0).locator(".planned-match-agenda-full-date")).toHaveText(/2026/);
-    await expect(agendaDays.nth(1).getByText("E2E Planned Run", { exact: true })).toBeVisible();
+    await expect(agendaDays.nth(1).getByText("2mins E2E Planned Run", { exact: true })).toBeVisible();
     await expect(agendaDays.nth(1).getByText("E2E Planned Speed Work", { exact: true })).toBeVisible();
     await expect(agendaDays.nth(1).getByRole("radio")).toHaveCount(2);
-    await expect(agendaDays.nth(2).getByText("E2E Planned Long Run", { exact: true })).toBeVisible();
+    const strongCandidate = agendaDays.nth(1).locator(".planned-match-candidate").filter({ hasText: "2mins E2E Planned Run" });
+    await expect(strongCandidate.locator(".planned-match-score--strong")).toHaveText("100/100");
+    await expect(strongCandidate.getByText("Suggested", { exact: true })).toBeVisible();
+    await expect(strongCandidate.getByText("2 min activity vs 2 min plan", { exact: true })).toBeVisible();
+    await expect(strongCandidate.getByText("Both continuous runs", { exact: true })).toBeVisible();
+    await expect(strongCandidate.getByRole("radio")).toBeChecked();
+    const structuredMismatchCandidate = agendaDays.nth(1).locator(".planned-match-candidate").filter({ hasText: "E2E Planned Speed Work" });
+    await expect(structuredMismatchCandidate.locator(".planned-match-score--weak")).toHaveText("50/100");
+    await expect(structuredMismatchCandidate.getByText("Planned intervals; activity is continuous", { exact: true })).toBeVisible();
+    await expect(structuredMismatchCandidate.getByText("Suggested", { exact: true })).toHaveCount(0);
+    const durationMismatchCandidate = agendaDays.nth(2).locator(".planned-match-candidate").filter({ hasText: "2 hours E2E Planned Long Run" });
+    await expect(durationMismatchCandidate).toBeVisible();
+    await expect(durationMismatchCandidate.locator(".planned-match-score--weak")).toHaveText("48/100");
+    await expect(durationMismatchCandidate.getByText("2 min activity vs 2 hr plan", { exact: true })).toBeVisible();
     let releasePlannedCandidates = () => {};
     const plannedCandidatesGate = new Promise<void>((resolve) => {
       releasePlannedCandidates = resolve;
@@ -234,23 +247,32 @@ test.describe("local product journey", () => {
     await expect(retryingPlans).toBeDisabled();
     await expect(initialFailurePlannedMatchDialog.getByRole("status")).toHaveText("Retrying planned runs…");
     releaseInitialRetry();
-    await expect(initialFailurePlannedMatchDialog.getByText("E2E Planned Long Run", { exact: true })).toBeVisible();
+    await expect(initialFailurePlannedMatchDialog.getByText("2 hours E2E Planned Long Run", { exact: true })).toBeVisible();
     await page.unroute("**/api/activities/*/planned-match-candidates?windowDays=7");
     await initialFailurePlannedMatchDialog.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(initialFailurePlannedMatchDialog).toBeHidden();
 
     await expect(page.getByText("Route", { exact: true })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Stats" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Intervals" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Stats" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Intervals" })).toHaveCount(0);
+    await expect(page.getByText("Activity graph", { exact: true })).toBeVisible();
     const previousActivity = page.getByRole("button", { name: "Previous activity" });
     await expect(previousActivity).toBeEnabled();
 
     await previousActivity.click();
     await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    const cyclingIntervalsTab = page.getByRole("tab", { name: "Intervals" });
+    await expect(cyclingIntervalsTab).toBeVisible();
+    await cyclingIntervalsTab.click();
+    await expect(cyclingIntervalsTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator(".activity-intervals-panel").getByText("Intervals", { exact: true })).toBeVisible();
     const cyclingNextActivity = page.getByRole("button", { name: "Next activity" });
     await expect(cyclingNextActivity).toBeEnabled();
     await cyclingNextActivity.click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Intervals" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Stats" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByText("Activity graph", { exact: true })).toBeVisible();
     await expect(previousActivity).toBeEnabled();
 
     let releaseNavigation = () => {};
@@ -311,6 +333,11 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name: "E2E Pool Swim" })).toBeVisible();
     await expect(page.locator(".climbs-panel")).toHaveCount(0);
     await expect(page.locator(".climb-sensitivity-details")).toHaveCount(0);
+    const swimmingIntervalsTab = page.getByRole("tab", { name: "Intervals" });
+    await expect(swimmingIntervalsTab).toBeVisible();
+    await swimmingIntervalsTab.click();
+    await expect(page.getByText("Laps", { exact: true })).toBeVisible();
+    await expect(page.getByText("No structured workout steps were provided; showing recorded laps.", { exact: true })).toBeVisible();
   });
 
   test("excludes a matched planned run from all candidate windows until unmatch", async ({ page }, testInfo) => {

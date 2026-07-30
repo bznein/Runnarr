@@ -215,13 +215,21 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	var activitySource string
 	var activitySportType string
 	var activityDate time.Time
-	if err := s.db.QueryRow(ctx, `select source, date(start_time), sport_type from activities where id = $1 and user_id = $2`, activityID, scopedUserID(ctx)).Scan(&activitySource, &activityDate, &activitySportType); err != nil {
+	var activityMovingTimeS, activityElapsedTimeS int
+	var activityStructured bool
+	if err := s.db.QueryRow(ctx, `
+		select source, date(start_time), sport_type, moving_time_s, elapsed_time_s,
+			exists(select 1 from activity_intervals where activity_id = activities.id)
+		from activities where id = $1 and user_id = $2
+	`, activityID, scopedUserID(ctx)).Scan(
+		&activitySource, &activityDate, &activitySportType, &activityMovingTimeS, &activityElapsedTimeS, &activityStructured,
+	); err != nil {
 		return PlannedActivityMatchResponse{}, err
 	}
 	if windowDays != 7 && windowDays != 30 {
 		windowDays = 7
 	}
-	response := PlannedActivityMatchResponse{Candidates: make([]PlannedActivity, 0)}
+	response := PlannedActivityMatchResponse{Candidates: make([]PlannedActivityMatchCandidate, 0)}
 	if activitySource == trainingSheetProvider {
 		return response, nil
 	}
@@ -247,14 +255,14 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 		if err := scanPlannedActivity(rows, &item); err != nil {
 			return response, err
 		}
-		response.Candidates = append(response.Candidates, item)
-		if response.SuggestedID == "" {
-			response.SuggestedID = item.ID
-		}
+		response.Candidates = append(response.Candidates, assessPlannedActivityMatch(
+			activityDate, activityMovingTimeS, activityElapsedTimeS, activityStructured, item,
+		))
 	}
 	if err := rows.Err(); err != nil {
 		return response, err
 	}
+	response.SuggestedID = suggestedPlannedActivityID(response.Candidates)
 	if windowDays == 7 {
 		if err := s.db.QueryRow(ctx, `
 			select exists(

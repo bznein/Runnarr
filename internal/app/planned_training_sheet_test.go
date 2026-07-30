@@ -7,8 +7,9 @@ import (
 
 func TestPlannedActivitiesFromTabKeepsWorkbookScopedSourceIDs(t *testing.T) {
 	tab := googleSheetTab{
-		ID:    "week-tab",
-		Title: "5-7",
+		ID:                       "week-tab",
+		Title:                    "5-7",
+		PlanCellBackgroundColors: map[int]string{1: "#ffffff", 2: "#674ea7"},
 		Values: [][]string{
 			{"", "Mon", "Tue"},
 			{"", "Easy run", "Intervals"},
@@ -26,6 +27,38 @@ func TestPlannedActivitiesFromTabKeepsWorkbookScopedSourceIDs(t *testing.T) {
 	}
 	if oldWorkbook[0].WorkbookID != "old-workbook" || newWorkbook[0].WorkbookID != "new-workbook" {
 		t.Fatalf("workbook IDs = %q/%q, want old/new workbook IDs", oldWorkbook[0].WorkbookID, newWorkbook[0].WorkbookID)
+	}
+	if oldWorkbook[0].Raw["planCellBackgroundColor"] != "#ffffff" || oldWorkbook[1].Raw["planCellBackgroundColor"] != "#674ea7" {
+		t.Fatalf("plan cell colors = %#v/%#v", oldWorkbook[0].Raw["planCellBackgroundColor"], oldWorkbook[1].Raw["planCellBackgroundColor"])
+	}
+}
+
+func TestApplyPlanCellBackgroundColorsStoresDefaultWhiteAndEffectiveFill(t *testing.T) {
+	tabs := []googleSheetTab{{ID: "123", Title: "5-7"}}
+	response := googleSheetPreviewResponse{Sheets: []googleSheetPreviewResponseSheet{{
+		Properties: struct {
+			SheetID int    `json:"sheetId"`
+			Title   string `json:"title"`
+		}{SheetID: 123, Title: "5-7"},
+		Data: []googleGridData{{
+			StartRow:    1,
+			StartColumn: 1,
+			RowData: []googleRowData{{Values: []googleGridCell{
+				{EffectiveFormat: googleCellFormat{BackgroundColor: &googleColor{Red: 0.4, Green: 0.3, Blue: 0.65, Alpha: 0.25}}},
+				{},
+			}}},
+		}},
+	}}}
+
+	applyPlanCellBackgroundColors(tabs, response)
+	if got := tabs[0].PlanCellBackgroundColors[1]; got != "#664da6" {
+		t.Fatalf("purple background = %q, want #664da6", got)
+	}
+	if got := tabs[0].PlanCellBackgroundColors[2]; got != "#ffffff" {
+		t.Fatalf("default background = %q, want #ffffff", got)
+	}
+	if len(tabs[0].PlanCellBackgroundColors) != 7 {
+		t.Fatalf("background count = %d, want 7", len(tabs[0].PlanCellBackgroundColors))
 	}
 }
 

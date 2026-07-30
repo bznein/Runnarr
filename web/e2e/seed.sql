@@ -61,6 +61,25 @@ on conflict (user_id, source, source_id) do update set
     elapsed_time_s = excluded.elapsed_time_s,
     raw = excluded.raw;
 
+-- Keep a lap-only fixture for the Intervals fallback journey.
+insert into activity_laps(
+    activity_id, lap_index, start_time, elapsed_time_s, moving_time_s,
+    distance_m, avg_pace_s_per_km, raw
+)
+select activity.id, 0, activity.start_time, 1900, 1800, 1500, 1200, '{}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-pool-swim'
+on conflict (activity_id, lap_index) do update set
+    start_time = excluded.start_time,
+    elapsed_time_s = excluded.elapsed_time_s,
+    moving_time_s = excluded.moving_time_s,
+    distance_m = excluded.distance_m,
+    avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+    raw = excluded.raw;
+
 -- Deliberately include provider-style distance on a strength activity so the
 -- browser journey verifies that distance and derived pace remain hidden.
 insert into activities(
@@ -179,12 +198,52 @@ on conflict (user_id, source, source_id) do update set
     matched_at = excluded.matched_at,
     raw = excluded.raw;
 
+-- Keep a structured-interval fixture for the Activity Detail tab journey.
+insert into activity_workouts(
+    activity_id, provider, provider_workout_id, name, sport_type, steps, raw
+)
+select activity.id, 'e2e', 'e2e-structured-ride', 'E2E Structured Ride',
+    'Cycling', '[]'::jsonb, '{}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-cycling-activity'
+on conflict (activity_id) do update set
+    provider = excluded.provider,
+    provider_workout_id = excluded.provider_workout_id,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    steps = excluded.steps,
+    raw = excluded.raw,
+    updated_at = now();
+
+insert into activity_intervals(
+    activity_id, interval_index, category, provider_type,
+    elapsed_time_s, moving_time_s, distance_m, avg_pace_s_per_km, raw
+)
+select activity.id, 0, 'active', 'ride', 900, 900, 6000, 150, '{}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-cycling-activity'
+on conflict (activity_id, interval_index) do update set
+    category = excluded.category,
+    provider_type = excluded.provider_type,
+    elapsed_time_s = excluded.elapsed_time_s,
+    moving_time_s = excluded.moving_time_s,
+    distance_m = excluded.distance_m,
+    avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+    raw = excluded.raw;
+
 insert into planned_activities(
     user_id, source, source_id, workbook_id, sheet_id, sheet_title,
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-run', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A1', current_date, 'E2E Planned Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A1', current_date, '2mins E2E Planned Run', 'Run', 'pending',
+    '{"planCellBackgroundColor":"#ffffff"}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -218,7 +277,8 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-speed', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A3', current_date, 'E2E Planned Speed Work', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A3', current_date, 'E2E Planned Speed Work', 'Run', 'pending',
+    '{"planCellBackgroundColor":"#3d85c6","workoutTable":{"rows":[{"label":"5min rep 1"}]}}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -235,7 +295,8 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-long', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A4', current_date + 3, 'E2E Planned Long Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A4', current_date + 3, '2 hours E2E Planned Long Run', 'Run', 'pending',
+    '{"planCellBackgroundColor":"#674ea7"}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set

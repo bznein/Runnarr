@@ -9,6 +9,12 @@ E2E_USERNAME="${RUNNARR_E2E_USERNAME:-e2e-admin}"
 E2E_PASSWORD="${RUNNARR_E2E_PASSWORD:-e2e-password-123}"
 COMPOSE_OVERRIDE="$(mktemp "${TMPDIR:-/tmp}/runnarr-e2e-compose.XXXXXX.yml")"
 NETWORK_CREATED=0
+TESTBED_MODE=0
+
+if [ "${1:-}" = "--testbed" ]; then
+  TESTBED_MODE=1
+  shift
+fi
 
 pick_port() {
   local start_port="$1"
@@ -77,6 +83,11 @@ cleanup() {
   exit "${status}"
 }
 
+stop_testbed() {
+  printf '\nStopping the testbed...\n'
+  exit 0
+}
+
 trap cleanup EXIT
 
 printf '%s\n' \
@@ -108,6 +119,20 @@ for attempt in $(seq 1 60); do
 done
 
 compose exec --no-TTY db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -v "e2e_username=${E2E_USERNAME}" < "${ROOT}/web/e2e/seed.sql"
+
+if [ "${TESTBED_MODE}" -eq 1 ]; then
+  compose exec --no-TTY db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -v "e2e_username=${E2E_USERNAME}" < "${ROOT}/web/e2e/testbed-seed.sql"
+  printf '\nRunnarr testbed is ready.\n'
+  printf 'URL:      %s\n' "${RUNNARR_BASE_URL}"
+  printf 'Username: %s\n' "${E2E_USERNAME}"
+  printf 'Password: %s\n' "${E2E_PASSWORD}"
+  printf '\nThis isolated environment contains synthetic activities, plans, health, and gear data.\n'
+  printf 'Press Ctrl-C to stop it and remove its containers, network, and volumes.\n\n'
+  trap stop_testbed HUP INT TERM
+  while true; do
+    sleep 60
+  done
+fi
 
 cd "${ROOT}/web"
 npx playwright test "$@"

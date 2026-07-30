@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+### Features
+
+- Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
+
 ### Fixes
 
 - Calendar entries for completed runs now retain matched-plan provenance and show the original planned date when it differs, without displaying the completed plan as a duplicate pending activity.
+- Activity details now hide the Intervals tab when there are no structured intervals or recorded laps.
 - Strength-training activities no longer show distance, elevation, pace, or grade-adjusted pace summary metrics.
 
 ## 1.0.0 - 2026-07-30
