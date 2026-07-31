@@ -216,16 +216,17 @@ func (s *Store) PlannedActivityMatchCandidates(ctx context.Context, activityID s
 	var activitySportType string
 	var activityDate time.Time
 	var activityMovingTimeS, activityElapsedTimeS int
-	var activityStructured bool
+	var activityIntervalCount int
 	if err := s.db.QueryRow(ctx, `
 		select source, date(start_time), sport_type, moving_time_s, elapsed_time_s,
-			exists(select 1 from activity_intervals where activity_id = activities.id)
+			(select count(*)::int from activity_intervals where activity_id = activities.id)
 		from activities where id = $1 and user_id = $2
 	`, activityID, scopedUserID(ctx)).Scan(
-		&activitySource, &activityDate, &activitySportType, &activityMovingTimeS, &activityElapsedTimeS, &activityStructured,
+		&activitySource, &activityDate, &activitySportType, &activityMovingTimeS, &activityElapsedTimeS, &activityIntervalCount,
 	); err != nil {
 		return PlannedActivityMatchResponse{}, err
 	}
+	activityStructured := activityIntervalsStructured(activityIntervalCount)
 	if windowDays != 7 && windowDays != 30 {
 		windowDays = 7
 	}
