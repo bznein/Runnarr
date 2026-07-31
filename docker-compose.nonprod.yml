@@ -2,3 +2,7 @@ services:
   app:
     environment:
       RUNNARR_TRUST_PROXY: "true"
+    networks:
+      runnarr:
+        aliases:
+          - ${RUNNARR_INGRESS_ALIAS:?non-production ingress alias is required}

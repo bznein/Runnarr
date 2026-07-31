@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed non-production ingress routing so the gateway resolves staging and
+  preview aliases to their app containers instead of back to itself.
 - Fixed GitHub-hosted deployment SSH to use the checksum-pinned native
   `cloudflared` client instead of a Docker-wrapped proxy command.
 
