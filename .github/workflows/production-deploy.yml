@@ -30,22 +30,36 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
         run: |
-          cloudflared_image="cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+          cloudflared="${RUNNER_TEMP}/cloudflared"
+          cloudflared_sha256="9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17"
           [[ "${DEPLOY_SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "${CF_ACCESS_CLIENT_ID}" && -n "${CF_ACCESS_CLIENT_SECRET}" ]]
+          [[ "${CF_ACCESS_CLIENT_ID}" != *$'\n'* && "${CF_ACCESS_CLIENT_SECRET}" != *$'\n'* ]]
+          curl -fsSL --retry 3 \
+            --output "${cloudflared}" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64
+          printf '%s  %s\n' "${cloudflared_sha256}" "${cloudflared}" |
+            sha256sum --check --status
+          chmod 0755 "${cloudflared}"
           install -d -m 0700 "${HOME}/.ssh"
           printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
           printf '%s\n' "${DEPLOY_SSH_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
-          printf 'TUNNEL_SERVICE_TOKEN_ID=%s\nTUNNEL_SERVICE_TOKEN_SECRET=%s\n' \
-            "${CF_ACCESS_CLIENT_ID}" "${CF_ACCESS_CLIENT_SECRET}" \
-            > "${HOME}/.ssh/cloudflare.env"
-          docker pull "${cloudflared_image}" >/dev/null
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euo pipefail'
+            printf 'export TUNNEL_SERVICE_TOKEN_ID=%q\n' "${CF_ACCESS_CLIENT_ID}"
+            printf 'export TUNNEL_SERVICE_TOKEN_SECRET=%q\n' "${CF_ACCESS_CLIENT_SECRET}"
+            # shellcheck disable=SC2016
+            printf 'exec %q access ssh --hostname "$1"\n' "${cloudflared}"
+          } > "${HOME}/.ssh/cloudflared-proxy"
           cat > "${HOME}/.ssh/config" <<EOF
           Host ${DEPLOY_SSH_HOST}
             IdentitiesOnly yes
-            ProxyCommand docker run --rm -i --env-file ${HOME}/.ssh/cloudflare.env ${cloudflared_image} access ssh --hostname %h
+            ProxyCommand ${HOME}/.ssh/cloudflared-proxy %h
           EOF
           chmod 0600 "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/known_hosts" \
-            "${HOME}/.ssh/cloudflare.env" "${HOME}/.ssh/config"
+            "${HOME}/.ssh/config"
+          chmod 0700 "${HOME}/.ssh/cloudflared-proxy"
 
       - name: Read staging state
         id: state
@@ -89,22 +103,36 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
         run: |
-          cloudflared_image="cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+          cloudflared="${RUNNER_TEMP}/cloudflared"
+          cloudflared_sha256="9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17"
           [[ "${DEPLOY_SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "${CF_ACCESS_CLIENT_ID}" && -n "${CF_ACCESS_CLIENT_SECRET}" ]]
+          [[ "${CF_ACCESS_CLIENT_ID}" != *$'\n'* && "${CF_ACCESS_CLIENT_SECRET}" != *$'\n'* ]]
+          curl -fsSL --retry 3 \
+            --output "${cloudflared}" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64
+          printf '%s  %s\n' "${cloudflared_sha256}" "${cloudflared}" |
+            sha256sum --check --status
+          chmod 0755 "${cloudflared}"
           install -d -m 0700 "${HOME}/.ssh"
           printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
           printf '%s\n' "${DEPLOY_SSH_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
-          printf 'TUNNEL_SERVICE_TOKEN_ID=%s\nTUNNEL_SERVICE_TOKEN_SECRET=%s\n' \
-            "${CF_ACCESS_CLIENT_ID}" "${CF_ACCESS_CLIENT_SECRET}" \
-            > "${HOME}/.ssh/cloudflare.env"
-          docker pull "${cloudflared_image}" >/dev/null
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euo pipefail'
+            printf 'export TUNNEL_SERVICE_TOKEN_ID=%q\n' "${CF_ACCESS_CLIENT_ID}"
+            printf 'export TUNNEL_SERVICE_TOKEN_SECRET=%q\n' "${CF_ACCESS_CLIENT_SECRET}"
+            # shellcheck disable=SC2016
+            printf 'exec %q access ssh --hostname "$1"\n' "${cloudflared}"
+          } > "${HOME}/.ssh/cloudflared-proxy"
           cat > "${HOME}/.ssh/config" <<EOF
           Host ${DEPLOY_SSH_HOST}
             IdentitiesOnly yes
-            ProxyCommand docker run --rm -i --env-file ${HOME}/.ssh/cloudflare.env ${cloudflared_image} access ssh --hostname %h
+            ProxyCommand ${HOME}/.ssh/cloudflared-proxy %h
           EOF
           chmod 0600 "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/known_hosts" \
-            "${HOME}/.ssh/cloudflare.env" "${HOME}/.ssh/config"
+            "${HOME}/.ssh/config"
+          chmod 0700 "${HOME}/.ssh/cloudflared-proxy"
 
       - name: Promote exact accepted staging deployment
         id: deploy
