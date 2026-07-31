@@ -17,6 +17,7 @@ type UserPreference struct {
 	ThemePreference      string   `json:"themePreference"`
 	ActivityTableColumns []string `json:"activityTableColumns,omitempty"`
 	GearSortBy           string   `json:"gearSortBy"`
+	DefaultExperience    string   `json:"defaultExperience"`
 }
 
 type SessionUser struct {
@@ -27,36 +28,45 @@ type SessionUser struct {
 }
 
 type Activity struct {
-	ID                       string             `json:"id"`
-	Source                   string             `json:"source"`
-	SourceID                 string             `json:"sourceId"`
-	Name                     string             `json:"name"`
-	SourceName               string             `json:"sourceName"`
-	LocalName                string             `json:"localName,omitempty"`
-	Notes                    string             `json:"notes,omitempty"`
-	Feedback                 string             `json:"feedback,omitempty"`
-	RPE                      *int               `json:"rpe,omitempty"`
-	SportType                string             `json:"sportType"`
-	StartTime                time.Time          `json:"startTime"`
-	DistanceM                float64            `json:"distanceM"`
-	MovingTimeS              int                `json:"movingTimeS"`
-	ElapsedTimeS             int                `json:"elapsedTimeS"`
-	ElevationGainM           float64            `json:"elevationGainM"`
-	AvgHeartRate             *float64           `json:"avgHeartRate,omitempty"`
-	MaxHeartRate             *float64           `json:"maxHeartRate,omitempty"`
-	AvgPaceSPKM              *float64           `json:"avgPaceSPKM,omitempty"`
-	AvgGradeAdjustedPaceSPKM *float64           `json:"avgGradeAdjustedPaceSPKM,omitempty"`
-	CaloriesKcal             *int               `json:"caloriesKcal,omitempty"`
-	OriginalProviderURL      string             `json:"originalProviderUrl,omitempty"`
-	SummaryPolyline          string             `json:"summaryPolyline,omitempty"`
-	Gear                     []GearSummary      `json:"gear,omitempty"`
-	Samples                  []ActivitySample   `json:"samples,omitempty"`
-	Laps                     []ActivityLap      `json:"laps,omitempty"`
-	Workout                  *ActivityWorkout   `json:"workout,omitempty"`
-	Intervals                []ActivityInterval `json:"intervals,omitempty"`
-	Climbs                   []ActivityClimb    `json:"climbs,omitempty"`
-	Media                    []ActivityMedia    `json:"media,omitempty"`
-	CreatedAt                time.Time          `json:"createdAt"`
+	ID                       string                      `json:"id"`
+	Source                   string                      `json:"source"`
+	SourceID                 string                      `json:"sourceId"`
+	Name                     string                      `json:"name"`
+	SourceName               string                      `json:"sourceName"`
+	LocalName                string                      `json:"localName,omitempty"`
+	Notes                    string                      `json:"notes,omitempty"`
+	Feedback                 string                      `json:"feedback,omitempty"`
+	RPE                      *int                        `json:"rpe,omitempty"`
+	SportType                string                      `json:"sportType"`
+	StartTime                time.Time                   `json:"startTime"`
+	DistanceM                float64                     `json:"distanceM"`
+	MovingTimeS              int                         `json:"movingTimeS"`
+	ElapsedTimeS             int                         `json:"elapsedTimeS"`
+	ElevationGainM           float64                     `json:"elevationGainM"`
+	AvgHeartRate             *float64                    `json:"avgHeartRate,omitempty"`
+	MaxHeartRate             *float64                    `json:"maxHeartRate,omitempty"`
+	AvgPaceSPKM              *float64                    `json:"avgPaceSPKM,omitempty"`
+	AvgGradeAdjustedPaceSPKM *float64                    `json:"avgGradeAdjustedPaceSPKM,omitempty"`
+	CaloriesKcal             *int                        `json:"caloriesKcal,omitempty"`
+	OriginalProviderURL      string                      `json:"originalProviderUrl,omitempty"`
+	SummaryPolyline          string                      `json:"summaryPolyline,omitempty"`
+	Gear                     []GearSummary               `json:"gear,omitempty"`
+	Samples                  []ActivitySample            `json:"samples,omitempty"`
+	Laps                     []ActivityLap               `json:"laps,omitempty"`
+	Workout                  *ActivityWorkout            `json:"workout,omitempty"`
+	Intervals                []ActivityInterval          `json:"intervals,omitempty"`
+	Climbs                   []ActivityClimb             `json:"climbs,omitempty"`
+	Media                    []ActivityMedia             `json:"media,omitempty"`
+	TrainingSheetMatch       *ActivityTrainingSheetMatch `json:"trainingSheetMatch,omitempty"`
+	CreatedAt                time.Time                   `json:"createdAt"`
+}
+
+type ActivityTrainingSheetMatch struct {
+	State               string     `json:"state"`
+	PlannedActivityID   string     `json:"plannedActivityId,omitempty"`
+	PlannedActivityName string     `json:"plannedActivityName,omitempty"`
+	PlannedDate         *time.Time `json:"plannedDate,omitempty"`
+	MatchedAt           *time.Time `json:"matchedAt,omitempty"`
 }
 
 type ClimbDetectionSettings struct {
@@ -308,16 +318,18 @@ type ImportedActivity struct {
 }
 
 type ActivityFilters struct {
-	SportTypes           []string
-	ExcludedSportTypes   []string
-	Search               string
-	DateFrom             time.Time
-	DateTo               time.Time
-	CalendarTimezone     string
-	SortBy               string
-	SortOrder            string
-	SummaryPeriod        string
-	IncludeTrainingSheet bool
+	SportTypes              []string
+	ExcludedSportTypes      []string
+	Search                  string
+	DateFrom                time.Time
+	DateTo                  time.Time
+	CalendarTimezone        string
+	SortBy                  string
+	SortOrder               string
+	SummaryPeriod           string
+	IncludeTrainingSheet    bool
+	TrainingSheetMatching   bool
+	TrainingSheetMatchState string
 }
 
 type ImportFile struct {

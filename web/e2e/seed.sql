@@ -2,7 +2,8 @@
 
 update user_settings
 set training_sheet_sheet_url = 'https://docs.google.com/spreadsheets/d/e2e-workbook/edit',
-    training_sheet_enabled = false
+    training_sheet_enabled = false,
+    default_experience = 'full'
 where user_id = (select id from users where username = :'e2e_username');
 
 insert into daily_health_metrics(
@@ -197,6 +198,26 @@ on conflict (user_id, source, source_id) do update set
     matched_activity_id = excluded.matched_activity_id,
     matched_at = excluded.matched_at,
     raw = excluded.raw;
+
+insert into training_sheet_writebacks(
+    planned_activity_id, activity_id, summary_status, summary_error,
+    interval_status, feedback_status, last_attempt_at
+)
+select planned.id, planned.matched_activity_id, 'failed', 'E2E writeback failure',
+    'not_applicable', 'not_provided', now()
+from planned_activities planned
+join users on users.id = planned.user_id
+where users.username = :'e2e_username'
+  and planned.source = 'training_sheet'
+  and planned.source_id = 'e2e-calendar-planned-run'
+  and planned.matched_activity_id is not null
+on conflict (planned_activity_id) do update set
+    activity_id = excluded.activity_id,
+    summary_status = excluded.summary_status,
+    summary_error = excluded.summary_error,
+    interval_status = excluded.interval_status,
+    feedback_status = excluded.feedback_status,
+    last_attempt_at = excluded.last_attempt_at;
 
 -- Keep a structured-interval fixture for the Activity Detail tab journey.
 insert into activity_workouts(

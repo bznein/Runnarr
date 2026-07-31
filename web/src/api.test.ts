@@ -80,4 +80,17 @@ describe("shared backend API contract", () => {
     expect(requestURL).toContain("sortBy=distance");
     expect(requestURL).toContain("sortOrder=asc");
   });
+
+  it("requests the status-aware training-sheet matching view", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      activities: [], limit: 100, offset: 0, hasMore: false
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.activities(undefined, { limit: 100, offset: 0, view: "training-sheet-matching", matchState: "attention" });
+
+    const requestURL = String(fetchMock.mock.calls[0][0]);
+    expect(requestURL).toContain("view=training-sheet-matching");
+    expect(requestURL).toContain("matchState=attention");
+  });
 });

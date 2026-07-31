@@ -504,7 +504,11 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 	if hasMore {
 		activities = activities[:limit]
 	}
-	if err := s.attachActivityGear(ctx, activities); err != nil {
+	if filters.TrainingSheetMatching {
+		if err := s.attachTrainingSheetMatches(ctx, activities); err != nil {
+			return ActivityListPage{}, err
+		}
+	} else if err := s.attachActivityGear(ctx, activities); err != nil {
 		return ActivityListPage{}, err
 	}
 	page := ActivityListPage{
@@ -1126,6 +1130,96 @@ func (s *Store) attachActivityGear(ctx context.Context, activities []Activity) e
 		activities[index].Gear = append(activities[index].Gear, gear)
 	}
 	return rows.Err()
+}
+
+func (s *Store) attachTrainingSheetMatches(ctx context.Context, activities []Activity) error {
+	if len(activities) == 0 {
+		return nil
+	}
+	activityIDs := make([]string, 0, len(activities))
+	activityIndex := make(map[string]int, len(activities))
+	for index := range activities {
+		activityIDs = append(activityIDs, activities[index].ID)
+		activityIndex[activities[index].ID] = index
+		activities[index].TrainingSheetMatch = &ActivityTrainingSheetMatch{State: "unmatched"}
+	}
+	rows, err := s.db.Query(ctx, `
+		select planned.matched_activity_id::text, planned.id::text, planned.name, planned.planned_date,
+			planned.matched_at, coalesce(writeback.summary_status, ''), coalesce(writeback.interval_status, ''),
+			coalesce(writeback.feedback_status, ''), coalesce(latest_job.status, '')
+		from planned_activities planned
+		left join training_sheet_writebacks writeback on writeback.planned_activity_id = planned.id
+		left join lateral (
+			select status
+			from sync_jobs
+			where user_id = planned.user_id and provider = 'training_sheet' and kind = 'writeback'
+				and payload->>'plannedActivityId' = planned.id::text
+			order by created_at desc
+			limit 1
+		) latest_job on true
+		where planned.user_id = $2 and planned.matched_activity_id::text = any($1)
+	`, activityIDs, scopedUserID(ctx))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var activityID, plannedID, plannedName string
+		var plannedDate time.Time
+		var matchedAt sql.NullTime
+		var summaryStatus, intervalStatus, feedbackStatus, jobStatus string
+		if err := rows.Scan(&activityID, &plannedID, &plannedName, &plannedDate, &matchedAt,
+			&summaryStatus, &intervalStatus, &feedbackStatus, &jobStatus); err != nil {
+			return err
+		}
+		index, ok := activityIndex[activityID]
+		if !ok {
+			continue
+		}
+		match := &ActivityTrainingSheetMatch{
+			State:               trainingSheetMatchState(summaryStatus, intervalStatus, feedbackStatus, jobStatus),
+			PlannedActivityID:   plannedID,
+			PlannedActivityName: plannedName,
+			PlannedDate:         &plannedDate,
+		}
+		if matchedAt.Valid {
+			match.MatchedAt = &matchedAt.Time
+		}
+		activities[index].TrainingSheetMatch = match
+	}
+	return rows.Err()
+}
+
+func trainingSheetMatchState(summaryStatus, intervalStatus, feedbackStatus, jobStatus string) string {
+	if jobStatus == "pending" || jobStatus == "running" || summaryStatus == "running" || intervalStatus == "running" || feedbackStatus == "running" {
+		return "writing"
+	}
+	if trainingSheetStatusNeedsAttention(jobStatus) || trainingSheetStatusNeedsAttention(summaryStatus) ||
+		trainingSheetStatusNeedsAttention(intervalStatus) || trainingSheetStatusNeedsAttention(feedbackStatus) {
+		return "attention"
+	}
+	if trainingSheetSectionComplete(summaryStatus) && trainingSheetSectionComplete(intervalStatus) && trainingSheetSectionComplete(feedbackStatus) {
+		return "complete"
+	}
+	return "pending"
+}
+
+func trainingSheetStatusNeedsAttention(status string) bool {
+	switch status {
+	case "failed", "canceled", "completed_with_conflicts":
+		return true
+	default:
+		return false
+	}
+}
+
+func trainingSheetSectionComplete(status string) bool {
+	switch status {
+	case "completed", "not_applicable", "not_provided":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Store) DeleteActivity(ctx context.Context, id string) (DeleteActivityResult, error) {
@@ -2168,6 +2262,36 @@ func activityFilterConditionsForUser(filters ActivityFilters, startArg int, user
 			)))`, activityDateExpression, timezoneArg))
 		} else {
 			conditions = append(conditions, trainingSheetActivityFilterCondition())
+		}
+	}
+	if filters.TrainingSheetMatching {
+		conditions = append(conditions, "sport_type in ('Run', 'Treadmill Run')")
+		matchedPlanExists := `exists (
+			select 1 from planned_activities matching_plan
+			where matching_plan.user_id = activities.user_id and matching_plan.matched_activity_id = activities.id
+		)`
+		switch filters.TrainingSheetMatchState {
+		case "unmatched":
+			conditions = append(conditions, "not "+matchedPlanExists)
+		case "matched":
+			conditions = append(conditions, matchedPlanExists)
+		case "attention":
+			conditions = append(conditions, `exists (
+				select 1
+				from planned_activities attention_plan
+				left join training_sheet_writebacks attention_writeback on attention_writeback.planned_activity_id = attention_plan.id
+				left join lateral (
+					select status from sync_jobs
+					where user_id = attention_plan.user_id and provider = 'training_sheet' and kind = 'writeback'
+						and payload->>'plannedActivityId' = attention_plan.id::text
+					order by created_at desc limit 1
+				) attention_job on true
+				where attention_plan.user_id = activities.user_id and attention_plan.matched_activity_id = activities.id
+					and (coalesce(attention_job.status, '') in ('failed', 'canceled', 'completed_with_conflicts')
+						or coalesce(attention_writeback.summary_status, '') in ('failed', 'canceled', 'completed_with_conflicts')
+						or coalesce(attention_writeback.interval_status, '') in ('failed', 'canceled', 'completed_with_conflicts')
+						or coalesce(attention_writeback.feedback_status, '') in ('failed', 'canceled', 'completed_with_conflicts'))
+			)`)
 		}
 	}
 	if strings.TrimSpace(filters.Search) != "" {

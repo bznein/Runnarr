@@ -20,3 +20,17 @@ func TestNormalizeThemePreference(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeDefaultExperience(t *testing.T) {
+	for input, want := range map[string]string{
+		"simple":   "simple",
+		" SIMPLE ": "simple",
+		"full":     "full",
+		"":         "full",
+		"unknown":  "full",
+	} {
+		if got := normalizeDefaultExperience(input); got != want {
+			t.Errorf("normalizeDefaultExperience(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

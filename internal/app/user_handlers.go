@@ -278,10 +278,32 @@ func (s *Server) handleGetPreferences(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request) {
-	var preferences UserPreference
-	if err := json.NewDecoder(r.Body).Decode(&preferences); err != nil {
+	var update struct {
+		ThemePreference      *string   `json:"themePreference"`
+		ActivityTableColumns *[]string `json:"activityTableColumns"`
+		GearSortBy           *string   `json:"gearSortBy"`
+		DefaultExperience    *string   `json:"defaultExperience"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+	preferences, err := s.store.GetUserPreferences(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load preferences")
+		return
+	}
+	if update.ThemePreference != nil {
+		preferences.ThemePreference = *update.ThemePreference
+	}
+	if update.ActivityTableColumns != nil {
+		preferences.ActivityTableColumns = *update.ActivityTableColumns
+	}
+	if update.GearSortBy != nil {
+		preferences.GearSortBy = *update.GearSortBy
+	}
+	if update.DefaultExperience != nil {
+		preferences.DefaultExperience = *update.DefaultExperience
 	}
 	if err := s.store.UpdateUserPreferences(r.Context(), preferences); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save preferences")

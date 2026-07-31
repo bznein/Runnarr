@@ -11,6 +11,7 @@
 
 ### Features
 
+- Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
 - Added an optional immutable-image deployment pipeline with isolated
   synthetic PR previews, persistent staging, Cloudflare Access protection,
