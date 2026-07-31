@@ -129,7 +129,7 @@ jobs:
 
       - name: Wait for app
         run: |
-          for attempt in {1..60}; do
+          for _ in {1..60}; do
             if curl -fsS http://127.0.0.1:37617/api/session; then
               exit 0
             fi
@@ -150,6 +150,17 @@ jobs:
       - name: Stop stack
         if: always()
         run: docker compose down -v
+
+  deployment:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate deployment files
+        run: make deployment-check
 
   tag-metadata:
     name: Tag metadata

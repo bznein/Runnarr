@@ -1,0 +1,113 @@
+name: Preview cleanup
+
+on:
+  pull_request:
+    types:
+      - closed
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: preview-cleanup
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Reconcile preview stacks
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: preview
+    steps:
+      - name: Resolve open same-repository PRs
+        id: pulls
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100
+            });
+            const ids = pulls
+              .filter(pull => pull.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`)
+              .map(pull => pull.number)
+              .sort((a, b) => a - b);
+            core.setOutput("ids", ids.join(" "));
+
+      - name: Configure passwordless deployment SSH through Access
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
+        run: |
+          cloudflared_image="cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+          [[ "${DEPLOY_SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          install -d -m 0700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
+          printf 'TUNNEL_SERVICE_TOKEN_ID=%s\nTUNNEL_SERVICE_TOKEN_SECRET=%s\n' \
+            "${CF_ACCESS_CLIENT_ID}" "${CF_ACCESS_CLIENT_SECRET}" \
+            > "${HOME}/.ssh/cloudflare.env"
+          docker pull "${cloudflared_image}" >/dev/null
+          cat > "${HOME}/.ssh/config" <<EOF
+          Host ${DEPLOY_SSH_HOST}
+            IdentitiesOnly yes
+            ProxyCommand docker run --rm -i --env-file ${HOME}/.ssh/cloudflare.env ${cloudflared_image} access ssh --hostname %h
+          EOF
+          chmod 0600 "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/known_hosts" \
+            "${HOME}/.ssh/cloudflare.env" "${HOME}/.ssh/config"
+
+      - name: Reconcile host state
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          OPEN_PRS: ${{ steps.pulls.outputs.ids }}
+        run: |
+          ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "preview-reconcile ${OPEN_PRS}"
+
+      - name: Remove stale preview DNS records
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
+          CF_ZONE_ID: ${{ vars.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ vars.DEPLOY_BASE_DOMAIN }}
+          OPEN_PRS: ${{ steps.pulls.outputs.ids }}
+        run: |
+          declare -A keep=()
+          for pr in ${OPEN_PRS}; do
+            keep["${pr}"]=1
+          done
+          endpoint="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
+          page=1
+          while :; do
+            response="$(
+              curl -fsS --get \
+                -H "Authorization: Bearer ${CF_API_TOKEN}" \
+                --data-urlencode "type=CNAME" \
+                --data-urlencode "per_page=100" \
+                --data-urlencode "page=${page}" \
+                "${endpoint}"
+            )"
+            while IFS=$'\t' read -r id name; do
+              [[ "${name}" =~ ^runnarr-pr-([1-9][0-9]*)\.${BASE_DOMAIN//./\\.}$ ]] || continue
+              pr="${BASH_REMATCH[1]}"
+              if [[ -z "${keep[${pr}]:-}" ]]; then
+                curl -fsS -X DELETE \
+                  -H "Authorization: Bearer ${CF_API_TOKEN}" \
+                  "${endpoint}/${id}" >/dev/null
+              fi
+            done < <(jq -r '.result[] | [.id,.name] | @tsv' <<< "${response}")
+            total_pages="$(jq -r '.result_info.total_pages' <<< "${response}")"
+            (( page < total_pages )) || break
+            ((page += 1))
+          done

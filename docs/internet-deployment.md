@@ -14,6 +14,9 @@ all user data. Do not publish the app or Postgres host ports in public mode.
 
 For the staged rollout, acceptance tests, rollback drills, and ongoing
 operational checks, see the [public deployment and testing plan](public-deployment-testing-plan.md).
+Repository maintainers who want automated PR previews, persistent staging, and
+digest-based manual production promotion should additionally follow the
+[deployment pipeline runbook](deployment-pipeline.md).
 
 ## Nginx Proxy Manager topology
 

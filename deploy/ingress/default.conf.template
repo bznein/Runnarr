@@ -1,0 +1,31 @@
+map $host $runnarr_backend {
+    hostnames;
+    default "";
+    "runnarr-staging.__RUNNARR_BASE_DOMAIN__" "runnarr-staging:8080";
+    ~^runnarr-pr-(?<preview_id>[1-9][0-9]*)\.__RUNNARR_BASE_DOMAIN_REGEX__$ "runnarr-pr-${preview_id}:8080";
+}
+
+server {
+    listen 8080;
+    server_name
+        runnarr-staging.__RUNNARR_BASE_DOMAIN__
+        ~^runnarr-pr-[1-9][0-9]*\.__RUNNARR_BASE_DOMAIN_REGEX__$;
+
+    resolver 127.0.0.11 ipv6=off valid=10s;
+
+    if ($runnarr_backend = "") {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://$runnarr_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $http_cf_connecting_ip;
+        proxy_set_header X-Forwarded-For $http_cf_connecting_ip;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+        proxy_read_timeout 120s;
+        client_max_body_size 100m;
+    }
+}
