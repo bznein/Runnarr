@@ -94,6 +94,25 @@ func TestPlannedActivityStructuredSignals(t *testing.T) {
 	}
 }
 
+func TestActivityIntervalsStructuredRequiresMultipleSteps(t *testing.T) {
+	tests := []struct {
+		name          string
+		intervalCount int
+		want          bool
+	}{
+		{name: "no intervals", intervalCount: 0, want: false},
+		{name: "single all-activity step", intervalCount: 1, want: false},
+		{name: "multiple steps", intervalCount: 2, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := activityIntervalsStructured(tt.intervalCount); got != tt.want {
+				t.Fatalf("activityIntervalsStructured(%d) = %v, want %v", tt.intervalCount, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAssessPlannedActivityMatch(t *testing.T) {
 	activityDate := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
 	continuousPlan := func(name string) PlannedActivity {
@@ -118,6 +137,11 @@ func TestAssessPlannedActivityMatch(t *testing.T) {
 	structuredMismatch := assessPlannedActivityMatch(activityDate, 40*60, 0, true, continuousPlan("40mins"))
 	if structuredMismatch.MatchScore != 59 || !structuredMismatch.suggestionBlocked || !strings.Contains(strings.Join(structuredMismatch.MatchReasons, " "), "activity has intervals") {
 		t.Fatalf("structure mismatch assessment = %#v", structuredMismatch)
+	}
+
+	singleStep := assessPlannedActivityMatch(activityDate, 40*60, 0, activityIntervalsStructured(1), continuousPlan("40mins"))
+	if singleStep.MatchScore != 100 || singleStep.MatchLevel != plannedMatchLevelStrong || singleStep.suggestionBlocked || !strings.Contains(strings.Join(singleStep.MatchReasons, " "), "Both continuous runs") {
+		t.Fatalf("single-step assessment = %#v", singleStep)
 	}
 
 	unknownDuration := assessPlannedActivityMatch(activityDate, 40*60, 0, false, continuousPlan("Easy run"))

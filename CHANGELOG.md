@@ -19,6 +19,7 @@
 
 ### Fixes
 
+- Planned-run matching now treats a single all-activity interval step as a continuous run instead of rejecting an otherwise exact continuous plan match.
 - Calendar entries for completed runs now retain matched-plan provenance and show the original planned date when it differs, without displaying the completed plan as a duplicate pending activity.
 - Activity details now hide the Intervals tab when there are no structured intervals or recorded laps.
 - Strength-training activities no longer show distance, elevation, pace, or grade-adjusted pace summary metrics.
