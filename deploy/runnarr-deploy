@@ -255,7 +255,6 @@ write_deployment_state() {
 
 connect_gateway() {
   local environment="$1"
-  local alias="$2"
   local directory project network
   directory="$(environment_directory "${environment}")"
   project="$(json_field "${directory}/runtime.json" '.project')"
@@ -265,9 +264,11 @@ connect_gateway() {
   if docker container inspect "${NONPROD_GATEWAY}" \
     --format '{{json .NetworkSettings.Networks}}' |
     jq -e --arg network "${network}" 'has($network)' >/dev/null; then
-    return 0
+    # Reconnect so gateways installed before app-owned aliases do not retain
+    # the old alias that made the proxy resolve its upstream back to itself.
+    docker network disconnect "${network}" "${NONPROD_GATEWAY}"
   fi
-  docker network connect --alias "${alias}" "${network}" "${NONPROD_GATEWAY}"
+  docker network connect "${network}" "${NONPROD_GATEWAY}"
 }
 
 disconnect_gateway() {
@@ -385,7 +386,7 @@ preview_up() {
   if ! compose "previews/${pr}" up --detach --no-build --remove-orphans ||
     ! (wait_for_health "previews/${pr}" "${commit}") ||
     ! seed_environment "previews/${pr}" "preview-admin" ||
-    ! connect_gateway "previews/${pr}" "runnarr-pr-${pr}"; then
+    ! connect_gateway "previews/${pr}"; then
     disconnect_gateway "previews/${pr}"
     compose "previews/${pr}" down --volumes --remove-orphans || true
     die "preview ${pr} failed to deploy"
@@ -514,7 +515,7 @@ staging_up() {
     fi
     touch "${directory}/seeded"
   fi
-  if ! connect_gateway staging runnarr-staging; then
+  if ! connect_gateway staging; then
     if [[ -n "${previous_image}" && -n "${previous_commit}" ]]; then
       log "staging gateway connection failed; restoring ${previous_image}"
       write_image_environment "${directory}/image.env" "${previous_image}" "staging" "${url}" "runnarr-staging"
@@ -584,7 +585,7 @@ staging_reject() {
   write_image_environment "${directory}/image.env" "${image}" "staging" "${url}" "runnarr-staging"
   compose staging up --detach --no-build --remove-orphans
   wait_for_health staging "${commit}"
-  connect_gateway staging runnarr-staging
+  connect_gateway staging
   cp "${previous_state}" "${directory}/state.json"
   jq -c . "${directory}/state.json"
 }

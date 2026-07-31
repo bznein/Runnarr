@@ -22,6 +22,8 @@ not authorize a production cutover by itself.
   Deployment jobs do not check out or execute PR scripts.
 - Preview, staging, and production use different Compose projects, databases,
   volumes, state, credentials, and networks.
+- Each non-production app owns its unique ingress alias on its isolated
+  network. The shared gateway joins that network without owning the alias.
 - The Cloudflare Tunnel reaches the non-production gateway and the host SSH
   listener used by the restricted deployment account. It cannot reach
   PostgreSQL, production HTTP, the Docker socket, or other host stacks.
@@ -99,6 +101,9 @@ For initial staging setup, `sudo deploy/configure-staging.sh HASH_FILE`
 validates a bare or formatted cost-12 bcrypt hash, generates independent database and
 application secrets, leaves OIDC/provider credentials disabled, and installs
 the root-owned `base.env`. It refuses to replace an existing staging file.
+After adding the dedicated staging Google OIDC client and email mapping, run
+`sudo deploy/verify-staging-oidc.sh` to validate the required values without
+printing them.
 
 Add these non-secret values to `/etc/runnarr/deploy.conf`:
 

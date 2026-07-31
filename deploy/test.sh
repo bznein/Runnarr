@@ -30,7 +30,8 @@ bash -n \
   "${ROOT}/deploy/configure-staging.sh" \
   "${ROOT}/deploy/configure-tunnel-ssh.sh" \
   "${ROOT}/deploy/install-deploy-keys.sh" \
-  "${ROOT}/deploy/install-host.sh"
+  "${ROOT}/deploy/install-host.sh" \
+  "${ROOT}/deploy/verify-staging-oidc.sh"
 
 DIGEST="ghcr.io/bznein/runnarr@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 cat > "${TEMPORARY}/base.env" <<'EOF'
@@ -74,10 +75,14 @@ jq -e \
    and (.services.db.ports == null)
    and (.services.app.mem_limit | tonumber) == 536870912
    and (.services.db.mem_limit | tonumber) == 536870912
+   and (.services.app.networks.runnarr.aliases | index("runnarr-pr-179")) != null
    and ((.services.app.networks | has("nonprod-ingress")) | not)
    and ((.services.db.networks | has("nonprod-ingress")) | not)
    and .networks.runnarr.ipam.config[0].subnet == "10.100.179.0/24"' \
   "${TEMPORARY}/preview.json" >/dev/null
+
+! grep -Fq 'docker network connect --alias' "${ROOT}/deploy/runnarr-deploy" ||
+  fail "the ingress alias must belong to the app, not the gateway"
 
 cat > "${TEMPORARY}/production.env" <<'EOF'
 POSTGRES_USER=runnarr
@@ -151,5 +156,7 @@ grep -Fq '/var/cache/nginx:uid=101,gid=101,mode=0750' \
 grep -Fq 'chmod 0644 "${CONFIG_ROOT}/ingress/default.conf"' \
   "${ROOT}/deploy/install-host.sh" ||
   fail "the unprivileged gateway cannot read its non-secret routing config"
+[[ -x "${ROOT}/deploy/verify-staging-oidc.sh" ]] ||
+  fail "the staging OIDC verifier is not executable"
 
 echo "deployment configuration checks passed"
