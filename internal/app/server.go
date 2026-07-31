@@ -105,7 +105,13 @@ func (s *Server) Routes() http.Handler {
 	r.Use(s.limitRequestBody)
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		build := CurrentBuildInfo()
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":        "ok",
+			"version":       build.Version,
+			"commit":        build.Commit,
+			"migrationHash": build.MigrationHash,
+		})
 	})
 
 	r.Route("/api", func(r chi.Router) {

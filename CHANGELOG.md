@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed the initial production rollback-compatibility check to include
+  staging's generated HTTPS and deployment environment settings.
+- Fixed non-production ingress routing so the gateway resolves staging and
+  preview aliases to their app containers instead of back to itself.
+- Fixed GitHub-hosted deployment SSH to use the checksum-pinned native
+  `cloudflared` client instead of a Docker-wrapped proxy command.
+
 ### Features
 
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
@@ -9,6 +16,10 @@
 - Added opt-in seven-day Garmin workout scheduling with per-user timezone settings, exact provider/date auto-matching after activity import, template cleanup, reconciliation status, and an offline fake-Garmin testbed.
 - Garmin workout ownership is fail-closed: Runnarr schedules, unschedules, or deletes a remote object only when both its locally tracked provider ID and per-user Runnarr ownership marker match. Names never establish ownership, and foreign Garmin workouts are left untouched.
 - Added a per-user notification inbox for workout generation and changes, Garmin calendar reconciliation, automatic activity matching, and training-sheet writeback, with configurable category delivery, 90-day history, actionable links, an unread-only bell menu, explicit severity icons and bulk-action feedback, and optional encrypted browser push subscriptions per device.
+- Added an optional immutable-image deployment pipeline with isolated
+  synthetic PR previews, persistent staging, Cloudflare Access protection,
+  manually approved staging-to-production promotion, encrypted pre-deployment
+  backups, build identity checks, and bounded rollback.
 
 ### Fixes
 

@@ -1,0 +1,185 @@
+name: Production promotion
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Read accepted staging deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: staging
+    outputs:
+      id: ${{ steps.state.outputs.id }}
+      commit: ${{ steps.state.outputs.commit }}
+      image: ${{ steps.state.outputs.image }}
+    steps:
+      - name: Configure passwordless staging SSH through Access
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
+        run: |
+          cloudflared="${RUNNER_TEMP}/cloudflared"
+          cloudflared_sha256="9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17"
+          [[ "${DEPLOY_SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "${CF_ACCESS_CLIENT_ID}" && -n "${CF_ACCESS_CLIENT_SECRET}" ]]
+          [[ "${CF_ACCESS_CLIENT_ID}" != *$'\n'* && "${CF_ACCESS_CLIENT_SECRET}" != *$'\n'* ]]
+          curl -fsSL --retry 3 \
+            --output "${cloudflared}" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64
+          printf '%s  %s\n' "${cloudflared_sha256}" "${cloudflared}" |
+            sha256sum --check --status
+          chmod 0755 "${cloudflared}"
+          install -d -m 0700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euo pipefail'
+            printf 'export TUNNEL_SERVICE_TOKEN_ID=%q\n' "${CF_ACCESS_CLIENT_ID}"
+            printf 'export TUNNEL_SERVICE_TOKEN_SECRET=%q\n' "${CF_ACCESS_CLIENT_SECRET}"
+            # shellcheck disable=SC2016
+            printf 'exec %q access ssh --hostname "$1"\n' "${cloudflared}"
+          } > "${HOME}/.ssh/cloudflared-proxy"
+          cat > "${HOME}/.ssh/config" <<EOF
+          Host ${DEPLOY_SSH_HOST}
+            IdentitiesOnly yes
+            ProxyCommand ${HOME}/.ssh/cloudflared-proxy %h
+          EOF
+          chmod 0600 "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/known_hosts" \
+            "${HOME}/.ssh/config"
+          chmod 0700 "${HOME}/.ssh/cloudflared-proxy"
+
+      - name: Read staging state
+        id: state
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          state="$(ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "status staging" | tail -n 1)"
+          jq -e \
+            '.environment == "staging" and .accepted == true and .rollbackCompatible == true' \
+            <<< "${state}" >/dev/null
+          {
+            echo "id=$(jq -r '.id' <<< "${state}")"
+            echo "commit=$(jq -r '.commit' <<< "${state}")"
+            echo "image=$(jq -r '.image' <<< "${state}")"
+          } >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Production candidate"
+            echo
+            echo "- Staging deployment: \`$(jq -r '.id' <<< "${state}")\`"
+            echo "- Commit: \`$(jq -r '.commit' <<< "${state}")\`"
+            echo "- Image: \`$(jq -r '.image' <<< "${state}")\`"
+            echo "- Migration set: \`$(jq -r '.migrationHash' <<< "${state}")\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  promote:
+    name: Approve and promote staging
+    needs:
+      - preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Configure passwordless production SSH through Access
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
+        run: |
+          cloudflared="${RUNNER_TEMP}/cloudflared"
+          cloudflared_sha256="9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17"
+          [[ "${DEPLOY_SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "${CF_ACCESS_CLIENT_ID}" && -n "${CF_ACCESS_CLIENT_SECRET}" ]]
+          [[ "${CF_ACCESS_CLIENT_ID}" != *$'\n'* && "${CF_ACCESS_CLIENT_SECRET}" != *$'\n'* ]]
+          curl -fsSL --retry 3 \
+            --output "${cloudflared}" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64
+          printf '%s  %s\n' "${cloudflared_sha256}" "${cloudflared}" |
+            sha256sum --check --status
+          chmod 0755 "${cloudflared}"
+          install -d -m 0700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euo pipefail'
+            printf 'export TUNNEL_SERVICE_TOKEN_ID=%q\n' "${CF_ACCESS_CLIENT_ID}"
+            printf 'export TUNNEL_SERVICE_TOKEN_SECRET=%q\n' "${CF_ACCESS_CLIENT_SECRET}"
+            # shellcheck disable=SC2016
+            printf 'exec %q access ssh --hostname "$1"\n' "${cloudflared}"
+          } > "${HOME}/.ssh/cloudflared-proxy"
+          cat > "${HOME}/.ssh/config" <<EOF
+          Host ${DEPLOY_SSH_HOST}
+            IdentitiesOnly yes
+            ProxyCommand ${HOME}/.ssh/cloudflared-proxy %h
+          EOF
+          chmod 0600 "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/known_hosts" \
+            "${HOME}/.ssh/config"
+          chmod 0700 "${HOME}/.ssh/cloudflared-proxy"
+
+      - name: Promote exact accepted staging deployment
+        id: deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          STAGING_ID: ${{ needs.preflight.outputs.id }}
+          EXPECTED_COMMIT: ${{ needs.preflight.outputs.commit }}
+        run: |
+          state="$(
+            ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "production-promote ${STAGING_ID}" |
+              tail -n 1
+          )"
+          jq -e \
+            --arg id "${STAGING_ID}" \
+            --arg commit "${EXPECTED_COMMIT}" \
+            '.id == $id and .commit == $commit and .environment == "production"' \
+            <<< "${state}" >/dev/null
+          echo "backup_id=$(jq -r '.backupId' <<< "${state}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify production externally
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          EXPECTED_COMMIT: ${{ needs.preflight.outputs.commit }}
+        run: |
+          for _ in $(seq 1 30); do
+            if payload="$(curl -fsS "${PRODUCTION_URL}/healthz")" &&
+              [[ "$(jq -r '.commit' <<< "${payload}")" == "${EXPECTED_COMMIT}" ]]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Record production result
+        env:
+          STAGING_ID: ${{ needs.preflight.outputs.id }}
+          COMMIT: ${{ needs.preflight.outputs.commit }}
+          IMAGE: ${{ needs.preflight.outputs.image }}
+          BACKUP_ID: ${{ steps.deploy.outputs.backup_id }}
+        run: |
+          {
+            echo "## Production promotion complete"
+            echo
+            echo "- Deployment: \`${STAGING_ID}\`"
+            echo "- Commit: \`${COMMIT}\`"
+            echo "- Image: \`${IMAGE}\`"
+            echo "- Backup: \`${BACKUP_ID}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

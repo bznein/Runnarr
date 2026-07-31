@@ -1,0 +1,912 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+umask 077
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=deploy/lib.sh
+source "${SCRIPT_DIR}/lib.sh"
+
+DEPLOY_CONFIG="${RUNNARR_DEPLOY_CONFIG:-/etc/runnarr/deploy.conf}"
+if [[ -f "${DEPLOY_CONFIG}" ]]; then
+  # This file is installed root-owned and contains deployment paths and
+  # capacity policy, never application or provider credentials.
+  # shellcheck disable=SC1090
+  source "${DEPLOY_CONFIG}"
+fi
+
+DEPLOY_ROOT="${RUNNARR_DEPLOY_ROOT:-/srv/runnarr}"
+ASSET_ROOT="${RUNNARR_DEPLOY_ASSETS:-/opt/runnarr-deploy}"
+DEPLOY_DOMAIN="${RUNNARR_DEPLOY_BASE_DOMAIN:-}"
+NONPROD_NETWORK="${RUNNARR_NONPROD_INGRESS_NETWORK:-runnarr-nonprod-ingress}"
+NONPROD_GATEWAY="${RUNNARR_NONPROD_GATEWAY_CONTAINER:-runnarr-nonprod-gateway}"
+MAX_PREVIEWS="${RUNNARR_MAX_PREVIEWS:-10}"
+MIN_AVAILABLE_MEMORY_BYTES="${RUNNARR_MIN_AVAILABLE_MEMORY_BYTES:-12884901888}"
+MIN_FREE_DISK_BYTES="${RUNNARR_MIN_FREE_DISK_BYTES:-10737418240}"
+BACKUP_KEEP="${RUNNARR_BACKUP_KEEP:-3}"
+DEPLOY_SCOPE="${RUNNARR_DEPLOY_SCOPE:-all}"
+LOCK_FILE="${DEPLOY_ROOT}/deploy.lock"
+
+BASE_COMPOSE="${ASSET_ROOT}/docker-compose.yml"
+DEPLOY_COMPOSE="${ASSET_ROOT}/docker-compose.deploy.yml"
+NONPROD_COMPOSE="${ASSET_ROOT}/docker-compose.nonprod.yml"
+PUBLIC_COMPOSE="${ASSET_ROOT}/docker-compose.public.yml"
+E2E_SEED="${ASSET_ROOT}/seed.sql"
+TESTBED_SEED="${ASSET_ROOT}/testbed-seed.sql"
+
+mkdir -p "${DEPLOY_ROOT}"
+exec 9>"${LOCK_FILE}"
+flock 9
+
+if [[ -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
+  read -r -a COMMAND <<< "${SSH_ORIGINAL_COMMAND}"
+else
+  COMMAND=("$@")
+fi
+[[ "${#COMMAND[@]}" -gt 0 ]] || die "no deployment command supplied"
+
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
+}
+
+require_assets() {
+  require_file "${BASE_COMPOSE}"
+  require_file "${DEPLOY_COMPOSE}"
+}
+
+scope_allows() {
+  local requested="$1"
+  [[ "${DEPLOY_SCOPE}" == "all" || "${DEPLOY_SCOPE}" == "${requested}" ]]
+}
+
+environment_directory() {
+  printf '%s/environments/%s\n' "${DEPLOY_ROOT}" "$1"
+}
+
+compose() {
+  local environment="$1"
+  shift
+  local directory project
+  directory="$(environment_directory "${environment}")"
+  project="$(json_field "${directory}/runtime.json" '.project')"
+
+  local -a files=(
+    --file "${BASE_COMPOSE}"
+    --file "${DEPLOY_COMPOSE}"
+  )
+  if [[ "${environment}" == "production" ]]; then
+    files+=(--file "${PUBLIC_COMPOSE}")
+  else
+    files+=(--file "${NONPROD_COMPOSE}")
+  fi
+
+  docker compose \
+    --project-name "${project}" \
+    --env-file "${directory}/base.env" \
+    --env-file "${directory}/image.env" \
+    "${files[@]}" \
+    "$@"
+}
+
+pull_and_verify_image() {
+  local image="$1"
+  local expected_commit="$2"
+  validate_digest "${image}" || die "image must be an immutable Runnarr GHCR digest"
+  validate_commit "${expected_commit}" || die "commit must be a full lowercase Git SHA"
+
+  docker pull "${image}" >/dev/null
+  local actual_commit migration_hash version
+  actual_commit="$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+  migration_hash="$(docker image inspect "${image}" --format '{{ index .Config.Labels "com.runnarr.migrations" }}')"
+  version="$(docker image inspect "${image}" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+  [[ "${actual_commit}" == "${expected_commit}" ]] || die "image commit ${actual_commit} does not match ${expected_commit}"
+  [[ "${migration_hash}" =~ ^[0-9a-f]{64}$ ]] || die "image has no valid migration-set label"
+  printf '%s\t%s\n' "${migration_hash}" "${version}"
+}
+
+wait_for_health() {
+  local environment="$1"
+  local expected_commit="$2"
+  local container status actual_commit
+
+  container="$(compose "${environment}" ps -q app)"
+  [[ -n "${container}" ]] || die "${environment} app container was not created"
+  for _attempt in $(seq 1 60); do
+    status="$(docker inspect "${container}" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}')"
+    if [[ "${status}" == "healthy" ]]; then
+      actual_commit="$(
+        docker exec "${container}" python3 -c \
+          'import json,urllib.request; print(json.load(urllib.request.urlopen("http://127.0.0.1:8080/healthz"))["commit"])'
+      )"
+      [[ "${actual_commit}" == "${expected_commit}" ]] || die "healthy app reports ${actual_commit}, expected ${expected_commit}"
+      return 0
+    fi
+    [[ "${status}" != "unhealthy" ]] || break
+    sleep 2
+  done
+  compose "${environment}" logs --tail=200 app >&2 || true
+  die "${environment} did not become healthy"
+}
+
+wait_for_status_only_health() {
+  local environment="$1"
+  local container health_status app_status
+
+  container="$(compose "${environment}" ps -q app)"
+  [[ -n "${container}" ]] || die "${environment} app container was not created"
+  for _attempt in $(seq 1 60); do
+    health_status="$(docker inspect "${container}" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}')"
+    if [[ "${health_status}" == "healthy" ]]; then
+      app_status="$(
+        docker exec "${container}" python3 -c \
+          'import json,urllib.request; print(json.load(urllib.request.urlopen("http://127.0.0.1:8080/healthz")).get("status", ""))'
+      )"
+      [[ "${app_status}" == "ok" ]] || die "healthy legacy app did not report status ok"
+      return 0
+    fi
+    [[ "${health_status}" != "unhealthy" ]] || break
+    sleep 2
+  done
+  compose "${environment}" logs --tail=200 app >&2 || true
+  die "${environment} legacy app did not become healthy"
+}
+
+wait_for_external_health() {
+  local url="$1"
+  local expected_commit="$2"
+  [[ "${url}" =~ ^https://[^/]+$ ]] || die "production URL must be an HTTPS origin without a path"
+  local payload
+  for _attempt in $(seq 1 30); do
+    if payload="$(curl -fsS "${url}/healthz")" &&
+      [[ "$(jq -r '.commit // empty' <<< "${payload}")" == "${expected_commit}" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  die "external production health did not report ${expected_commit}"
+}
+
+wait_for_external_status_only_health() {
+  local url="$1"
+  [[ "${url}" =~ ^https://[^/]+$ ]] || die "production URL must be an HTTPS origin without a path"
+  local payload
+  for _attempt in $(seq 1 30); do
+    if payload="$(curl -fsS "${url}/healthz")" &&
+      [[ "$(jq -r '.status // empty' <<< "${payload}")" == "ok" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  die "external production health did not report status ok"
+}
+
+seed_environment() {
+  local environment="$1"
+  local username="$2"
+  require_file "${E2E_SEED}"
+  require_file "${TESTBED_SEED}"
+  compose "${environment}" exec --no-TTY db \
+    psql -U runnarr -d runnarr -v "e2e_username=${username}" < "${E2E_SEED}"
+  compose "${environment}" exec --no-TTY db \
+    psql -U runnarr -d runnarr -v "e2e_username=${username}" < "${TESTBED_SEED}"
+}
+
+write_runtime() {
+  local directory="$1"
+  local project="$2"
+  mkdir -p "${directory}"
+  # jq programs are intentionally single-quoted so the shell does not expand
+  # jq's $project variable.
+  # shellcheck disable=SC2016
+  atomic_json "${directory}/runtime.json" \
+    --arg project "${project}" \
+    '{project:$project}'
+}
+
+write_deployment_state() {
+  local directory="$1"
+  local id="$2"
+  local environment="$3"
+  local image="$4"
+  local commit="$5"
+  local migration_hash="$6"
+  local version="$7"
+  local rollback_compatible="$8"
+  local previous_id="${9:-}"
+  local backup_id="${10:-}"
+  local url="${11:-}"
+  local accepted="${12:-false}"
+  mkdir -p "${directory}/history"
+  if [[ -f "${directory}/state.json" ]]; then
+    local old_id
+    old_id="$(json_field "${directory}/state.json" '.id')"
+    cp "${directory}/state.json" "${directory}/history/${old_id}.json"
+  fi
+  # These are jq variables populated by the --arg options below.
+  # shellcheck disable=SC2016
+  atomic_json "${directory}/state.json" \
+    --arg id "${id}" \
+    --arg environment "${environment}" \
+    --arg image "${image}" \
+    --arg commit "${commit}" \
+    --arg migrationHash "${migration_hash}" \
+    --arg version "${version}" \
+    --arg deployedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson rollbackCompatible "${rollback_compatible}" \
+    --arg previousDeploymentId "${previous_id}" \
+    --arg backupId "${backup_id}" \
+    --arg url "${url}" \
+    --argjson accepted "${accepted}" \
+    '{
+      id:$id,
+      environment:$environment,
+      image:$image,
+      commit:$commit,
+      migrationHash:$migrationHash,
+      version:$version,
+      deployedAt:$deployedAt,
+      rollbackCompatible:$rollbackCompatible,
+      previousDeploymentId:$previousDeploymentId,
+      backupId:$backupId,
+      url:$url,
+      accepted:$accepted
+    }'
+}
+
+connect_gateway() {
+  local environment="$1"
+  local directory project network
+  directory="$(environment_directory "${environment}")"
+  project="$(json_field "${directory}/runtime.json" '.project')"
+  network="${project}_runnarr"
+  docker container inspect "${NONPROD_GATEWAY}" >/dev/null 2>&1 ||
+    die "non-production gateway is not running"
+  if docker container inspect "${NONPROD_GATEWAY}" \
+    --format '{{json .NetworkSettings.Networks}}' |
+    jq -e --arg network "${network}" 'has($network)' >/dev/null; then
+    # Reconnect so gateways installed before app-owned aliases do not retain
+    # the old alias that made the proxy resolve its upstream back to itself.
+    docker network disconnect "${network}" "${NONPROD_GATEWAY}"
+  fi
+  docker network connect "${network}" "${NONPROD_GATEWAY}"
+}
+
+disconnect_gateway() {
+  local environment="$1"
+  local directory project network
+  directory="$(environment_directory "${environment}")"
+  project="$(json_field "${directory}/runtime.json" '.project')"
+  network="${project}_runnarr"
+  docker network disconnect "${network}" "${NONPROD_GATEWAY}" >/dev/null 2>&1 || true
+}
+
+accept_deployment() {
+  local environment="$1"
+  local expected_id="$2"
+  local directory
+  directory="$(environment_directory "${environment}")"
+  require_file "${directory}/state.json"
+  local actual_id
+  actual_id="$(json_field "${directory}/state.json" '.id')"
+  [[ "${actual_id}" == "${expected_id}" ]] ||
+    die "${environment} changed before external acceptance completed"
+  local temporary
+  temporary="$(mktemp "${directory}/state.json.XXXXXX")"
+  jq \
+    --arg acceptedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.accepted = true | .acceptedAt = $acceptedAt' \
+    "${directory}/state.json" > "${temporary}"
+  chmod 0600 "${temporary}"
+  mv "${temporary}" "${directory}/state.json"
+  jq -c . "${directory}/state.json"
+}
+
+check_preview_capacity() {
+  local preview_directory="$1"
+  if [[ ! -d "${preview_directory}" ]]; then
+    local count
+    count="$(find "${DEPLOY_ROOT}/environments/previews" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+    (( count < MAX_PREVIEWS )) || die "preview capacity reached (${MAX_PREVIEWS})"
+  fi
+
+  local memory_bytes disk_bytes
+  memory_bytes="$(awk '/^MemAvailable:/ {print $2 * 1024}' /proc/meminfo)"
+  disk_bytes="$(df --output=avail -B1 "${DEPLOY_ROOT}" | tail -n 1 | tr -d ' ')"
+  (( memory_bytes >= MIN_AVAILABLE_MEMORY_BYTES )) || die "preview deferred: available memory is below the safety floor"
+  (( disk_bytes >= MIN_FREE_DISK_BYTES )) || die "preview deferred: free disk is below the safety floor"
+}
+
+create_preview_base_environment() {
+  local directory="$1"
+  local pr="$2"
+  require_file "${DEPLOY_ROOT}/config/preview.env"
+  # preview.env is root-owned and contains only deployment-wide reviewer
+  # configuration. Generated database and encryption secrets remain per PR.
+  # shellcheck disable=SC1091
+  source "${DEPLOY_ROOT}/config/preview.env"
+  [[ -n "${RUNNARR_PREVIEW_ADMIN_PASSWORD_HASH:-}" ]] || die "preview password hash is not configured"
+
+  local database_password secret_key subnet_second subnet_third
+  database_password="$(openssl rand -hex 24)"
+  secret_key="$(openssl rand -hex 32)"
+  subnet_second="$((100 + (pr / 256) % 100))"
+  subnet_third="$((pr % 256))"
+  {
+    printf 'POSTGRES_USER=runnarr\n'
+    printf 'POSTGRES_PASSWORD=%s\n' "${database_password}"
+    printf 'POSTGRES_DB=runnarr\n'
+    printf 'DATABASE_URL=postgres://runnarr:%s@db:5432/runnarr?sslmode=disable\n' "${database_password}"
+    printf 'RUNNARR_PUBLIC_MODE=false\n'
+    printf 'RUNNARR_LOCAL_AUTH_ENABLED=true\n'
+    printf 'RUNNARR_TRUST_PROXY=true\n'
+    printf 'RUNNARR_ADMIN_USERNAME=preview-admin\n'
+    printf "RUNNARR_ADMIN_PASSWORD_HASH='%s'\n" "${RUNNARR_PREVIEW_ADMIN_PASSWORD_HASH}"
+    printf 'RUNNARR_SECRET_KEY=%s\n' "${secret_key}"
+    printf 'RUNNARR_GOOGLE_CLIENT_ID=\n'
+    printf 'RUNNARR_GOOGLE_CLIENT_SECRET=\n'
+    printf 'RUNNARR_OIDC_GOOGLE_CLIENT_ID=\n'
+    printf 'RUNNARR_OIDC_GOOGLE_CLIENT_SECRET=\n'
+    printf 'RUNNARR_OIDC_ALLOWED_EMAILS=\n'
+    printf 'RUNNARR_APP_CPU_LIMIT=0.5\n'
+    printf 'RUNNARR_APP_MEMORY_LIMIT=512m\n'
+    printf 'RUNNARR_DB_CPU_LIMIT=0.5\n'
+    printf 'RUNNARR_DB_MEMORY_LIMIT=512m\n'
+    printf 'RUNNARR_NETWORK_SUBNET=10.%s.%s.0/24\n' "${subnet_second}" "${subnet_third}"
+    printf 'RUNNARR_NONPROD_INGRESS_NETWORK=%s\n' "${NONPROD_NETWORK}"
+  } > "${directory}/base.env"
+  chmod 0600 "${directory}/base.env"
+}
+
+preview_up() {
+  local pr="$1"
+  local image="$2"
+  local commit="$3"
+  validate_pr_number "${pr}" || die "invalid PR number"
+  [[ -n "${DEPLOY_DOMAIN}" ]] || die "RUNNARR_DEPLOY_BASE_DOMAIN is not configured"
+  docker network inspect "${NONPROD_NETWORK}" >/dev/null 2>&1 || die "non-production ingress network does not exist"
+
+  local directory="${DEPLOY_ROOT}/environments/previews/${pr}"
+  check_preview_capacity "${directory}"
+  local metadata migration_hash version id url
+  metadata="$(pull_and_verify_image "${image}" "${commit}")"
+  migration_hash="${metadata%%$'\t'*}"
+  version="${metadata#*$'\t'}"
+  id="$(deployment_id "${commit}")"
+  url="https://runnarr-pr-${pr}.${DEPLOY_DOMAIN}"
+
+  if [[ -f "${directory}/runtime.json" && -f "${directory}/base.env" && -f "${directory}/image.env" ]]; then
+    disconnect_gateway "previews/${pr}"
+    compose "previews/${pr}" down --volumes --remove-orphans
+  fi
+  mkdir -p "${directory}"
+  write_runtime "${directory}" "runnarr-pr-${pr}"
+  create_preview_base_environment "${directory}" "${pr}"
+  write_image_environment "${directory}/image.env" "${image}" "preview" "${url}" "runnarr-pr-${pr}" "${pr}"
+
+  if ! compose "previews/${pr}" up --detach --no-build --remove-orphans ||
+    ! (wait_for_health "previews/${pr}" "${commit}") ||
+    ! seed_environment "previews/${pr}" "preview-admin" ||
+    ! connect_gateway "previews/${pr}"; then
+    disconnect_gateway "previews/${pr}"
+    compose "previews/${pr}" down --volumes --remove-orphans || true
+    die "preview ${pr} failed to deploy"
+  fi
+  write_deployment_state "${directory}" "${id}" "preview" "${image}" "${commit}" \
+    "${migration_hash}" "${version}" true "" "" "${url}" false
+  jq -c . "${directory}/state.json"
+}
+
+preview_down() {
+  local pr="$1"
+  validate_pr_number "${pr}" || die "invalid PR number"
+  local directory="${DEPLOY_ROOT}/environments/previews/${pr}"
+  if [[ ! -d "${directory}" ]]; then
+    printf '{"removed":false,"pr":%s}\n' "${pr}"
+    return 0
+  fi
+  require_file "${directory}/runtime.json"
+  require_file "${directory}/base.env"
+  require_file "${directory}/image.env"
+  disconnect_gateway "previews/${pr}"
+  compose "previews/${pr}" down --volumes --remove-orphans
+  local trash
+  trash="${DEPLOY_ROOT}/trash/preview-${pr}-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "${DEPLOY_ROOT}/trash"
+  mv "${directory}" "${trash}"
+  rm -rf -- "${trash}"
+  printf '{"removed":true,"pr":%s}\n' "${pr}"
+}
+
+preview_reconcile() {
+  local -A keep=()
+  local pr
+  for pr in "$@"; do
+    validate_pr_number "${pr}" || die "invalid PR number in reconciliation set"
+    keep["${pr}"]=1
+  done
+  local directory
+  for directory in "${DEPLOY_ROOT}"/environments/previews/*; do
+    [[ -d "${directory}" ]] || continue
+    pr="${directory##*/}"
+    validate_pr_number "${pr}" || die "unexpected preview directory: ${directory}"
+    if [[ -z "${keep[${pr}]:-}" ]]; then
+      preview_down "${pr}" >/dev/null
+      log "removed closed preview ${pr}"
+    fi
+  done
+  jq -cn --args "$@" \
+    '{reconciled:true,open:($ARGS.positional | map(tonumber))}'
+}
+
+previous_image_compatible() {
+  local staging_directory="$1"
+  local previous_image="$2"
+  local expected_commit="$3"
+  local name="runnarr-compat-${expected_commit:0:12}"
+  local network="runnarr-staging_runnarr"
+  docker rm --force "${name}" >/dev/null 2>&1 || true
+  docker run --detach \
+    --name "${name}" \
+    --network "${network}" \
+    --env-file "${staging_directory}/base.env" \
+    --env-file "${staging_directory}/image.env" \
+    --env RUNNARR_HTTP_ADDR=:8080 \
+    --label com.runnarr.managed=true \
+    --label com.runnarr.environment=compatibility \
+    "${previous_image}" >/dev/null
+  local result=false
+  for _attempt in $(seq 1 45); do
+    if docker exec "${name}" python3 -c \
+      'import json,urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8080/healthz"))["status"]=="ok"' \
+      >/dev/null 2>&1; then
+      result=true
+      break
+    fi
+    sleep 2
+  done
+  if [[ "${result}" != "true" ]]; then
+    docker logs --tail=200 "${name}" >&2 || true
+  fi
+  docker rm --force "${name}" >/dev/null 2>&1 || true
+  [[ "${result}" == "true" ]]
+}
+
+staging_up() {
+  local image="$1"
+  local commit="$2"
+  [[ -n "${DEPLOY_DOMAIN}" ]] || die "RUNNARR_DEPLOY_BASE_DOMAIN is not configured"
+  local directory="${DEPLOY_ROOT}/environments/staging"
+  require_file "${directory}/base.env"
+  write_runtime "${directory}" "runnarr-staging"
+
+  local metadata migration_hash version id url
+  metadata="$(pull_and_verify_image "${image}" "${commit}")"
+  migration_hash="${metadata%%$'\t'*}"
+  version="${metadata#*$'\t'}"
+  id="$(deployment_id "${commit}")"
+  url="https://runnarr-staging.${DEPLOY_DOMAIN}"
+
+  local previous_image="" previous_commit="" previous_staging_id=""
+  if [[ -f "${directory}/state.json" ]]; then
+    previous_image="$(json_field "${directory}/state.json" '.image')"
+    previous_commit="$(json_field "${directory}/state.json" '.commit')"
+    previous_staging_id="$(json_field "${directory}/state.json" '.id')"
+  fi
+  write_image_environment "${directory}/image.env" "${image}" "staging" "${url}" "runnarr-staging"
+  if ! compose staging up --detach --no-build --remove-orphans ||
+    ! (wait_for_health staging "${commit}"); then
+    if [[ -n "${previous_image}" && -n "${previous_commit}" ]]; then
+      log "staging candidate failed; restoring ${previous_image}"
+      write_image_environment "${directory}/image.env" "${previous_image}" "staging" "${url}" "runnarr-staging"
+      compose staging up --detach --no-build --remove-orphans
+      wait_for_health staging "${previous_commit}"
+    else
+      compose staging down --remove-orphans || true
+    fi
+    die "staging deployment failed"
+  fi
+  if [[ ! -f "${directory}/seeded" ]]; then
+    if ! seed_environment staging "${RUNNARR_STAGING_SEED_USERNAME:-staging-admin}"; then
+      if [[ -n "${previous_image}" && -n "${previous_commit}" ]]; then
+        log "staging seed failed; restoring ${previous_image}"
+        write_image_environment "${directory}/image.env" "${previous_image}" "staging" "${url}" "runnarr-staging"
+        compose staging up --detach --no-build --remove-orphans
+        wait_for_health staging "${previous_commit}"
+      else
+        compose staging down --remove-orphans || true
+      fi
+      die "staging seed failed"
+    fi
+    touch "${directory}/seeded"
+  fi
+  if ! connect_gateway staging; then
+    if [[ -n "${previous_image}" && -n "${previous_commit}" ]]; then
+      log "staging gateway connection failed; restoring ${previous_image}"
+      write_image_environment "${directory}/image.env" "${previous_image}" "staging" "${url}" "runnarr-staging"
+      compose staging up --detach --no-build --remove-orphans
+      wait_for_health staging "${previous_commit}"
+    else
+      compose staging down --remove-orphans || true
+    fi
+    die "staging gateway connection failed"
+  fi
+
+  local rollback_compatible=true
+  local production_state="${DEPLOY_ROOT}/environments/production/state.json"
+  if [[ -f "${production_state}" ]]; then
+    local production_hash production_image production_commit
+    production_hash="$(json_field "${production_state}" '.migrationHash')"
+    production_image="$(json_field "${production_state}" '.image')"
+    production_commit="$(json_field "${production_state}" '.commit')"
+    if [[ "${production_hash}" != "${migration_hash}" ]]; then
+      rollback_compatible=false
+      if previous_image_compatible "${directory}" "${production_image}" "${production_commit}"; then
+        rollback_compatible=true
+      fi
+    fi
+  elif [[ -f "${DEPLOY_ROOT}/environments/production/image.env" ]]; then
+    # Before the first managed production deployment there is no state file.
+    # Exercise the currently deployed local image against migrated staging so
+    # the initial cutover has the same compatibility gate as later releases.
+    local bootstrap_image
+    bootstrap_image="$(
+      sed -n 's/^RUNNARR_IMAGE=//p' \
+        "${DEPLOY_ROOT}/environments/production/image.env" |
+        tail -n 1
+    )"
+    rollback_compatible=false
+    if [[ -n "${bootstrap_image}" ]] &&
+      previous_image_compatible "${directory}" "${bootstrap_image}" "bootstrap"; then
+      rollback_compatible=true
+    fi
+  fi
+  write_deployment_state "${directory}" "${id}" "staging" "${image}" "${commit}" \
+    "${migration_hash}" "${version}" "${rollback_compatible}" "${previous_staging_id}" "" "${url}" false
+  jq -c . "${directory}/state.json"
+}
+
+staging_reject() {
+  local expected_id="$1"
+  local directory="${DEPLOY_ROOT}/environments/staging"
+  require_file "${directory}/state.json"
+  [[ "$(json_field "${directory}/state.json" '.id')" == "${expected_id}" ]] ||
+    die "staging changed before rejection completed"
+  local previous_id
+  previous_id="$(json_field "${directory}/state.json" '.previousDeploymentId')"
+  if [[ -z "${previous_id}" ]]; then
+    disconnect_gateway staging
+    compose staging down --remove-orphans
+    rm -f "${directory}/state.json"
+    printf '{"removed":true,"environment":"staging","rejected":"%s"}\n' "${expected_id}"
+    return 0
+  fi
+  local previous_state="${directory}/history/${previous_id}.json"
+  require_file "${previous_state}"
+  local image commit url
+  image="$(json_field "${previous_state}" '.image')"
+  commit="$(json_field "${previous_state}" '.commit')"
+  url="$(json_field "${previous_state}" '.url')"
+  write_image_environment "${directory}/image.env" "${image}" "staging" "${url}" "runnarr-staging"
+  compose staging up --detach --no-build --remove-orphans
+  wait_for_health staging "${commit}"
+  connect_gateway staging
+  cp "${previous_state}" "${directory}/state.json"
+  jq -c . "${directory}/state.json"
+}
+
+assert_no_running_sync() {
+  local count
+  count="$(
+    compose production exec --no-TTY db \
+      psql -U runnarr -d runnarr -tAc "select count(*) from sync_jobs where status = 'running';" |
+      tr -d '[:space:]'
+  )"
+  [[ "${count}" == "0" ]] || die "production has ${count} running sync job(s)"
+}
+
+check_backup_capacity() {
+  local database_bytes app_bytes available required
+  database_bytes="$(
+    compose production exec --no-TTY db \
+      psql -U runnarr -d runnarr -tAc "select pg_database_size(current_database());" |
+      tr -d '[:space:]'
+  )"
+  local app_container
+  app_container="$(compose production ps -q app)"
+  app_bytes="$(docker exec "${app_container}" du -sb /app/data | awk '{print $1}')"
+  available="$(df --output=avail -B1 "${DEPLOY_ROOT}" | tail -n 1 | tr -d ' ')"
+  required="$(( MIN_FREE_DISK_BYTES + (database_bytes + app_bytes) * 5 / 4 ))"
+  (( available >= required )) || die "not enough disk for a verified backup while preserving the safety floor"
+}
+
+create_production_backup() {
+  local deployment="$1"
+  local backup_root="${DEPLOY_ROOT}/backups/production"
+  local final="${backup_root}/${deployment}"
+  local temporary
+  mkdir -p "${backup_root}"
+  [[ ! -e "${final}" ]] || die "backup ${deployment} already exists"
+  command -v age >/dev/null 2>&1 || die "age is required for encrypted production backups"
+  [[ -n "${RUNNARR_BACKUP_AGE_RECIPIENT:-}" ]] || die "RUNNARR_BACKUP_AGE_RECIPIENT is not configured"
+  check_backup_capacity
+  temporary="$(mktemp -d "${backup_root}/.${deployment}.XXXXXX")"
+
+  local db_container app_container
+  db_container="$(compose production ps -q db)"
+  app_container="$(compose production ps -q app)"
+  [[ -n "${db_container}" && -n "${app_container}" ]] || die "production containers are not available for backup"
+
+  compose production stop app
+  local failure=""
+  if ! docker exec "${db_container}" sh -ec \
+    'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "${temporary}/database.dump"; then
+    failure="PostgreSQL backup failed"
+  elif ! mkdir "${temporary}/app-data"; then
+    failure="application data backup directory could not be created"
+  elif ! docker cp "${app_container}:/app/data/." "${temporary}/app-data/"; then
+    failure="application data copy failed"
+  elif ! tar -C "${temporary}" -czf "${temporary}/app-data.tar.gz" app-data; then
+    failure="application data archive failed"
+  elif ! rm -rf -- "${temporary}/app-data"; then
+    failure="plaintext application data cleanup failed"
+  elif ! docker exec -i "${db_container}" pg_restore --list < "${temporary}/database.dump" >/dev/null ||
+    ! tar -tzf "${temporary}/app-data.tar.gz" >/dev/null; then
+    failure="backup verification failed"
+  elif ! age -r "${RUNNARR_BACKUP_AGE_RECIPIENT}" -o "${temporary}/database.dump.age" "${temporary}/database.dump" ||
+    ! age -r "${RUNNARR_BACKUP_AGE_RECIPIENT}" -o "${temporary}/app-data.tar.gz.age" "${temporary}/app-data.tar.gz"; then
+    failure="backup encryption failed"
+  elif ! rm -f "${temporary}/database.dump" "${temporary}/app-data.tar.gz"; then
+    failure="plaintext backup cleanup failed"
+  elif ! (
+    cd "${temporary}"
+    sha256sum database.dump.age app-data.tar.gz.age > SHA256SUMS
+  ); then
+    failure="backup checksum creation failed"
+  elif ! jq -n \
+    --arg id "${deployment}" \
+    --arg createdAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{id:$id,createdAt:$createdAt,encrypted:true,verified:true}' \
+    > "${temporary}/backup.json"; then
+    failure="backup metadata creation failed"
+  elif ! chmod 0600 "${temporary}/backup.json"; then
+    failure="backup metadata permissions could not be secured"
+  elif ! mv "${temporary}" "${final}"; then
+    failure="verified backup could not be finalized"
+  fi
+  if [[ -n "${failure}" ]]; then
+    compose production start app >/dev/null || true
+    rm -rf -- "${temporary}"
+    die "${failure}"
+  fi
+  printf '%s\n' "${deployment}"
+}
+
+prune_production_backups() {
+  local backup_root="${DEPLOY_ROOT}/backups/production"
+  local -a backups=()
+  while IFS= read -r path; do
+    backups+=("${path}")
+  done < <(find "${backup_root}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | awk '{print $2}')
+  local index
+  for ((index = BACKUP_KEEP; index < ${#backups[@]}; index++)); do
+    [[ "${backups[${index}]}" == "${backup_root}/"* ]] || die "refusing to prune an unexpected backup path"
+    rm -rf -- "${backups[${index}]}"
+  done
+}
+
+production_promote() {
+  local expected_staging_id="$1"
+  validate_deployment_id "${expected_staging_id}" || die "invalid staging deployment id"
+  local staging_state="${DEPLOY_ROOT}/environments/staging/state.json"
+  local directory="${DEPLOY_ROOT}/environments/production"
+  require_file "${staging_state}"
+  require_file "${directory}/base.env"
+  require_file "${directory}/image.env"
+  write_runtime "${directory}" "runnarr"
+
+  local staging_id image commit migration_hash version rollback_compatible
+  staging_id="$(json_field "${staging_state}" '.id')"
+  [[ "${staging_id}" == "${expected_staging_id}" ]] || die "staging changed after production approval was requested"
+  image="$(json_field "${staging_state}" '.image')"
+  commit="$(json_field "${staging_state}" '.commit')"
+  migration_hash="$(json_field "${staging_state}" '.migrationHash')"
+  version="$(json_field "${staging_state}" '.version')"
+  rollback_compatible="$(json_field "${staging_state}" '.rollbackCompatible')"
+  [[ "$(json_field "${staging_state}" '.accepted')" == "true" ]] ||
+    die "staging has not passed its external acceptance check"
+
+  local metadata
+  metadata="$(pull_and_verify_image "${image}" "${commit}")"
+  [[ "${metadata%%$'\t'*}" == "${migration_hash}" ]] || die "staging migration identity no longer matches the image"
+
+  local previous_id="" previous_image="" previous_commit="" previous_health_mode="commit"
+  if [[ -f "${directory}/state.json" ]]; then
+    previous_id="$(json_field "${directory}/state.json" '.id')"
+    previous_image="$(json_field "${directory}/state.json" '.image')"
+    previous_commit="$(json_field "${directory}/state.json" '.commit')"
+    local previous_hash
+    previous_hash="$(json_field "${directory}/state.json" '.migrationHash')"
+    if [[ "${previous_hash}" != "${migration_hash}" && "${rollback_compatible}" != "true" ]]; then
+      die "the previous production image did not pass the migrated-schema compatibility check"
+    fi
+  else
+    # The first managed promotion adopts the already-running Compose project.
+    # Its local image need not have immutable build labels, but it must be
+    # identifiable so a failed cutover can restore it immediately.
+    previous_image="$(sed -n 's/^RUNNARR_IMAGE=//p' "${directory}/image.env" | tail -n 1)"
+    local current_app
+    current_app="$(compose production ps -q app)"
+    [[ -n "${previous_image}" && -n "${current_app}" ]] ||
+      die "the first managed promotion requires the current production image and running app"
+    local current_health
+    current_health="$(
+      docker exec "${current_app}" python3 -c \
+        'import json,urllib.request; print(json.dumps(json.load(urllib.request.urlopen("http://127.0.0.1:8080/healthz"))))'
+    )"
+    [[ "$(jq -r '.status // empty' <<< "${current_health}")" == "ok" ]] ||
+      die "the current production app did not report status ok"
+    previous_commit="$(jq -r '.commit // empty' <<< "${current_health}")"
+    if [[ -z "${previous_commit}" ]]; then
+      previous_health_mode="status-only"
+    fi
+  fi
+
+  assert_no_running_sync
+  local backup_id
+  backup_id="$(create_production_backup "${staging_id}")"
+  local bootstrap_image_environment=""
+  if [[ -z "${previous_id}" ]]; then
+    if ! bootstrap_image_environment="$(mktemp "${directory}/.bootstrap-image.env.XXXXXX")" ||
+      ! cp "${directory}/image.env" "${bootstrap_image_environment}" ||
+      ! chmod 0600 "${bootstrap_image_environment}"; then
+      compose production start app >/dev/null || true
+      [[ -z "${bootstrap_image_environment}" ]] || rm -f "${bootstrap_image_environment}"
+      die "the current production image configuration could not be preserved; the app was restarted"
+    fi
+  fi
+  if ! write_image_environment "${directory}/image.env" "${image}" "production"; then
+    compose production start app >/dev/null || true
+    [[ -z "${bootstrap_image_environment}" ]] || rm -f "${bootstrap_image_environment}"
+    die "production image configuration could not be updated; the current app was restarted"
+  fi
+  if compose production up --detach --no-build --remove-orphans &&
+    (wait_for_health production "${commit}") &&
+    (wait_for_external_health "${RUNNARR_PRODUCTION_URL:-}" "${commit}"); then
+    write_deployment_state "${directory}" "${staging_id}" "production" "${image}" "${commit}" \
+      "${migration_hash}" "${version}" true "${previous_id}" "${backup_id}" "" true
+    prune_production_backups
+    [[ -z "${bootstrap_image_environment}" ]] || rm -f "${bootstrap_image_environment}"
+    jq -c . "${directory}/state.json"
+    return 0
+  fi
+
+  if [[ -n "${previous_image}" ]]; then
+    log "candidate failed; restoring previous production image ${previous_image}"
+    if [[ -n "${bootstrap_image_environment}" ]]; then
+      mv "${bootstrap_image_environment}" "${directory}/image.env"
+      bootstrap_image_environment=""
+    else
+      write_image_environment "${directory}/image.env" "${previous_image}" "production"
+    fi
+    compose production up --detach --no-build --remove-orphans
+    if [[ "${previous_health_mode}" == "status-only" ]]; then
+      wait_for_status_only_health production
+      wait_for_external_status_only_health "${RUNNARR_PRODUCTION_URL:-}"
+    else
+      wait_for_health production "${previous_commit}"
+      wait_for_external_health "${RUNNARR_PRODUCTION_URL:-}" "${previous_commit}"
+    fi
+  fi
+  [[ -z "${bootstrap_image_environment}" ]] || rm -f "${bootstrap_image_environment}"
+  die "production promotion failed; the previous image was restored when available"
+}
+
+production_rollback() {
+  local target_id="$1"
+  validate_deployment_id "${target_id}" || die "invalid rollback deployment id"
+  local directory="${DEPLOY_ROOT}/environments/production"
+  require_file "${directory}/state.json"
+  local current_previous
+  current_previous="$(json_field "${directory}/state.json" '.previousDeploymentId')"
+  [[ "${target_id}" == "${current_previous}" ]] || die "only the immediately previous production deployment may be rolled back automatically"
+  local target="${directory}/history/${target_id}.json"
+  require_file "${target}"
+  local image commit migration_hash version current_id
+  image="$(json_field "${target}" '.image')"
+  commit="$(json_field "${target}" '.commit')"
+  migration_hash="$(json_field "${target}" '.migrationHash')"
+  version="$(json_field "${target}" '.version')"
+  current_id="$(json_field "${directory}/state.json" '.id')"
+  pull_and_verify_image "${image}" "${commit}" >/dev/null
+  assert_no_running_sync
+  write_image_environment "${directory}/image.env" "${image}" "production"
+  compose production up --detach --no-build --remove-orphans
+  wait_for_health production "${commit}"
+  wait_for_external_health "${RUNNARR_PRODUCTION_URL:-}" "${commit}"
+  write_deployment_state "${directory}" "${target_id}" "production" "${image}" "${commit}" \
+    "${migration_hash}" "${version}" true "${current_id}" "" "" true
+  jq -c . "${directory}/state.json"
+}
+
+status_command() {
+  local environment="$1"
+  case "${environment}" in
+    staging|production)
+      require_file "$(environment_directory "${environment}")/state.json"
+      jq -c . "$(environment_directory "${environment}")/state.json"
+      ;;
+    preview)
+      local pr="${2:-}"
+      validate_pr_number "${pr}" || die "preview status requires a valid PR number"
+      require_file "${DEPLOY_ROOT}/environments/previews/${pr}/state.json"
+      jq -c . "${DEPLOY_ROOT}/environments/previews/${pr}/state.json"
+      ;;
+    *)
+      die "unknown status environment: ${environment}"
+      ;;
+  esac
+}
+
+require_assets
+case "${COMMAND[0]}" in
+  preview-up)
+    scope_allows nonprod || die "this SSH key cannot deploy previews"
+    [[ "${#COMMAND[@]}" -eq 4 ]] || die "usage: preview-up PR IMAGE COMMIT"
+    preview_up "${COMMAND[1]}" "${COMMAND[2]}" "${COMMAND[3]}"
+    ;;
+  preview-down)
+    scope_allows nonprod || die "this SSH key cannot remove previews"
+    [[ "${#COMMAND[@]}" -eq 2 ]] || die "usage: preview-down PR"
+    preview_down "${COMMAND[1]}"
+    ;;
+  preview-reconcile)
+    scope_allows nonprod || die "this SSH key cannot reconcile previews"
+    preview_reconcile "${COMMAND[@]:1}"
+    ;;
+  staging-up)
+    scope_allows nonprod || die "this SSH key cannot deploy staging"
+    [[ "${#COMMAND[@]}" -eq 3 ]] || die "usage: staging-up IMAGE COMMIT"
+    staging_up "${COMMAND[1]}" "${COMMAND[2]}"
+    ;;
+  staging-accept)
+    scope_allows nonprod || die "this SSH key cannot accept staging"
+    [[ "${#COMMAND[@]}" -eq 2 ]] || die "usage: staging-accept DEPLOYMENT_ID"
+    validate_deployment_id "${COMMAND[1]}" || die "invalid staging deployment id"
+    accept_deployment staging "${COMMAND[1]}"
+    ;;
+  staging-reject)
+    scope_allows nonprod || die "this SSH key cannot reject staging"
+    [[ "${#COMMAND[@]}" -eq 2 ]] || die "usage: staging-reject DEPLOYMENT_ID"
+    validate_deployment_id "${COMMAND[1]}" || die "invalid staging deployment id"
+    staging_reject "${COMMAND[1]}"
+    ;;
+  preview-accept)
+    scope_allows nonprod || die "this SSH key cannot accept previews"
+    [[ "${#COMMAND[@]}" -eq 3 ]] || die "usage: preview-accept PR DEPLOYMENT_ID"
+    validate_pr_number "${COMMAND[1]}" || die "invalid PR number"
+    validate_deployment_id "${COMMAND[2]}" || die "invalid preview deployment id"
+    accept_deployment "previews/${COMMAND[1]}" "${COMMAND[2]}"
+    ;;
+  production-promote)
+    scope_allows production || die "this SSH key cannot promote production"
+    [[ "${#COMMAND[@]}" -eq 2 ]] || die "usage: production-promote STAGING_DEPLOYMENT_ID"
+    production_promote "${COMMAND[1]}"
+    ;;
+  production-rollback)
+    scope_allows production || die "this SSH key cannot roll back production"
+    [[ "${#COMMAND[@]}" -eq 2 ]] || die "usage: production-rollback DEPLOYMENT_ID"
+    production_rollback "${COMMAND[1]}"
+    ;;
+  status)
+    [[ "${#COMMAND[@]}" -ge 2 && "${#COMMAND[@]}" -le 3 ]] || die "usage: status ENVIRONMENT [PR]"
+    if [[ "${COMMAND[1]}" == "production" ]]; then
+      scope_allows production || die "this SSH key cannot read production state"
+    else
+      scope_allows nonprod || die "this SSH key cannot read non-production state"
+    fi
+    status_command "${COMMAND[1]}" "${COMMAND[2]:-}"
+    ;;
+  *)
+    die "unsupported deployment command: ${COMMAND[0]}"
+    ;;
+esac

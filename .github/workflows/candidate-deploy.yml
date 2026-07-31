@@ -1,0 +1,417 @@
+name: Candidate image and deployment
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: candidate-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    name: Resolve trusted candidate
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      eligible: ${{ steps.candidate.outputs.eligible }}
+      kind: ${{ steps.candidate.outputs.kind }}
+      commit: ${{ steps.candidate.outputs.commit }}
+      pr: ${{ steps.candidate.outputs.pr }}
+      version: ${{ steps.candidate.outputs.version }}
+    steps:
+      - name: Resolve candidate without checking out its code
+        id: candidate
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            core.setOutput("eligible", "false");
+            core.setOutput("commit", run.head_sha);
+            core.setOutput("pr", "");
+
+            if (run.event === "push" && run.head_branch === "main") {
+              core.setOutput("eligible", "true");
+              core.setOutput("kind", "main");
+              core.setOutput("version", `main-${run.head_sha.slice(0, 12)}`);
+              return;
+            }
+            if (run.event !== "pull_request" || run.pull_requests.length !== 1) {
+              core.info(`Ignoring CI event ${run.event} without one pull request.`);
+              return;
+            }
+
+            const pullNumber = run.pull_requests[0].number;
+            const { data: pull } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullNumber
+            });
+            if (
+              pull.state !== "open" ||
+              pull.draft ||
+              pull.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}` ||
+              pull.head.sha !== run.head_sha
+            ) {
+              core.info("Preview candidates must be current, open, non-draft same-repository pull requests.");
+              return;
+            }
+            const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: pull.user.login
+            });
+            const trusted = new Set(["admin", "maintain", "write"]);
+            if (!trusted.has(permission.permission) && !trusted.has(permission.role_name)) {
+              core.info(`PR author permission ${permission.permission}/${permission.role_name} is not trusted for host deployment.`);
+              return;
+            }
+
+            core.setOutput("eligible", "true");
+            core.setOutput("kind", "preview");
+            core.setOutput("pr", String(pullNumber));
+            core.setOutput("version", `pr-${pullNumber}-${run.head_sha.slice(0, 12)}`);
+
+  image:
+    name: Build, scan, and publish
+    needs:
+      - metadata
+    if: needs.metadata.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+      subject_digest: ${{ steps.publish.outputs.subject_digest }}
+      migration_hash: ${{ steps.identity.outputs.migration_hash }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.metadata.outputs.commit }}
+          persist-credentials: false
+
+      - name: Compute migration-set identity
+        id: identity
+        shell: bash
+        run: |
+          migration_hash="$(
+            find internal/app/migrations -type f -name '*.sql' -print0 |
+              sort -z |
+              xargs -0 sha256sum |
+              sha256sum |
+              cut -d' ' -f1
+          )"
+          echo "migration_hash=${migration_hash}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build candidate without credentials
+        env:
+          COMMIT: ${{ needs.metadata.outputs.commit }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+          MIGRATION_HASH: ${{ steps.identity.outputs.migration_hash }}
+        run: |
+          docker build \
+            --build-arg "RUNNARR_BUILD_VERSION=${VERSION}" \
+            --build-arg "RUNNARR_BUILD_COMMIT=${COMMIT}" \
+            --build-arg "RUNNARR_MIGRATION_HASH=${MIGRATION_HASH}" \
+            --tag "runnarr-candidate:${COMMIT}" \
+            .
+
+      - name: Scan candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          image-ref: runnarr-candidate:${{ needs.metadata.outputs.commit }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Generate candidate SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          image: runnarr-candidate:${{ needs.metadata.outputs.commit }}
+          artifact-name: runnarr-${{ needs.metadata.outputs.commit }}.spdx.json
+          output-file: runnarr-sbom.spdx.json
+
+      - name: Login to GHCR after build and scan
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish immutable candidate
+        id: publish
+        env:
+          COMMIT: ${{ needs.metadata.outputs.commit }}
+        run: |
+          repository="ghcr.io/bznein/runnarr"
+          tag="${repository}:sha-${COMMIT}"
+          docker tag "runnarr-candidate:${COMMIT}" "${tag}"
+          docker push "${tag}"
+          image="$(docker image inspect "${tag}" --format '{{index .RepoDigests 0}}')"
+          subject_digest="${image#*@}"
+          [[ "${image}" =~ ^ghcr.io/bznein/runnarr@sha256:[0-9a-f]{64}$ ]]
+          echo "image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "subject_digest=${subject_digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Attest published image
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ghcr.io/bznein/runnarr
+          subject-digest: ${{ steps.publish.outputs.subject_digest }}
+          push-to-registry: true
+
+  deploy:
+    name: Deploy candidate
+    needs:
+      - metadata
+      - image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    environment:
+      name: ${{ needs.metadata.outputs.kind == 'main' && 'staging' || 'preview' }}
+      url: ${{ needs.metadata.outputs.kind == 'main' && format('https://runnarr-staging.{0}', vars.DEPLOY_BASE_DOMAIN) || format('https://runnarr-pr-{0}.{1}', needs.metadata.outputs.pr, vars.DEPLOY_BASE_DOMAIN) }}
+    steps:
+      - name: Configure passwordless deployment SSH through Access
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
+        run: |
+          cloudflared="${RUNNER_TEMP}/cloudflared"
+          cloudflared_sha256="9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17"
+          [[ "${DEPLOY_SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "${CF_ACCESS_CLIENT_ID}" && -n "${CF_ACCESS_CLIENT_SECRET}" ]]
+          [[ "${CF_ACCESS_CLIENT_ID}" != *$'\n'* && "${CF_ACCESS_CLIENT_SECRET}" != *$'\n'* ]]
+          curl -fsSL --retry 3 \
+            --output "${cloudflared}" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64
+          printf '%s  %s\n' "${cloudflared_sha256}" "${cloudflared}" |
+            sha256sum --check --status
+          chmod 0755 "${cloudflared}"
+          install -d -m 0700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euo pipefail'
+            printf 'export TUNNEL_SERVICE_TOKEN_ID=%q\n' "${CF_ACCESS_CLIENT_ID}"
+            printf 'export TUNNEL_SERVICE_TOKEN_SECRET=%q\n' "${CF_ACCESS_CLIENT_SECRET}"
+            # shellcheck disable=SC2016
+            printf 'exec %q access ssh --hostname "$1"\n' "${cloudflared}"
+          } > "${HOME}/.ssh/cloudflared-proxy"
+          cat > "${HOME}/.ssh/config" <<EOF
+          Host ${DEPLOY_SSH_HOST}
+            IdentitiesOnly yes
+            ProxyCommand ${HOME}/.ssh/cloudflared-proxy %h
+          EOF
+          chmod 0600 "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/known_hosts" \
+            "${HOME}/.ssh/config"
+          chmod 0700 "${HOME}/.ssh/cloudflared-proxy"
+
+      - name: Create exact preview DNS record
+        if: needs.metadata.outputs.kind == 'preview'
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
+          CF_ZONE_ID: ${{ vars.CF_ZONE_ID }}
+          CF_TUNNEL_ID: ${{ vars.CF_TUNNEL_ID }}
+          BASE_DOMAIN: ${{ vars.DEPLOY_BASE_DOMAIN }}
+          PR_NUMBER: ${{ needs.metadata.outputs.pr }}
+        run: |
+          name="runnarr-pr-${PR_NUMBER}.${BASE_DOMAIN}"
+          endpoint="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
+          record_id="$(
+            curl -fsS --get \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              --data-urlencode "type=CNAME" \
+              --data-urlencode "name=${name}" \
+              "${endpoint}" |
+              jq -r '.result[0].id // empty'
+          )"
+          payload="$(
+            jq -cn \
+              --arg name "${name}" \
+              --arg content "${CF_TUNNEL_ID}.cfargotunnel.com" \
+              '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}'
+          )"
+          if [[ -n "${record_id}" ]]; then
+            curl -fsS -X PUT \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "${payload}" \
+              "${endpoint}/${record_id}" >/dev/null
+          else
+            curl -fsS -X POST \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "${payload}" \
+              "${endpoint}" >/dev/null
+          fi
+
+      - name: Deploy through forced host command
+        id: deployment
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          KIND: ${{ needs.metadata.outputs.kind }}
+          PR_NUMBER: ${{ needs.metadata.outputs.pr }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          COMMIT: ${{ needs.metadata.outputs.commit }}
+        run: |
+          if [[ "${KIND}" == "main" ]]; then
+            command="staging-up ${IMAGE} ${COMMIT}"
+          else
+            command="preview-up ${PR_NUMBER} ${IMAGE} ${COMMIT}"
+          fi
+          state="$(
+            ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "${command}" |
+              tail -n 1
+          )"
+          jq -e --arg commit "${COMMIT}" '.commit == $commit' <<< "${state}" >/dev/null
+          printf '%s\n' "${state}" > "${RUNNER_TEMP}/deployment-state.json"
+          echo "id=$(jq -r '.id' <<< "${state}")" >> "${GITHUB_OUTPUT}"
+          echo "url=$(jq -r '.url' <<< "${state}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Smoke test through Cloudflare Access
+        env:
+          URL: ${{ steps.deployment.outputs.url }}
+          COMMIT: ${{ needs.metadata.outputs.commit }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          for _ in $(seq 1 30); do
+            if payload="$(
+              curl -fsS \
+                -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+                -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+                "${URL}/healthz"
+            )" && [[ "$(jq -r '.commit' <<< "${payload}")" == "${COMMIT}" ]]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Accept externally verified deployment
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          KIND: ${{ needs.metadata.outputs.kind }}
+          PR_NUMBER: ${{ needs.metadata.outputs.pr }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+        run: |
+          if [[ "${KIND}" == "main" ]]; then
+            command="staging-accept ${DEPLOYMENT_ID}"
+          else
+            command="preview-accept ${PR_NUMBER} ${DEPLOYMENT_ID}"
+          fi
+          state="$(ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" "${command}" | tail -n 1)"
+          jq -e --arg id "${DEPLOYMENT_ID}" '.id == $id and .accepted == true' <<< "${state}" >/dev/null
+
+      - name: Add or update preview comment
+        if: needs.metadata.outputs.kind == 'preview'
+        uses: actions/github-script@v8
+        env:
+          PR_NUMBER: ${{ needs.metadata.outputs.pr }}
+          PREVIEW_URL: ${{ steps.deployment.outputs.url }}
+          COMMIT: ${{ needs.metadata.outputs.commit }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+        with:
+          script: |
+            const marker = "<!-- runnarr-preview -->";
+            const body = `${marker}
+            ### Private Runnarr preview
+
+            - URL: ${process.env.PREVIEW_URL}
+            - Commit: \`${process.env.COMMIT}\`
+            - Image: \`${process.env.IMAGE}\`
+            - Deployment: \`${process.env.DEPLOYMENT_ID}\`
+            - Synthetic data only; Cloudflare Access and the shared preview login are required.
+            `;
+            const pull_number = Number(process.env.PR_NUMBER);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pull_number,
+              per_page: 100
+            });
+            const existing = comments.find(comment =>
+              comment.user.type === "Bot" && comment.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pull_number,
+                body
+              });
+            }
+
+      - name: Restore previous staging after failed external acceptance
+        if: failure() && needs.metadata.outputs.kind == 'main' && steps.deployment.outputs.id != ''
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+        run: |
+          ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "staging-reject ${DEPLOYMENT_ID}" >/dev/null || true
+
+      - name: Remove preview DNS after failed deployment
+        if: failure() && needs.metadata.outputs.kind == 'preview'
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_DNS_API_TOKEN }}
+          CF_ZONE_ID: ${{ vars.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ vars.DEPLOY_BASE_DOMAIN }}
+          PR_NUMBER: ${{ needs.metadata.outputs.pr }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+        run: |
+          ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "preview-down ${PR_NUMBER}" >/dev/null || true
+          name="runnarr-pr-${PR_NUMBER}.${BASE_DOMAIN}"
+          endpoint="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
+          record_id="$(
+            curl -fsS --get \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              --data-urlencode "type=CNAME" \
+              --data-urlencode "name=${name}" \
+              "${endpoint}" |
+              jq -r '.result[0].id // empty'
+          )"
+          if [[ -n "${record_id}" ]]; then
+            curl -fsS -X DELETE \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              "${endpoint}/${record_id}" >/dev/null
+          fi

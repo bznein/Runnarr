@@ -1,0 +1,11 @@
+tunnel: __RUNNARR_TUNNEL_ID__
+credentials-file: /run/secrets/tunnel-credentials.json
+
+ingress:
+  - hostname: runnarr-deploy.__RUNNARR_BASE_DOMAIN__
+    service: ssh://host.docker.internal:22
+  - hostname: runnarr-staging.__RUNNARR_BASE_DOMAIN__
+    service: http://gateway:8080
+  - hostname: "*.__RUNNARR_BASE_DOMAIN__"
+    service: http://gateway:8080
+  - service: http_status:404

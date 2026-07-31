@@ -4,8 +4,11 @@ Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Ga
 
 The v1 scope covers the existing private activity, health, calendar, gear, tools,
 planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
-Courses, printable pace bands, basic/expert mode, Garmin write-back, encrypted
-support mode, and a permanent staging environment remain post-v1 work.
+Courses, printable pace bands, basic/expert mode, Garmin write-back, and
+encrypted support mode remain post-v1 work. Maintainers can optionally
+provision isolated PR previews, persistent staging, and manually approved
+production promotion using the [deployment pipeline](docs/deployment-pipeline.md);
+the normal self-hosted Compose workflow remains unchanged.
 
 ## Quick Start
 

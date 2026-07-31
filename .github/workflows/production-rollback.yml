@@ -1,0 +1,90 @@
+name: Production image rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_id:
+        description: Immediate previous production deployment ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Approve image rollback
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - name: Validate deployment ID
+        env:
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+        run: |
+          [[ "${DEPLOYMENT_ID}" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$ ]]
+
+      - name: Configure passwordless production SSH through Access
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
+        run: |
+          cloudflared="${RUNNER_TEMP}/cloudflared"
+          cloudflared_sha256="9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17"
+          [[ "${DEPLOY_SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "${CF_ACCESS_CLIENT_ID}" && -n "${CF_ACCESS_CLIENT_SECRET}" ]]
+          [[ "${CF_ACCESS_CLIENT_ID}" != *$'\n'* && "${CF_ACCESS_CLIENT_SECRET}" != *$'\n'* ]]
+          curl -fsSL --retry 3 \
+            --output "${cloudflared}" \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64
+          printf '%s  %s\n' "${cloudflared_sha256}" "${cloudflared}" |
+            sha256sum --check --status
+          chmod 0755 "${cloudflared}"
+          install -d -m 0700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/id_ed25519"
+          printf '%s\n' "${DEPLOY_SSH_HOST_KEY}" > "${HOME}/.ssh/known_hosts"
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euo pipefail'
+            printf 'export TUNNEL_SERVICE_TOKEN_ID=%q\n' "${CF_ACCESS_CLIENT_ID}"
+            printf 'export TUNNEL_SERVICE_TOKEN_SECRET=%q\n' "${CF_ACCESS_CLIENT_SECRET}"
+            # shellcheck disable=SC2016
+            printf 'exec %q access ssh --hostname "$1"\n' "${cloudflared}"
+          } > "${HOME}/.ssh/cloudflared-proxy"
+          cat > "${HOME}/.ssh/config" <<EOF
+          Host ${DEPLOY_SSH_HOST}
+            IdentitiesOnly yes
+            ProxyCommand ${HOME}/.ssh/cloudflared-proxy %h
+          EOF
+          chmod 0600 "${HOME}/.ssh/id_ed25519" "${HOME}/.ssh/known_hosts" \
+            "${HOME}/.ssh/config"
+          chmod 0700 "${HOME}/.ssh/cloudflared-proxy"
+
+      - name: Roll back to immediate previous image
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+        run: |
+          state="$(
+            ssh -o BatchMode=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "production-rollback ${DEPLOYMENT_ID}" |
+              tail -n 1
+          )"
+          jq -e --arg id "${DEPLOYMENT_ID}" '.id == $id and .environment == "production"' <<< "${state}" >/dev/null
+          {
+            echo "## Production image rollback complete"
+            echo
+            echo "- Deployment: \`$(jq -r '.id' <<< "${state}")\`"
+            echo "- Commit: \`$(jq -r '.commit' <<< "${state}")\`"
+            echo "- Image: \`$(jq -r '.image' <<< "${state}")\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
