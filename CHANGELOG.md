@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed GitHub-hosted deployment SSH to use the checksum-pinned native
+  `cloudflared` client instead of a Docker-wrapped proxy command.
+
 ### Features
 
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.

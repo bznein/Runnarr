@@ -183,8 +183,9 @@ Use the non-production key in `preview` and `staging`, and the separate
 production key in `production`. `DEPLOY_SSH_HOST_KEY` is the complete pinned
 known-hosts line, not merely a fingerprint. Set `DEPLOY_SSH_HOST` in all three
 environments to `runnarr-deploy.example.com` and `DEPLOY_SSH_USER` to
-`runnarr-deploy`. The workflows pin the tested `cloudflared` client image and
-use the Access service token without storing it in the SSH command line.
+`runnarr-deploy`. The workflows download the tested native `cloudflared`
+client with a pinned SHA-256 digest and use the Access service token without
+storing it in the SSH command line.
 
 Configure `production` with:
 
