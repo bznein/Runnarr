@@ -447,7 +447,7 @@ textarea {
 
 .notification-popover-item {
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--color-border-soft);
@@ -497,18 +497,34 @@ textarea {
   text-align: center;
 }
 
-.notification-dot {
-  width: 8px;
-  height: 8px;
-  margin-top: 6px;
-  border-radius: 50%;
-  background: var(--color-muted);
+.notification-action-feedback,
+.notification-action-error {
+  padding: 10px 14px;
+  font-size: 13px;
 }
 
-.notification-dot.success { background: var(--color-primary-strong); }
-.notification-dot.warning { background: var(--color-warning); }
-.notification-dot.error { background: var(--color-danger); }
-.notification-dot.info { background: var(--color-primary); }
+.notification-action-feedback {
+  color: var(--color-primary-text);
+  background: var(--color-success-soft);
+}
+
+.notification-action-error {
+  color: var(--color-danger-strong);
+  background: var(--color-danger-muted);
+}
+
+.notification-severity {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--color-muted);
+}
+
+.notification-severity.success { color: var(--color-primary-strong); }
+.notification-severity.warning { color: var(--color-warning); }
+.notification-severity.error { color: var(--color-danger); }
+.notification-severity.info { color: var(--color-primary); }
 
 .notification-toolbar {
   justify-content: space-between;
@@ -535,7 +551,7 @@ textarea {
 
 .notification-card-main {
   display: grid;
-  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   align-items: start;
   gap: 12px;
   padding: 16px;
@@ -552,7 +568,7 @@ textarea {
 
 .notification-timeline-event {
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   gap: 10px;
   padding: 12px 0 2px;
 }

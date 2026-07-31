@@ -728,12 +728,25 @@ test.describe("local product journey", () => {
       lastEventAt: timestamp,
       eventCount: 1
     };
+    let notificationRead = false;
+    let notificationExists = true;
 
     await page.route(/\/api\/notifications(?:\/[^?]+)?(?:\?.*)?$/, async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       if (request.method() === "PATCH") {
+        notificationRead = JSON.parse(request.postData() ?? "{}").read === true;
         await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ updated: true }) });
+        return;
+      }
+      if (request.method() === "POST" && url.pathname === "/api/notifications/read-all") {
+        notificationRead = true;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ updated: true }) });
+        return;
+      }
+      if (request.method() === "DELETE" && url.pathname === "/api/notifications") {
+        if (url.searchParams.get("scope") === "all" || notificationRead) notificationExists = false;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true }) });
         return;
       }
       if (url.pathname === `/api/notifications/${notificationID}`) {
@@ -742,6 +755,7 @@ test.describe("local product journey", () => {
           contentType: "application/json",
           body: JSON.stringify({
             ...notification,
+            ...(notificationRead ? { readAt: timestamp } : {}),
             events: [{
               id: "00000000-0000-4000-8000-000000000175",
               category: notification.category,
@@ -756,10 +770,21 @@ test.describe("local product journey", () => {
         });
         return;
       }
+      if (url.searchParams.get("limit") === "5") {
+        expect(url.searchParams.get("unread")).toBe("true");
+      }
+      const visibleNotification = {
+        ...notification,
+        ...(notificationRead ? { readAt: timestamp } : {})
+      };
+      const includeNotification = notificationExists && (!url.searchParams.has("unread") || !notificationRead);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ notifications: [notification], unreadCount: 1 })
+        body: JSON.stringify({
+          notifications: includeNotification ? [visibleNotification] : [],
+          unreadCount: notificationExists && !notificationRead ? 1 : 0
+        })
       });
     });
 
@@ -767,6 +792,8 @@ test.describe("local product journey", () => {
     await page.getByRole("button", { name: "1 unread notifications", exact: true }).click();
     const popover = page.getByRole("dialog", { name: "Recent notifications" });
     await expect(popover.getByText(notification.title, { exact: true })).toBeVisible();
+    await expect(popover.locator(".notification-severity.success")).toBeVisible();
+    await expect(popover.locator(".notification-dot")).toHaveCount(0);
     await popover.getByRole("button").filter({ hasText: notification.title }).click();
     await expect(page).toHaveURL(/\/settings\?section=notifications$/);
     const settings = page.locator("#notifications");
@@ -786,8 +813,20 @@ test.describe("local product journey", () => {
 
     await page.goto("/notifications");
     await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+    await expect(page.locator(".notification-card .notification-severity.success")).toBeVisible();
+    const markAllRead = page.getByRole("button", { name: "Mark all read", exact: true });
+    await expect(markAllRead).toBeDisabled();
     await page.getByText(notification.title, { exact: true }).click();
     await expect(page.locator(".notification-timeline-event").getByText(notification.body, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Mark unread", exact: true }).click();
+    await expect(markAllRead).toBeEnabled();
+    await markAllRead.click();
+    await expect(page.getByRole("status")).toHaveText("All notifications marked as read.");
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Clear read", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Read notifications cleared.");
+    await expect(page.getByText(notification.title, { exact: true })).toHaveCount(0);
+    await expect(markAllRead).toBeDisabled();
     await expectNoHorizontalOverflow(page);
   });
 });

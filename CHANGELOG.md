@@ -8,7 +8,7 @@
 - Added structured workout authoring from training-sheet prescriptions or manual text, including nested repeats, time/distance/lap-button steps, exact and ranged pace targets, configurable pace tolerance, final-recovery skipping, editable manual copies, parse diagnostics, calendar links, and a dedicated Workouts UI.
 - Added opt-in seven-day Garmin workout scheduling with per-user timezone settings, exact provider/date auto-matching after activity import, template cleanup, reconciliation status, and an offline fake-Garmin testbed.
 - Garmin workout ownership is fail-closed: Runnarr schedules, unschedules, or deletes a remote object only when both its locally tracked provider ID and per-user Runnarr ownership marker match. Names never establish ownership, and foreign Garmin workouts are left untouched.
-- Added a per-user notification inbox for workout generation and changes, Garmin calendar reconciliation, automatic activity matching, and training-sheet writeback, with configurable category delivery, 90-day history, actionable links, and optional encrypted browser push subscriptions per device.
+- Added a per-user notification inbox for workout generation and changes, Garmin calendar reconciliation, automatic activity matching, and training-sheet writeback, with configurable category delivery, 90-day history, actionable links, an unread-only bell menu, explicit severity icons and bulk-action feedback, and optional encrypted browser push subscriptions per device.
 
 ### Fixes
 
