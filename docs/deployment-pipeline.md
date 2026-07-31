@@ -238,8 +238,9 @@ deployments. Staging uses public-mode HTTPS/OIDC behavior plus a local
 automation account behind Cloudflare Access.
 
 If the migration-set label changes, the host starts the previous production
-image briefly against the migrated synthetic staging database. Production
-promotion is blocked unless that compatibility check succeeds.
+image briefly against the migrated synthetic staging database using staging's
+complete base and generated image environment. Production promotion is blocked
+unless that compatibility check succeeds.
 
 Real provider accounts are disabled by default. Use only dedicated
 non-production accounts during a separately declared integration smoke window.

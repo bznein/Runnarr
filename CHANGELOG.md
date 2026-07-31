@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the initial production rollback-compatibility check to include
+  staging's generated HTTPS and deployment environment settings.
 - Fixed non-production ingress routing so the gateway resolves staging and
   preview aliases to their app containers instead of back to itself.
 - Fixed GitHub-hosted deployment SSH to use the checksum-pinned native

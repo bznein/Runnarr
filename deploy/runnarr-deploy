@@ -449,6 +449,7 @@ previous_image_compatible() {
     --name "${name}" \
     --network "${network}" \
     --env-file "${staging_directory}/base.env" \
+    --env-file "${staging_directory}/image.env" \
     --env RUNNARR_HTTP_ADDR=:8080 \
     --label com.runnarr.managed=true \
     --label com.runnarr.environment=compatibility \
@@ -463,6 +464,9 @@ previous_image_compatible() {
     fi
     sleep 2
   done
+  if [[ "${result}" != "true" ]]; then
+    docker logs --tail=200 "${name}" >&2 || true
+  fi
   docker rm --force "${name}" >/dev/null 2>&1 || true
   [[ "${result}" == "true" ]]
 }
