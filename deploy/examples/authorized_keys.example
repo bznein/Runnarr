@@ -1,0 +1,5 @@
+# Replace the public-key placeholders. Keep both entries on the runnarr-deploy
+# account; the forced scope prevents the preview key from invoking production
+# commands. OpenSSH supplies the requested text in SSH_ORIGINAL_COMMAND.
+restrict,command="env RUNNARR_DEPLOY_SCOPE=nonprod RUNNARR_DEPLOY_CONFIG=/etc/runnarr/deploy.conf /opt/runnarr-deploy/deploy/runnarr-deploy" ssh-ed25519 PREVIEW_AND_STAGING_PUBLIC_KEY
+restrict,command="env RUNNARR_DEPLOY_SCOPE=production RUNNARR_DEPLOY_CONFIG=/etc/runnarr/deploy.conf /opt/runnarr-deploy/deploy/runnarr-deploy" ssh-ed25519 PRODUCTION_PUBLIC_KEY

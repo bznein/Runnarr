@@ -5,6 +5,10 @@
 ### Features
 
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
+- Added an optional immutable-image deployment pipeline with isolated
+  synthetic PR previews, persistent staging, Cloudflare Access protection,
+  manually approved staging-to-production promotion, encrypted pre-deployment
+  backups, build identity checks, and bounded rollback.
 
 ### Fixes
 

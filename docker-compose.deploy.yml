@@ -1,0 +1,28 @@
+services:
+  db:
+    ports: !override []
+    cpus: ${RUNNARR_DB_CPU_LIMIT:-1.0}
+    mem_limit: ${RUNNARR_DB_MEMORY_LIMIT:-2g}
+    pids_limit: ${RUNNARR_DB_PIDS_LIMIT:-128}
+    labels:
+      com.runnarr.managed: "true"
+      com.runnarr.environment: ${RUNNARR_DEPLOY_ENVIRONMENT:?deployment environment is required}
+      com.runnarr.preview-pr: ${RUNNARR_PREVIEW_PR:-}
+
+  app:
+    image: ${RUNNARR_IMAGE:?an immutable image digest is required}
+    pull_policy: never
+    ports: !override []
+    cpus: ${RUNNARR_APP_CPU_LIMIT:-1.0}
+    mem_limit: ${RUNNARR_APP_MEMORY_LIMIT:-1g}
+    pids_limit: ${RUNNARR_APP_PIDS_LIMIT:-128}
+    labels:
+      com.runnarr.managed: "true"
+      com.runnarr.environment: ${RUNNARR_DEPLOY_ENVIRONMENT:?deployment environment is required}
+      com.runnarr.preview-pr: ${RUNNARR_PREVIEW_PR:-}
+
+networks:
+  runnarr:
+    ipam:
+      config:
+        - subnet: ${RUNNARR_NETWORK_SUBNET:?an explicit deployment subnet is required}

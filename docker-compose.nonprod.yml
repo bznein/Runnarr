@@ -1,0 +1,4 @@
+services:
+  app:
+    environment:
+      RUNNARR_TRUST_PROXY: "true"

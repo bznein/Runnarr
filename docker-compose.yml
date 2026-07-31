@@ -58,6 +58,19 @@ services:
       - "[::1]:${RUNNARR_PORT:-37617}:8080"
     volumes:
       - app-data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import json,urllib.request;
+          data=json.load(urllib.request.urlopen("http://127.0.0.1:8080/healthz",timeout=3));
+          assert data["status"]=="ok"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     read_only: true
     tmpfs:
       - /tmp
@@ -75,6 +88,3 @@ volumes:
 
 networks:
   runnarr:
-    ipam:
-      config:
-        - subnet: 10.89.0.0/24

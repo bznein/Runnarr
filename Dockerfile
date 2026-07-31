@@ -8,13 +8,28 @@ RUN npm run build
 FROM golang:1.26-alpine AS api-build
 WORKDIR /src
 RUN apk add --no-cache ca-certificates
+ARG RUNNARR_BUILD_VERSION=dev
+ARG RUNNARR_BUILD_COMMIT=unknown
+ARG RUNNARR_MIGRATION_HASH=unknown
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
 COPY --from=web-build /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/runnarr ./cmd/runnarr
+RUN CGO_ENABLED=0 GOOS=linux go build \
+  -ldflags "-s -w \
+    -X github.com/bznein/Runnarr/internal/app.BuildVersion=${RUNNARR_BUILD_VERSION} \
+    -X github.com/bznein/Runnarr/internal/app.BuildCommit=${RUNNARR_BUILD_COMMIT} \
+    -X github.com/bznein/Runnarr/internal/app.BuildMigrationHash=${RUNNARR_MIGRATION_HASH}" \
+  -o /out/runnarr ./cmd/runnarr
 
 FROM python:3.13-slim
+ARG RUNNARR_BUILD_VERSION=dev
+ARG RUNNARR_BUILD_COMMIT=unknown
+ARG RUNNARR_MIGRATION_HASH=unknown
+LABEL org.opencontainers.image.source="https://github.com/bznein/Runnarr" \
+  org.opencontainers.image.version="${RUNNARR_BUILD_VERSION}" \
+  org.opencontainers.image.revision="${RUNNARR_BUILD_COMMIT}" \
+  com.runnarr.migrations="${RUNNARR_MIGRATION_HASH}"
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates tzdata \

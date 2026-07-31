@@ -23,6 +23,7 @@ The repository Makefile provides the standard checks in one place:
 make check       # Go format, vet, backend tests, frontend tests, and build
 make test-race   # Backend race-enabled tests
 make e2e         # Isolated Docker Compose Playwright suite
+make deployment-check # Deployment script and rendered Compose invariants
 ```
 
 `make` runs `make check`. The E2E suite is separate because it starts and

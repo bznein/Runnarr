@@ -53,17 +53,25 @@ is a separate integration concern and must not expand the reusable core.
 
 - [Issue #170](https://github.com/bznein/Runnarr/issues/170)
 
-### 6. Course support
+### 6. Deployment pipeline — current
+
+- [Issue #179](https://github.com/bznein/Runnarr/issues/179)
+- Add isolated per-PR previews, persistent staging from `main`, and manual
+  promotion of the accepted staging image to production.
+- Keep this Runnarr-specific integration separate from the reusable agent
+  orchestration project.
+
+### 7. Course support
 
 - [Issue #102](https://github.com/bznein/Runnarr/issues/102)
 
-### 7. Garmin sync and writeback
+### 8. Garmin sync and writeback
 
 - [Issue #181](https://github.com/bznein/Runnarr/issues/181)
 - [Issue #187](https://github.com/bznein/Runnarr/issues/187)
 - [Issue #49](https://github.com/bznein/Runnarr/issues/49)
 
-### 8. Mobile and activity UX
+### 9. Mobile and activity UX
 
 - [Issue #191](https://github.com/bznein/Runnarr/issues/191)
 - [Issue #190](https://github.com/bznein/Runnarr/issues/190)
@@ -71,18 +79,18 @@ is a separate integration concern and must not expand the reusable core.
 - [Issue #186](https://github.com/bznein/Runnarr/issues/186)
 - [Issue #172](https://github.com/bznein/Runnarr/issues/172)
 
-### 9. Information architecture
+### 10. Information architecture
 
 - [Issue #161](https://github.com/bznein/Runnarr/issues/161)
 - [Issue #137](https://github.com/bznein/Runnarr/issues/137)
 - [Issue #177](https://github.com/bznein/Runnarr/issues/177)
 
-### 10. Self-hosting and privacy
+### 11. Self-hosting and privacy
 
 - [Issue #160](https://github.com/bznein/Runnarr/issues/160)
 - [Issue #121](https://github.com/bznein/Runnarr/issues/121)
 
-### 11. Deferred product extensions
+### 12. Deferred product extensions
 
 - Pace bands: [Issue #133](https://github.com/bznein/Runnarr/issues/133)
 - Notifications: [Issue #174](https://github.com/bznein/Runnarr/issues/174)
