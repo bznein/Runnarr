@@ -83,6 +83,11 @@ jq -e \
 
 ! grep -Fq 'docker network connect --alias' "${ROOT}/deploy/runnarr-deploy" ||
   fail "the ingress alias must belong to the app, not the gateway"
+grep -Fq -- '--env-file "${staging_directory}/image.env"' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "the rollback compatibility check does not load staging image settings"
+grep -Fq 'docker logs --tail=200 "${name}"' "${ROOT}/deploy/runnarr-deploy" ||
+  fail "rollback compatibility failures do not preserve diagnostics"
 
 cat > "${TEMPORARY}/production.env" <<'EOF'
 POSTGRES_USER=runnarr
