@@ -129,6 +129,7 @@ export type PlannedActivity = {
   sourceUrl?: string;
   matchedActivityId?: string;
   matchedAt?: string;
+  workoutId?: string;
 };
 
 export type PlannedActivityMatchCandidate = PlannedActivity & {
@@ -474,7 +475,8 @@ export type ActivityNavigation = {
 };
 
 export type CalendarActivitySummary = {
-  id: string;
+	id: string;
+	workoutId?: string;
   source: string;
   name: string;
   startTime: string;
@@ -482,6 +484,163 @@ export type CalendarActivitySummary = {
   distanceM: number;
   movingTimeS: number;
   matchedPlan?: CalendarPlanMatch;
+};
+
+export type WorkoutConfig = {
+  syncEnabled: boolean;
+  defaultPaceToleranceSeconds: number;
+  timezone: string;
+  horizonDays: number;
+};
+
+export type WorkoutEndCondition = {
+  type: "time" | "distance" | "lap_button";
+  value?: number;
+  unit?: string;
+};
+
+export type WorkoutTarget = {
+  type: "none" | "pace";
+  paceSecondsPerKM?: number;
+  paceFastSecondsPerKM?: number;
+  paceSlowSecondsPerKM?: number;
+};
+
+export type WorkoutStep = {
+  order: number;
+  kind: "warmup" | "work" | "recovery" | "cooldown" | "repeat";
+  description?: string;
+  endCondition?: WorkoutEndCondition;
+  target: WorkoutTarget;
+  repeatCount?: number;
+  skipLastRecovery?: boolean;
+  children?: WorkoutStep[];
+};
+
+export type WorkoutDefinition = {
+  version: number;
+  sportType: string;
+  steps: WorkoutStep[];
+  estimatedDurationS: number;
+};
+
+export type WorkoutParseMessage = {
+  level: string;
+  message: string;
+  source?: string;
+};
+
+export type WorkoutGarminState = {
+  status?: string;
+  error?: string;
+  providerWorkoutId?: string;
+  providerScheduleId?: string;
+  scheduledAt?: string;
+};
+
+export type Workout = {
+  id: string;
+  source: "training_sheet" | "manual";
+  plannedActivityId?: string;
+  copiedFromWorkoutId?: string;
+  name: string;
+  sportType: string;
+  sourceText?: string;
+  sourceHash?: string;
+  definition: WorkoutDefinition;
+  parseStatus: "ready" | "warning" | "error";
+  parseMessages: WorkoutParseMessage[];
+  scheduledDate?: string;
+  paceToleranceSeconds?: number;
+  garminExcluded: boolean;
+  revision: number;
+  garmin: WorkoutGarminState;
+  generatedAt: string;
+  archivedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkoutParseResult = {
+  definition: WorkoutDefinition;
+  status: "ready" | "warning" | "error";
+  messages: WorkoutParseMessage[];
+};
+
+export type WorkoutMutation = {
+  name?: string;
+  sourceText?: string;
+  definition?: WorkoutDefinition;
+  scheduledDate?: string;
+  paceToleranceSeconds?: number;
+  useDefaultPaceTolerance?: boolean;
+  garminExcluded?: boolean;
+};
+
+export type WorkoutReconcileAction = {
+  workoutId?: string;
+  action: string;
+  date?: string;
+  status: string;
+  message?: string;
+};
+
+export type WorkoutReconcileResult = {
+  enabled: boolean;
+  from?: string;
+  to?: string;
+  actions: WorkoutReconcileAction[];
+};
+
+export type NotificationCategory = "workout_changes" | "garmin_calendar" | "activity_matching" | "sheet_writeback";
+export type NotificationMode = "off" | "in_app" | "in_app_push";
+export type NotificationSeverity = "info" | "success" | "warning" | "error";
+
+export type NotificationEvent = {
+  id: string;
+  category: NotificationCategory;
+  kind: string;
+  severity: NotificationSeverity;
+  title: string;
+  body?: string;
+  actionPath: string;
+  createdAt: string;
+};
+
+export type RunnarrNotification = {
+  id: string;
+  category: NotificationCategory;
+  kind: string;
+  severity: NotificationSeverity;
+  title: string;
+  body?: string;
+  actionPath: string;
+  readAt?: string;
+  createdAt: string;
+  lastEventAt: string;
+  eventCount: number;
+  events?: NotificationEvent[];
+};
+
+export type NotificationPage = {
+  notifications: RunnarrNotification[];
+  unreadCount: number;
+  nextCursor?: string;
+};
+
+export type NotificationSettings = {
+  categories: Record<NotificationCategory, NotificationMode>;
+  vapidPublicKey?: string;
+};
+
+export type PushSubscriptionDevice = {
+  id: string;
+  deviceName: string;
+  userAgent?: string;
+  lastSeenAt: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  createdAt: string;
 };
 
 export type CalendarPlanMatch = {

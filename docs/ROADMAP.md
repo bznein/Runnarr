@@ -49,9 +49,11 @@ is a separate integration concern and must not expand the reusable core.
 - [Issue #148](https://github.com/bznein/Runnarr/issues/148)
 - [Issue #151](https://github.com/bznein/Runnarr/issues/151)
 
-### 5. Garmin workout scheduling
+### 5. Garmin workout scheduling — complete
 
 - [Issue #170](https://github.com/bznein/Runnarr/issues/170)
+- Added parsing, authoring, calendar scheduling, Garmin
+  ownership/reconciliation, activity auto-matching, and the offline testbed.
 
 ### 6. Deployment pipeline — current
 
@@ -61,17 +63,23 @@ is a separate integration concern and must not expand the reusable core.
 - Keep this Runnarr-specific integration separate from the reusable agent
   orchestration project.
 
-### 7. Course support
+### 7. User notifications — complete
+
+- [Issue #174](https://github.com/bznein/Runnarr/issues/174)
+- Added a per-user inbox with event timelines, category delivery preferences,
+  actionable links, retention controls, and opt-in per-device browser push.
+
+### 8. Course support — next
 
 - [Issue #102](https://github.com/bznein/Runnarr/issues/102)
 
-### 8. Garmin sync and writeback
+### 9. Garmin sync and writeback
 
 - [Issue #181](https://github.com/bznein/Runnarr/issues/181)
 - [Issue #187](https://github.com/bznein/Runnarr/issues/187)
 - [Issue #49](https://github.com/bznein/Runnarr/issues/49)
 
-### 9. Mobile and activity UX
+### 10. Mobile and activity UX
 
 - [Issue #191](https://github.com/bznein/Runnarr/issues/191)
 - [Issue #190](https://github.com/bznein/Runnarr/issues/190)
@@ -79,21 +87,20 @@ is a separate integration concern and must not expand the reusable core.
 - [Issue #186](https://github.com/bznein/Runnarr/issues/186)
 - [Issue #172](https://github.com/bznein/Runnarr/issues/172)
 
-### 10. Information architecture
+### 11. Information architecture
 
 - [Issue #161](https://github.com/bznein/Runnarr/issues/161)
 - [Issue #137](https://github.com/bznein/Runnarr/issues/137)
 - [Issue #177](https://github.com/bznein/Runnarr/issues/177)
 
-### 11. Self-hosting and privacy
+### 12. Self-hosting and privacy
 
 - [Issue #160](https://github.com/bznein/Runnarr/issues/160)
 - [Issue #121](https://github.com/bznein/Runnarr/issues/121)
 
-### 12. Deferred product extensions
+### 13. Deferred product extensions
 
 - Pace bands: [Issue #133](https://github.com/bznein/Runnarr/issues/133)
-- Notifications: [Issue #174](https://github.com/bznein/Runnarr/issues/174)
 - Themes: [Issue #178](https://github.com/bznein/Runnarr/issues/178)
 - Branding/logo: [Issue #185](https://github.com/bznein/Runnarr/issues/185)
 

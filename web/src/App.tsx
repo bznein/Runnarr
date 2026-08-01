@@ -21,6 +21,7 @@ import { applyThemePreference, parseThemePreference, themeOptions, themePreferen
 import type { ThemePreference } from "./theme";
 import { chartDisplayDomain } from "./activityChartBounds";
 import { supportsRouteMetrics } from "./activityMetrics";
+import { NotificationBell, NotificationSettingsSection, NotificationsPage, unregisterCurrentPushDevice } from "./notifications";
 import { hasIntervalAnalysis, resolveActivityAnalysisTab } from "./activityAnalysis";
 import type { ActivityAnalysisTab } from "./activityAnalysis";
 import type {
@@ -49,7 +50,11 @@ import type {
   TrainingSheetPreviewCell,
   ToolsPaceResponse,
   ToolsVdotResponse,
-  UserPreference
+  UserPreference,
+  Workout,
+  WorkoutDefinition,
+  WorkoutMutation,
+  WorkoutStep
 } from "./types";
 
 type RoutePoint = [number, number];
@@ -240,6 +245,16 @@ function mergeUserPreference(current: UserPreference | undefined, updates: Parti
   };
 }
 
+function safeNextPath(value: string) {
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (parsed.origin !== window.location.origin || !value.startsWith("/") || value.startsWith("//")) return "/";
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 function useSaveUserPreferences(userID?: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -266,6 +281,7 @@ export function App() {
   const [themePreferenceUserID, setThemePreferenceUserID] = useState<string>();
   const pwa = usePwaInstallPrompt();
   const queryClient = useQueryClient();
+  const location = useLocation();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
   const effectiveUserID = session.data?.user?.id;
   const preferences = useQuery({
@@ -307,10 +323,12 @@ export function App() {
   }
 
   if (!session.data?.authenticated) {
+    const next = safeNextPath(`${location.pathname}${location.search}${location.hash}`);
+    const loginPath = next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`;
     return (
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to={loginPath} replace />} />
       </Routes>
     );
   }
@@ -343,8 +361,35 @@ function AuthenticatedApp({
   const config = useQuery({ queryKey: ["config"], queryFn: api.config });
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const storedNext = window.sessionStorage.getItem("runnarrLoginNext");
+    if (!storedNext) return;
+    window.sessionStorage.removeItem("runnarrLoginNext");
+    navigate(safeNextPath(storedNext), { replace: true });
+  }, [navigate]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const notificationID = params.get("runnarrNotification");
+    if (!notificationID) return;
+    params.delete("runnarrNotification");
+    const cleanPath = `${location.pathname}${params.size ? `?${params}` : ""}${location.hash}`;
+    const timeout = window.setTimeout(() => {
+      const markRead = session?.canWrite === false ? Promise.resolve() : api.setNotificationRead(notificationID, true).catch(() => undefined);
+      void markRead.finally(() => {
+        void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+        navigate(cleanPath, { replace: true });
+      });
+    });
+    return () => window.clearTimeout(timeout);
+  }, [location.hash, location.pathname, location.search, navigate, queryClient, session?.canWrite]);
   const logout = useMutation({
-    mutationFn: api.logout,
+    mutationFn: async () => {
+      await unregisterCurrentPushDevice();
+      return api.logout();
+    },
     onSuccess: async () => {
       setCsrfToken("");
       await queryClient.invalidateQueries({ queryKey: ["session"] });
@@ -363,6 +408,7 @@ function AuthenticatedApp({
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/calendar" icon={<CalendarDays size={18} />} label="Calendar" />
+          <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
           <NavItem to="/health" icon={<HeartPulse size={18} />} label="Health" />
           <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
           <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
@@ -372,6 +418,7 @@ function AuthenticatedApp({
             <strong>{session?.user?.displayName || session?.user?.username}</strong>
             <span>{session?.user?.role === "admin" ? "Administrator" : "User"}</span>
           </div>
+          <NotificationBell canWrite={session?.canWrite !== false} />
           <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
           <button className="nav-button" type="button" onClick={() => logout.mutate()}>
             <LogOut size={18} />
@@ -395,12 +442,16 @@ function AuthenticatedApp({
           <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
           <Route path="/calendar" element={<ActivityCalendarPage />} />
           <Route path="/calendar/day/:date" element={<CalendarDayPage />} />
+          <Route path="/workouts" element={<WorkoutsPage />} />
+          <Route path="/workouts/new" element={<WorkoutEditorPage />} />
+          <Route path="/workouts/:id" element={<WorkoutEditorPage />} />
+          <Route path="/notifications" element={<NotificationsPage canWrite={session?.canWrite !== false} />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/gear" element={<GearPage />} />
           <Route path="/gear/:id" element={<GearDetailPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
-          <Route path="/settings" element={<SettingsPage themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={themePreferenceError} />} />
+          <Route path="/settings" element={<SettingsPage canWrite={session?.canWrite !== false} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={themePreferenceError} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -434,6 +485,10 @@ function MobileNavigation({
         ? "Day view"
         : location.pathname.startsWith("/calendar")
           ? "Calendar"
+          : location.pathname.startsWith("/workouts")
+            ? "Workouts"
+          : location.pathname.startsWith("/notifications")
+            ? "Notifications"
           : location.pathname.startsWith("/health")
             ? "Health"
             : location.pathname.startsWith("/tools")
@@ -452,9 +507,12 @@ function MobileNavigation({
           <span>Runnarr</span>
         </Link>
         <span className="mobile-header-title">{currentLabel}</span>
-        <button className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" onClick={() => setMoreOpen(true)}>
-          <Menu size={19} />
-        </button>
+        <div className="mobile-header-actions">
+          <NotificationBell mobile canWrite={session?.canWrite !== false} />
+          <button className="icon-button mobile-menu-button" type="button" aria-label="Open navigation" onClick={() => setMoreOpen(true)}>
+            <Menu size={19} />
+          </button>
+        </div>
       </header>
       <nav className="mobile-bottom-nav" aria-label="Primary navigation">
         <NavLink to="/" className={({ isActive }) => `mobile-nav-item ${isActive ? "active" : ""}`} end>
@@ -502,6 +560,7 @@ function MobileNavigation({
                 </button>
               )}
               <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
+              <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
               <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
               <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
             </div>
@@ -571,7 +630,9 @@ function LoginPage() {
     onSuccess: async (session) => {
       setCsrfToken(session.csrfToken);
       await queryClient.invalidateQueries({ queryKey: ["session"] });
-      navigate("/");
+      const next = safeNextPath(searchParams.get("next") || window.sessionStorage.getItem("runnarrLoginNext") || "/");
+      window.sessionStorage.removeItem("runnarrLoginNext");
+      navigate(next);
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : "Login failed")
   });
@@ -579,6 +640,10 @@ function LoginPage() {
   const localLoginEnabled = session.data?.localLoginEnabled !== false;
   const googleOIDCEnabled = session.data?.googleOIDCEnabled === true;
   const callbackError = searchParams.get("error");
+  useEffect(() => {
+    const next = searchParams.get("next");
+    if (next) window.sessionStorage.setItem("runnarrLoginNext", safeNextPath(next));
+  }, [searchParams]);
 
   return (
     <div className="login-page">
@@ -2019,7 +2084,7 @@ function ActivityCalendarPage() {
                   <ul className="calendar-day-list">
                     {entry.dayData?.activities.map((activity) => (
                       <li key={activity.id} className={`calendar-day-activity${activity.source === "training_sheet" ? " calendar-day-activity--planned" : ""}`}>
-                        <Link to={`/activities/${activity.id}`}>
+                        <Link to={calendarActivityPath(activity)}>
                           {activity.name}
                         </Link>
                         <span className="calendar-day-activity-meta">
@@ -2056,7 +2121,7 @@ function ActivityCalendarPage() {
                 <ul className="calendar-day-list">
                   {entry.dayData.activities.map((activity) => (
                     <li key={activity.id} className={`calendar-day-activity${activity.source === "training_sheet" ? " calendar-day-activity--planned" : ""}`}>
-                      <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
+                      <Link to={calendarActivityPath(activity)}>{activity.name}</Link>
                       <span className="calendar-day-activity-meta">
                         {activity.sportType}
                         {activity.sportType && activity.movingTimeS > 0 && ` · ${formatDuration(activity.movingTimeS)}`}
@@ -2163,7 +2228,7 @@ function CalendarDayActivityList({ activities, date }: { activities: CalendarAct
         return (
           <li key={activity.id} className={`calendar-day-activity-row${activity.source === "training_sheet" ? " calendar-day-activity-row--planned" : ""}`}>
             <div>
-              <Link to={`/activities/${activity.id}`}>{activity.name}</Link>
+              <Link to={calendarActivityPath(activity)}>{activity.name}</Link>
               {metadata && <span className="calendar-day-activity-meta">{metadata}</span>}
               {activity.matchedPlan && (
                 <span className="calendar-day-match-meta">
@@ -2177,6 +2242,13 @@ function CalendarDayActivityList({ activities, date }: { activities: CalendarAct
       })}
     </ul>
   );
+}
+
+function calendarActivityPath(activity: CalendarActivitySummary) {
+  if (activity.workoutId && (activity.source === "training_sheet" || activity.source === "manual_workout")) {
+    return `/workouts/${activity.workoutId}`;
+  }
+  return `/activities/${activity.id}`;
 }
 
 function ActivityFiltersDialog({
@@ -2974,6 +3046,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [climbSensitivity]);
 
   const item = activity.data?.activity;
+  const writeback = plannedMatchCandidates.data?.writeback;
   const intervalAnalysisAvailable = hasIntervalAnalysis(item);
   const visibleAnalysisTab = resolveActivityAnalysisTab(analysisTab, intervalAnalysisAvailable);
   const effectiveClimbs = item ? (climbPreview.data?.climbs ?? item.climbs ?? []) : [];
@@ -2992,6 +3065,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       setSelectedClimbIndex(undefined);
     }
   }, [effectiveClimbs, selectedClimbIndex]);
+
+  useEffect(() => {
+    if (searchParams.get("section") !== "writeback") return;
+    const timeout = window.setTimeout(() => document.getElementById("writeback")?.scrollIntoView({ block: "center" }));
+    return () => window.clearTimeout(timeout);
+  }, [searchParams, writeback]);
 
   if (activity.isLoading) {
     return <Page title="Activity"><LoadingRow /></Page>;
@@ -3049,7 +3128,6 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const canSaveClimbSensitivity = !isClimbSensitivitySaved;
   const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
-  const writeback = plannedMatchCandidates.data?.writeback;
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
   const loadingCandidateRetry = retryingPlannedMatchCandidates;
   const loadingCandidateRequest = loadingMorePlans || loadingCandidateRetry;
@@ -3208,6 +3286,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
             <ActivityPlannedMatchAction
               matched={Boolean(matchedPlannedActivity)}
               matchedName={matchedPlannedActivity?.name}
+              matchedWorkoutId={matchedPlannedActivity?.workoutId}
               loading={plannedMatchCandidates.isLoading}
               working={previewPlannedActivity.isPending || applyPlannedActivity.isPending || unmatchPlannedActivity.isPending}
               onMatch={() => openMatchDialog()}
@@ -3328,6 +3407,15 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       {plannedMatchCandidates.error && <div className="error">{plannedMatchCandidates.error instanceof Error ? plannedMatchCandidates.error.message : "Could not load planned activity matches"}</div>}
       {unmatchPlannedActivity.error && <div className="error">{unmatchPlannedActivity.error instanceof Error ? unmatchPlannedActivity.error.message : "Could not unmatch planned run"}</div>}
       {retryWriteback.error && <div className="error">{retryWriteback.error instanceof Error ? retryWriteback.error.message : "Could not retry sheet write-back"}</div>}
+      {writeback && <section id="writeback" className="panel activity-writeback-panel">
+        <div><div className="panel-heading">Training sheet writeback</div><p className="muted">{matchedPlannedActivity?.name || "Matched planned activity"}</p></div>
+        <div className="activity-writeback-statuses">
+          <span>Summary <strong>{writeback.summaryStatus || "pending"}</strong></span>
+          <span>Intervals <strong>{writeback.intervalsStatus || "pending"}</strong></span>
+          <span>Feedback <strong>{writeback.feedbackStatus || "pending"}</strong></span>
+        </div>
+        {canRetryWriteback && <button className="secondary-button small-button" type="button" disabled={retryWriteback.isPending} onClick={() => retryWriteback.mutate()}><RefreshCw size={14} />{retryWriteback.isPending ? "Retrying…" : "Retry writeback"}</button>}
+      </section>}
       <section className="metric-grid">
         {supportsRouteMetrics(item.sportType) && <Metric label="Distance" value={formatDistance(item.distanceM)} />}
         <Metric label="Moving Time" value={formatDuration(item.movingTimeS || item.elapsedTimeS)} />
@@ -4343,6 +4431,7 @@ function ActivityExportGPXDialog({
 function ActivityPlannedMatchAction({
   matched,
   matchedName,
+  matchedWorkoutId,
   loading,
   working,
   onMatch,
@@ -4350,6 +4439,7 @@ function ActivityPlannedMatchAction({
 }: {
   matched: boolean;
   matchedName?: string;
+  matchedWorkoutId?: string;
   loading: boolean;
   working: boolean;
   onMatch: () => void;
@@ -4357,16 +4447,19 @@ function ActivityPlannedMatchAction({
 }) {
   const label = working ? (matched ? "Unmatching" : "Matching") : (matched ? "Unmatch" : "Match");
   return (
-    <button
-      className="secondary-button"
-      type="button"
-      title={matched ? `Unmatch ${matchedName ?? "planned run"}` : "Match with a planned run"}
-      disabled={loading || working}
-      onClick={matched ? onUnmatch : onMatch}
-    >
-      {matched && <RotateCcw size={16} />}
-      {label}
-    </button>
+    <>
+      {matched && matchedWorkoutId && <Link className="secondary-button" to={`/workouts/${matchedWorkoutId}`} title={`Open workout for ${matchedName ?? "planned run"}`}><RouteIcon size={16} />Workout</Link>}
+      <button
+        className="secondary-button"
+        type="button"
+        title={matched ? `Unmatch ${matchedName ?? "planned run"}` : "Match with a planned run"}
+        disabled={loading || working}
+        onClick={matched ? onUnmatch : onMatch}
+      >
+        {matched && <RotateCcw size={16} />}
+        {label}
+      </button>
+    </>
   );
 }
 
@@ -4872,11 +4965,296 @@ function ClimbStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+const workoutFilterOptions = [
+  { id: "upcoming", label: "Upcoming" },
+  { id: "drafts", label: "Drafts" },
+  { id: "attention", label: "Needs attention" },
+  { id: "excluded", label: "Excluded" },
+  { id: "past", label: "Past" }
+] as const;
+
+function WorkoutsPage() {
+  const [filter, setFilter] = useState<(typeof workoutFilterOptions)[number]["id"]>("upcoming");
+  const queryClient = useQueryClient();
+  const workouts = useQuery({ queryKey: ["workouts", filter], queryFn: () => api.workouts(filter) });
+  const config = useQuery({ queryKey: ["workout-config"], queryFn: api.workoutConfig });
+  const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
+  const latestJob = (jobs.data?.jobs ?? []).find((job) => job.provider === "garmin" && job.kind === "workouts");
+  const reconcile = useMutation({
+    mutationFn: api.reconcileWorkouts,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] }),
+        queryClient.invalidateQueries({ queryKey: ["workouts"] })
+      ]);
+    }
+  });
+  const items = workouts.data?.workouts ?? [];
+
+  return (
+    <Page
+      title="Workouts"
+      eyebrow="Structured running sessions"
+      actions={<div className="workout-page-actions">
+        <button className="secondary-button small-button" type="button" disabled={!config.data?.syncEnabled || reconcile.isPending || latestJob?.status === "running"} onClick={() => reconcile.mutate()}>
+          <RefreshCw size={15} />
+          {latestJob?.status === "running" ? "Syncing…" : "Sync Garmin"}
+        </button>
+        <Link className="primary-button small-button" to="/workouts/new">New workout</Link>
+      </div>}
+    >
+      <section className="panel workout-list-panel">
+        <div className="workout-filter-tabs" role="tablist" aria-label="Workout filters">
+          {workoutFilterOptions.map((option) => (
+            <button key={option.id} type="button" className={filter === option.id ? "active" : ""} onClick={() => setFilter(option.id)}>{option.label}</button>
+          ))}
+        </div>
+        {!config.isLoading && !config.data?.syncEnabled && <div className="workout-notice">Garmin workout sync is off. You can build and inspect workouts without changing Garmin.</div>}
+        {latestJob?.status === "failed" && <div className="error">Garmin workout sync failed: {latestJob.error || "See sync details in Settings."}</div>}
+        {reconcile.error && <div className="error">{reconcile.error instanceof Error ? reconcile.error.message : "Could not start Garmin workout sync"}</div>}
+        {workouts.isLoading && <LoadingRow />}
+        {workouts.error && <div className="error">{workouts.error instanceof Error ? workouts.error.message : "Could not load workouts"}</div>}
+        {!workouts.isLoading && !workouts.error && items.length === 0 && <div className="empty-state">No workouts in this view.</div>}
+        {items.length > 0 && (
+          <div className="workout-list">
+            {items.map((workout) => <WorkoutListRow key={workout.id} workout={workout} />)}
+          </div>
+        )}
+      </section>
+    </Page>
+  );
+}
+
+function WorkoutListRow({ workout }: { workout: Workout }) {
+  const state = workout.garminExcluded
+    ? { label: "Excluded", className: "muted" }
+    : workout.parseStatus === "error"
+      ? { label: "Parse error", className: "failed" }
+      : workout.garmin.error
+        ? { label: "Ownership conflict", className: "failed" }
+        : workout.garmin.status === "scheduled"
+          ? { label: "Scheduled", className: "completed" }
+          : { label: workout.scheduledDate ? "Pending" : "Draft", className: "queued" };
+  return (
+    <Link className="workout-list-row" to={`/workouts/${workout.id}`}>
+      <div className="workout-list-date">
+        <strong>{workout.scheduledDate ? workout.scheduledDate.slice(8, 10) : "—"}</strong>
+        <span>{workout.scheduledDate ? formatCalendarAgendaDate(workout.scheduledDate).replace(/^\w+,?\s*/, "") : "Unscheduled"}</span>
+      </div>
+      <div className="workout-list-main">
+        <strong>{workout.name}</strong>
+        <span>{workoutDefinitionSummaryText(workout.definition)} · {workout.source === "training_sheet" ? "Training sheet" : "Manual"}</span>
+        {workout.garmin.error && <span className="workout-row-error">{workout.garmin.error}</span>}
+      </div>
+      <span className={`status ${state.className}`}>{state.label}</span>
+    </Link>
+  );
+}
+
+function WorkoutEditorPage() {
+  const { id } = useParams();
+  const creating = !id;
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const workout = useQuery({ queryKey: ["workout", id], queryFn: () => api.workout(id ?? ""), enabled: !creating });
+  const config = useQuery({ queryKey: ["workout-config"], queryFn: api.workoutConfig });
+  const [loadedID, setLoadedID] = useState("");
+  const [name, setName] = useState("Running workout");
+  const [sourceText, setSourceText] = useState("");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [useDefaultTolerance, setUseDefaultTolerance] = useState(true);
+  const [paceTolerance, setPaceTolerance] = useState(0);
+  const [garminExcluded, setGarminExcluded] = useState(false);
+
+  useEffect(() => {
+    const item = workout.data;
+    if (!item || loadedID === item.id) {
+      return;
+    }
+    setLoadedID(item.id);
+    setName(item.name);
+    setSourceText(item.sourceText ?? "");
+    setScheduledDate(item.scheduledDate ?? "");
+    setUseDefaultTolerance(item.paceToleranceSeconds === undefined);
+    setPaceTolerance(item.paceToleranceSeconds ?? config.data?.defaultPaceToleranceSeconds ?? 0);
+    setGarminExcluded(item.garminExcluded);
+  }, [config.data?.defaultPaceToleranceSeconds, loadedID, workout.data]);
+
+  useEffect(() => {
+    if (creating && config.data && useDefaultTolerance) {
+      setPaceTolerance(config.data.defaultPaceToleranceSeconds);
+    }
+  }, [config.data, creating, useDefaultTolerance]);
+
+  useEffect(() => {
+    if (searchParams.get("section") !== "garmin" || !workout.data) return;
+    const timeout = window.setTimeout(() => document.getElementById("garmin")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+    return () => window.clearTimeout(timeout);
+  }, [searchParams, workout.data]);
+
+  const parse = useMutation({ mutationFn: api.parseWorkout });
+  const save = useMutation({
+    mutationFn: async () => {
+      const body: WorkoutMutation = {
+        paceToleranceSeconds: useDefaultTolerance ? undefined : paceTolerance,
+        useDefaultPaceTolerance: useDefaultTolerance,
+        garminExcluded
+      };
+      if (creating || workout.data?.source === "manual") {
+        body.name = name.trim();
+        body.scheduledDate = scheduledDate;
+        if (creating || sourceText !== (workout.data?.sourceText ?? "")) {
+          body.sourceText = sourceText;
+        }
+      }
+      return creating ? api.createWorkout(body) : api.updateWorkout(id ?? "", body);
+    },
+    onSuccess: async (saved) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["workouts"] }),
+        queryClient.invalidateQueries({ queryKey: ["workout", saved.id] }),
+        queryClient.invalidateQueries({ queryKey: ["activity-calendar"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar-day"] })
+      ]);
+      navigate(`/workouts/${saved.id}`, { replace: creating });
+    }
+  });
+  const duplicate = useMutation({
+    mutationFn: () => api.duplicateWorkout(id ?? ""),
+    onSuccess: async (copy) => {
+      await queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      navigate(`/workouts/${copy.id}`);
+    }
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteWorkout(id ?? ""),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["workouts"] });
+      navigate("/workouts");
+    }
+  });
+
+  if (!creating && workout.isLoading) {
+    return <Page title="Workout"><LoadingRow /></Page>;
+  }
+  if (!creating && workout.error) {
+    return <Page title="Workout"><div className="error">{workout.error instanceof Error ? workout.error.message : "Could not load workout"}</div></Page>;
+  }
+
+  const current = workout.data;
+  const readOnly = current?.source === "training_sheet";
+  const parsedCurrent = parse.data && parse.variables === sourceText ? parse.data : undefined;
+  const definition = parsedCurrent?.definition ?? current?.definition;
+  const parseStatus = parsedCurrent?.status ?? current?.parseStatus;
+  const parseMessages = parsedCurrent?.messages ?? current?.parseMessages ?? [];
+  const invalid = creating && sourceText.trim() === "";
+
+  return (
+    <Page
+      title={creating ? "New workout" : current?.name ?? "Workout"}
+      eyebrow={readOnly ? "Generated from training sheet" : creating ? "Manual workout" : "Manual workout"}
+      actions={<div className="workout-page-actions">
+        <Link className="secondary-button small-button" to="/workouts"><ChevronLeft size={15} />Back</Link>
+        {!creating && <button className="secondary-button small-button" type="button" disabled={duplicate.isPending} onClick={() => duplicate.mutate()}>Duplicate</button>}
+        {!creating && !readOnly && <button className="danger-button small-button" type="button" disabled={remove.isPending} onClick={() => {
+          if (window.confirm("Delete this workout? Runnarr will safely unschedule only its own verified Garmin calendar entry.")) {
+            remove.mutate();
+          }
+        }}>Delete</button>}
+        <button className="primary-button small-button" type="button" disabled={save.isPending || invalid} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : "Save"}</button>
+      </div>}
+    >
+      {readOnly && <div className="workout-notice">Structure and date follow the training sheet. Duplicate this workout to create an editable manual copy.</div>}
+      {current?.garmin.error && <div className="error"><strong>Garmin ownership conflict.</strong> {current.garmin.error} Runnarr did not modify the remote workout.</div>}
+      <div className="workout-editor-layout">
+        <section className="panel workout-editor-form">
+          <div className="panel-heading">Workout</div>
+          <label className="field"><span>Name</span><input value={name} disabled={readOnly} maxLength={160} onChange={(event) => setName(event.target.value)} /></label>
+          <label className="field"><span>Date</span><input type="date" value={scheduledDate} disabled={readOnly} onChange={(event) => setScheduledDate(event.target.value)} /></label>
+          <label className="field"><span>Prescription</span><textarea rows={7} value={sourceText} disabled={readOnly} placeholder="15mins warm up//5x7mins@3:35(2mins)//15mins cool down" onChange={(event) => setSourceText(event.target.value)} /></label>
+          {!readOnly && <button className="secondary-button small-button workout-parse-button" type="button" disabled={!sourceText.trim() || parse.isPending} onClick={() => parse.mutate(sourceText)}>{parse.isPending ? "Parsing…" : "Preview prescription"}</button>}
+          <div className="workout-operation-grid">
+            <label className="checkbox-field"><input type="checkbox" checked={useDefaultTolerance} onChange={(event) => setUseDefaultTolerance(event.target.checked)} /> Use default pace tolerance</label>
+            <label className="field"><span>Pace tolerance (seconds)</span><input type="number" min={0} max={60} disabled={useDefaultTolerance} value={paceTolerance} onChange={(event) => setPaceTolerance(Number(event.target.value))} /></label>
+            <label className="checkbox-field"><input type="checkbox" checked={garminExcluded} onChange={(event) => setGarminExcluded(event.target.checked)} /> Do not send this workout to Garmin</label>
+          </div>
+          {(save.error || duplicate.error || remove.error || parse.error) && <div className="error">{mutationErrorMessage(save.error || duplicate.error || remove.error || parse.error, "Could not update workout")}</div>}
+        </section>
+        <section className="panel workout-preview-panel">
+          <div className="filter-header"><div className="panel-heading">Steps</div>{parseStatus && <span className={`status ${parseStatus === "error" ? "failed" : parseStatus === "warning" ? "canceled" : "completed"}`}>{parseStatus}</span>}</div>
+          {definition ? <WorkoutDefinitionView definition={definition} /> : <div className="muted">Enter a prescription to preview its steps.</div>}
+          {parseMessages.length > 0 && <ul className="workout-parse-messages">{parseMessages.map((message, index) => <li key={`${message.message}-${index}`} className={message.level}>{message.message}</li>)}</ul>}
+          <div id="garmin" className="workout-garmin-summary">
+            <strong>Garmin</strong>
+            <span>{garminExcluded ? "Excluded" : current?.garmin.status || (scheduledDate ? "Pending sync" : "Not scheduled")}</span>
+            {current?.garmin.providerWorkoutId && <a className="workout-garmin-link" href={`https://connect.garmin.com/modern/workout/${encodeURIComponent(current.garmin.providerWorkoutId)}`} target="_blank" rel="noreferrer">Open in Garmin <ExternalLink size={13} /><span className="sr-only"> workout {current.garmin.providerWorkoutId}</span></a>}
+            {current?.garmin.providerScheduleId && <span>Calendar ID {current.garmin.providerScheduleId}</span>}
+          </div>
+        </section>
+      </div>
+    </Page>
+  );
+}
+
+function WorkoutDefinitionView({ definition }: { definition: WorkoutDefinition }) {
+  return <div className="workout-step-list">
+    {definition.steps.map((step) => <WorkoutStepView key={`${step.order}-${step.kind}`} step={step} />)}
+    {definition.estimatedDurationS > 0 && <div className="workout-duration">Estimated duration: {formatDuration(definition.estimatedDurationS)}</div>}
+  </div>;
+}
+
+function WorkoutStepView({ step }: { step: WorkoutStep }) {
+  if (step.kind === "repeat") {
+    return <div className="workout-step repeat">
+      <div className="workout-step-heading"><strong>{step.repeatCount}× repeat</strong>{step.skipLastRecovery && <span>Skip final recovery</span>}</div>
+      <div className="workout-step-children">{(step.children ?? []).map((child) => <WorkoutStepView key={`${child.order}-${child.kind}`} step={child} />)}</div>
+    </div>;
+  }
+  return <div className={`workout-step ${step.kind}`}>
+    <strong>{workoutStepKindLabel(step.kind)}</strong>
+    <span>{workoutStepConditionLabel(step)}</span>
+    {step.target.type === "pace" && <span>{workoutPaceTargetLabel(step)}</span>}
+    {step.description && <small>{step.description}</small>}
+  </div>;
+}
+
+function workoutDefinitionSummaryText(definition: WorkoutDefinition) {
+  const repeat = definition.steps.find((step) => step.kind === "repeat");
+  const duration = definition.estimatedDurationS > 0 ? formatDuration(definition.estimatedDurationS) : "Open duration";
+  return repeat ? `${repeat.repeatCount}× intervals · ${duration}` : duration;
+}
+
+function workoutStepKindLabel(kind: WorkoutStep["kind"]) {
+  return ({ warmup: "Warm up", work: "Work", recovery: "Recovery", cooldown: "Cool down", repeat: "Repeat" } as const)[kind];
+}
+
+function workoutStepConditionLabel(step: WorkoutStep) {
+  const condition = step.endCondition;
+  if (!condition || condition.type === "lap_button") return "Lap button";
+  if (condition.type === "distance") return condition.value && condition.value >= 1000 ? `${(condition.value / 1000).toLocaleString()} km` : `${condition.value ?? 0} m`;
+  return formatDuration(Math.round(condition.value ?? 0));
+}
+
+function workoutPaceTargetLabel(step: WorkoutStep) {
+  const target = step.target;
+  if (target.paceFastSecondsPerKM && target.paceSlowSecondsPerKM) {
+    return `${formatPace(target.paceFastSecondsPerKM)}–${formatPace(target.paceSlowSecondsPerKM)}`;
+  }
+  return target.paceSecondsPerKM ? formatPace(target.paceSecondsPerKM) : "";
+}
+
+function mutationErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function SettingsPage({
+  canWrite,
   themePreference,
   onThemePreferenceChange,
   themePreferenceError
 }: {
+  canWrite: boolean;
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
   themePreferenceError?: Error | null;
@@ -4906,14 +5284,15 @@ function SettingsPage({
     .filter((job, index, list) => list.findIndex((item) => item.id === job.id) === index);
 
   useEffect(() => {
-    if (location.hash !== "#import") {
+    const section = new URLSearchParams(location.search).get("section") || (location.hash === "#import" ? "import" : "");
+    if (!section) {
       return;
     }
     const timeout = window.setTimeout(() => {
-      document.getElementById("import")?.scrollIntoView({ block: "start" });
+      document.getElementById(section)?.scrollIntoView({ block: "start" });
     });
     return () => window.clearTimeout(timeout);
-  }, [location.hash]);
+  }, [location.hash, location.search]);
 
   const garminConnect = useMutation({
     mutationFn: api.garminConnect,
@@ -5043,7 +5422,9 @@ function SettingsPage({
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       {garminHealthSync.error && <div className="error">{garminHealthSync.error instanceof Error ? garminHealthSync.error.message : "Garmin health sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
+      <WorkoutSettings />
       <TrainingSheetSettings />
+      <NotificationSettingsSection canWrite={canWrite} />
       <ClimbDetectionSettingsSection />
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} error={themePreferenceError} />
       <UserManagement />
@@ -5066,6 +5447,57 @@ function SettingsPage({
         importsLoading={imports.isLoading}
       />
     </Page>
+  );
+}
+
+function WorkoutSettings() {
+  const queryClient = useQueryClient();
+  const config = useQuery({ queryKey: ["workout-config"], queryFn: api.workoutConfig });
+  const [loaded, setLoaded] = useState(false);
+  const [syncEnabled, setSyncEnabled] = useState(false);
+  const [tolerance, setTolerance] = useState(0);
+  const [timezone, setTimezone] = useState("");
+
+  useEffect(() => {
+    if (!config.data || loaded) return;
+    setLoaded(true);
+    setSyncEnabled(config.data.syncEnabled);
+    setTolerance(config.data.defaultPaceToleranceSeconds);
+    setTimezone(config.data.timezone || browserCalendarTimezone());
+  }, [config.data, loaded]);
+
+  const save = useMutation({
+    mutationFn: () => api.updateWorkoutConfig({
+      syncEnabled,
+      defaultPaceToleranceSeconds: tolerance,
+      timezone: timezone.trim()
+    }),
+    onSuccess: async (saved) => {
+      setSyncEnabled(saved.syncEnabled);
+      setTolerance(saved.defaultPaceToleranceSeconds);
+      setTimezone(saved.timezone);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["workout-config"] }),
+        queryClient.invalidateQueries({ queryKey: ["sync-jobs"] })
+      ]);
+    }
+  });
+
+  return (
+    <section id="workouts" className="panel workout-settings-panel">
+      <div>
+        <div className="panel-heading">Garmin workouts</div>
+        <p className="muted">Build workouts in Runnarr and schedule the next {config.data?.horizonDays ?? 7} days in Garmin Connect.</p>
+      </div>
+      <div className="workout-settings-controls">
+        <label className="checkbox-field"><input type="checkbox" checked={syncEnabled} onChange={(event) => setSyncEnabled(event.target.checked)} /> Enable Garmin workout scheduling</label>
+        <label className="compact-field"><span>Default pace range (± seconds)</span><input type="number" min={0} max={60} value={tolerance} onChange={(event) => setTolerance(Number(event.target.value))} /></label>
+        <label className="compact-field"><span>Workout timezone</span><input value={timezone} placeholder="Europe/Dublin" onChange={(event) => setTimezone(event.target.value)} /></label>
+        <button className="primary-button small-button" type="button" disabled={save.isPending || config.isLoading} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : "Save workout settings"}</button>
+      </div>
+      <p className="muted workout-ownership-note">Safety: Runnarr schedules, unschedules, and deletes only remote templates carrying this account’s exact Runnarr ownership marker. Other Garmin workouts are never modified.</p>
+      {save.error && <div className="error">{save.error instanceof Error ? save.error.message : "Could not save workout settings"}</div>}
+    </section>
   );
 }
 

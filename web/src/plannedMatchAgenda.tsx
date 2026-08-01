@@ -1,4 +1,5 @@
 import type { PlannedActivityMatchCandidate, PlannedActivityMatchResponse } from "./types";
+import { Link } from "react-router-dom";
 
 export type PlannedActivityAgendaGroup = {
   plannedDate: string;
@@ -87,9 +88,12 @@ export function PlannedActivityMatchAgenda({
             <div className="planned-match-agenda-day-content">
               <div className="planned-match-agenda-full-date">{formatPlannedActivityAgendaDate(group.plannedDate)}</div>
               <div className="planned-match-agenda-candidates">
-                {group.candidates.map((candidate) => (
-                  <label className="planned-match-candidate" key={candidate.id}>
+                {group.candidates.map((candidate) => {
+                  const inputId = `planned-activity-${candidate.id}`;
+                  return (
+                  <div className="planned-match-candidate" key={candidate.id}>
                     <input
+                      id={inputId}
                       type="radio"
                       name="planned-activity"
                       checked={candidate.id === selectedCandidateId}
@@ -99,7 +103,7 @@ export function PlannedActivityMatchAgenda({
                     />
                     <div>
                       <div className="planned-match-candidate-title">
-                        <strong>{candidate.name}</strong>
+                        <label htmlFor={inputId}><strong>{candidate.name}</strong></label>
                         <span
                           className={`planned-match-score planned-match-score--${candidate.matchLevel}`}
                           aria-label={`Match score ${candidate.matchScore} out of 100`}
@@ -107,14 +111,16 @@ export function PlannedActivityMatchAgenda({
                           {candidate.matchScore}/100
                         </span>
                         {candidate.id === suggestedId && <span className="planned-match-badge">Suggested</span>}
+                        {candidate.workoutId && <Link className="planned-match-workout-link" to={`/workouts/${candidate.workoutId}`}>View workout</Link>}
                       </div>
                       {candidate.notes && <p className="muted">{candidate.notes}</p>}
                       <div className="planned-match-reasons" aria-label={`Match reasons for ${candidate.name}`}>
                         {candidate.matchReasons.map((reason) => <span key={reason}>{reason}</span>)}
                       </div>
                     </div>
-                  </label>
-                ))}
+                  </div>
+                  );
+                })}
               </div>
             </div>
           </section>

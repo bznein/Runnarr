@@ -27,6 +27,7 @@ type PlannedActivity struct {
 	SourceURL         string         `json:"sourceUrl,omitempty"`
 	MatchedActivityID string         `json:"matchedActivityId,omitempty"`
 	MatchedAt         *time.Time     `json:"matchedAt,omitempty"`
+	WorkoutID         string         `json:"workoutId,omitempty"`
 	Raw               map[string]any `json:"raw,omitempty"`
 	CreatedAt         time.Time      `json:"createdAt"`
 	UpdatedAt         time.Time      `json:"updatedAt"`

@@ -455,6 +455,7 @@ type WeeklyBucket struct {
 
 type CalendarActivity struct {
 	ID          string             `json:"id"`
+	WorkoutID   string             `json:"workoutId,omitempty"`
 	Source      string             `json:"source"`
 	Name        string             `json:"name"`
 	StartTime   time.Time          `json:"startTime"`
