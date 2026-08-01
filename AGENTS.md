@@ -58,6 +58,7 @@ Use `GOCACHE=/tmp/runnarr-go-cache` if the default Go cache is not writable in t
 ## Verification Expectations
 
 - Run the smallest meaningful checks for the change.
+- For every behavior change or bug fix, add or update synthetic/testbed data to cover the implemented case whenever feasible, so the scenario can be exercised in PR previews and staging. If synthetic coverage is infeasible, explicitly state why and identify the automated or manual validation used instead.
 - For backend behavior, run `go test ./...`; use `go test -race ./...` when touching shared state, sync, storage, or CI-sensitive code.
 - For frontend behavior, run `cd web && npm test` when tests exist for the affected logic, and `cd web && npm run build` for TypeScript/UI changes.
 - For Docker/runtime changes, run build and smoke checks without restarting when possible; run `docker compose up --build -d` only after explicit current-request authorization.

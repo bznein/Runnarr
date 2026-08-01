@@ -136,6 +136,10 @@ func plannedActivityStructured(planned PlannedActivity) (bool, bool) {
 	return false, false
 }
 
+func activityIntervalsStructured(intervalCount int) bool {
+	return intervalCount > 1
+}
+
 func plannedWorkoutTableHasRows(value any) bool {
 	switch table := value.(type) {
 	case trainingSheetWorkoutTable:
