@@ -23,6 +23,7 @@
 
 ### Fixes
 
+- Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
 - Planned and completed activity views now link to their corresponding Runnarr workout, and managed workouts link to their exact Garmin Connect workout.
 - Garmin workout ownership verification now handles numeric workout IDs and nested calendar response IDs from real Garmin responses without false conflicts.
 - Manual workout plans no longer create training-sheet writeback records or jobs when matched to an activity.

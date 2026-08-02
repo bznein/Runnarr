@@ -302,7 +302,7 @@ func (s *Store) ListStaleGarminWorkoutTemplates(ctx context.Context, before stri
 		select id::text, definition_hash, provider_workout_id, name, ownership_marker,
 			payload, remote, status, error
 		from garmin_workout_templates template
-		where template.user_id = $1 and template.status = 'uploaded' and template.deleted_at is null
+		where template.user_id = $1 and template.status in ('uploaded', 'error') and template.deleted_at is null
 			and template.provider_workout_id <> ''
 			and exists (
 				select 1 from garmin_workout_schedules schedule
@@ -480,6 +480,13 @@ func (s *GarminService) ReconcileWorkouts(ctx context.Context) (WorkoutReconcile
 	}
 	for _, template := range stale {
 		remote, err := s.bridge.GetWorkout(ctx, tokenStore, template.ProviderWorkoutID)
+		if errors.Is(err, ErrGarminNotFound) {
+			if err := s.store.MarkGarminWorkoutTemplateDeleted(ctx, template.ID); err != nil {
+				return result, err
+			}
+			result.Actions = append(result.Actions, WorkoutReconcileAction{Action: "delete_template", Status: "deleted"})
+			continue
+		}
 		if err != nil {
 			_ = s.store.MarkGarminWorkoutTemplateError(ctx, template.ID, "could not verify remote workout before cleanup: "+err.Error())
 			continue
@@ -613,20 +620,28 @@ func (s *GarminService) removeManagedWorkoutSchedule(ctx context.Context, tokenS
 		_ = s.store.MarkGarminWorkoutScheduleExistingError(ctx, schedule.ID, action.Message)
 		return action
 	}
-	remoteTemplate, err := s.bridge.GetWorkout(ctx, tokenStore, template.ProviderWorkoutID)
-	if err != nil || verifyGarminManagedTemplate(template, remoteTemplate) != nil {
-		action.Status, action.Message = "conflict", "Garmin workout ownership could not be verified; calendar entry was left untouched"
-		_ = s.store.MarkGarminWorkoutScheduleExistingError(ctx, schedule.ID, action.Message)
-		return action
-	}
 	remote, exists := remoteSchedules[schedule.ProviderScheduleID]
 	if !exists {
 		remote, err = s.bridge.GetScheduledWorkout(ctx, tokenStore, schedule.ProviderScheduleID)
+		if errors.Is(err, ErrGarminNotFound) {
+			if err := s.store.MarkGarminWorkoutScheduleRemoved(ctx, schedule.ID); err != nil {
+				action.Status, action.Message = "error", err.Error()
+				return action
+			}
+			action.Status = "removed"
+			return action
+		}
 		if err != nil || remote.ID != schedule.ProviderScheduleID {
 			action.Status, action.Message = "conflict", "Garmin calendar entry could not be verified by ID; it was left untouched"
 			_ = s.store.MarkGarminWorkoutScheduleExistingError(ctx, schedule.ID, action.Message)
 			return action
 		}
+	}
+	remoteTemplate, err := s.bridge.GetWorkout(ctx, tokenStore, template.ProviderWorkoutID)
+	if err != nil || verifyGarminManagedTemplate(template, remoteTemplate) != nil {
+		action.Status, action.Message = "conflict", "Garmin workout ownership could not be verified; calendar entry was left untouched"
+		_ = s.store.MarkGarminWorkoutScheduleExistingError(ctx, schedule.ID, action.Message)
+		return action
 	}
 	if remote.WorkoutID != template.ProviderWorkoutID {
 		action.Status, action.Message = "conflict", "Garmin calendar entry points to a non-Runnarr workout; it was left untouched"

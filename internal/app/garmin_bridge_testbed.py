@@ -7,6 +7,10 @@ import sys
 from datetime import date
 
 
+class NotFoundException(RuntimeError):
+    pass
+
+
 def initial_state():
     return {
         "nextWorkoutId": 10001,
@@ -119,7 +123,7 @@ def main():
         workout_id = required(request, "workoutId")
         payload = state["workouts"].get(workout_id)
         if payload is None:
-            raise RuntimeError("testbed workout not found")
+            raise NotFoundException("testbed workout not found")
         print(json.dumps(normalized_workout(payload)))
         return
     if action == "upload-workout":
@@ -138,7 +142,8 @@ def main():
         workout_id = required(request, "workoutId")
         if workout_id == "9001":
             raise RuntimeError("testbed guard: attempted to delete foreign workout")
-        state["workouts"].pop(workout_id, None)
+        if state["workouts"].pop(workout_id, None) is None:
+            raise NotFoundException("testbed workout not found")
         save_state(path, state)
         print(json.dumps({"ok": True}))
         return
