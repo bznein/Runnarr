@@ -598,6 +598,19 @@ test.describe("local product journey", () => {
     await login(page, true);
     await expectNoHorizontalOverflow(page);
 
+    const dashboardChart = page.locator(".chart-area .recharts-surface").first();
+    const dashboardBar = dashboardChart.locator(".recharts-bar-rectangle").first();
+    await expect(dashboardBar).toBeVisible();
+    await dashboardBar.tap();
+    await expect(dashboardChart).toBeFocused();
+    await expect(dashboardChart).toHaveCSS("outline-style", "none");
+
+    await page.getByRole("button", { name: "Years", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(dashboardChart).toBeFocused();
+    await expect(dashboardChart).toHaveCSS("outline-style", "solid");
+    await expect(dashboardChart).toHaveCSS("outline-width", "2px");
+
     const primaryNavigation = page.getByRole("navigation", { name: "Primary navigation" });
     await expect(primaryNavigation.getByRole("link")).toHaveCount(4);
     await expect(primaryNavigation.getByRole("button", { name: "More", exact: true })).toBeVisible();

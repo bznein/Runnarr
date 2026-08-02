@@ -1294,6 +1294,15 @@ textarea {
   min-width: 0;
 }
 
+.recharts-surface:focus {
+  outline: none;
+}
+
+.recharts-surface:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
 .health-controls-panel {
   display: flex;
   align-items: end;

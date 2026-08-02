@@ -23,6 +23,7 @@
 
 ### Fixes
 
+- Mobile chart taps no longer leave a large browser focus rectangle, while keyboard focus remains visibly indicated.
 - Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
 - Planned and completed activity views now link to their corresponding Runnarr workout, and managed workouts link to their exact Garmin Connect workout.
 - Garmin workout ownership verification now handles numeric workout IDs and nested calendar response IDs from real Garmin responses without false conflicts.
