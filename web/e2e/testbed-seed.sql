@@ -56,14 +56,17 @@ from users
 cross join lateral (
     select sequence,
         format('testbed-activity-%s', lpad(sequence::text, 2, '0')) as source_id,
-        case sequence % 7
-            when 0 then format('Easy Riverside Run %s', lpad(sequence::text, 2, '0'))
-            when 1 then format('Tempo Run %s', lpad(sequence::text, 2, '0'))
-            when 2 then format('Rolling Roads Ride %s', lpad(sequence::text, 2, '0'))
-            when 3 then format('Full Body Strength %s', lpad(sequence::text, 2, '0'))
-            when 4 then format('Lunch Walk %s', lpad(sequence::text, 2, '0'))
-            when 5 then format('Pool Endurance %s', lpad(sequence::text, 2, '0'))
-            else format('Hill Hike %s', lpad(sequence::text, 2, '0'))
+        case
+            when sequence = 1 then 'Sensor Trend Test Run'
+            else case sequence % 7
+                when 0 then format('Easy Riverside Run %s', lpad(sequence::text, 2, '0'))
+                when 1 then format('Tempo Run %s', lpad(sequence::text, 2, '0'))
+                when 2 then format('Rolling Roads Ride %s', lpad(sequence::text, 2, '0'))
+                when 3 then format('Full Body Strength %s', lpad(sequence::text, 2, '0'))
+                when 4 then format('Lunch Walk %s', lpad(sequence::text, 2, '0'))
+                when 5 then format('Pool Endurance %s', lpad(sequence::text, 2, '0'))
+                else format('Hill Hike %s', lpad(sequence::text, 2, '0'))
+            end
         end as name,
         case sequence % 7
             when 0 then 'Run'
@@ -193,6 +196,62 @@ on conflict (activity_id, sample_index) do update set
     cadence = excluded.cadence,
     power = excluded.power,
     speed_mps = excluded.speed_mps;
+
+-- Keep one dense activity specifically for visually checking trend processing.
+-- It contains ordinary sensor noise, isolated spikes, sustained efforts, a
+-- recorded stop, a long sample gap, and a sensor dropout.
+delete from activity_samples samples
+using activities activity
+where samples.activity_id = activity.id
+  and activity.user_id = (select id from users where username = :'e2e_username')
+  and activity.source = 'testbed'
+  and activity.source_id = 'testbed-activity-01';
+
+insert into activity_samples(
+    activity_id, sample_index, timestamp, elapsed_s, distance_m,
+    latitude, longitude, elevation_m, heart_rate, cadence, power, speed_mps
+)
+select activity.id, sample_index,
+    activity.start_time + elapsed_s * interval '1 second',
+    elapsed_s,
+    sample_index * 3.4,
+    53.3420 + sample_index * 0.000025,
+    -6.2580 + sample_index * 0.000035,
+    30 + sample_index * 0.05 + sin(sample_index / 8.0) * 2
+        + case when sample_index = 40 then 35 else 0 end,
+    case
+        when sample_index = 120 then null
+        when sample_index = 20 then 205
+        when sample_index between 70 and 75 then 178
+        else 148 + sample_index % 5
+    end,
+    case
+        when sample_index = 120 then null
+        when sample_index = 24 then 220
+        when sample_index between 70 and 75 then 186
+        else 170 + sample_index % 3
+    end,
+    case
+        when sample_index = 120 then null
+        when sample_index = 25 then 700
+        when sample_index between 30 and 59 then 310 + sample_index % 4
+        else 245 + sample_index % 7
+    end,
+    case
+        when sample_index = 90 then 0
+        when sample_index = 15 then 1000.0 / 120
+        when sample_index = 110 then 1000.0 / 900
+        when sample_index between 30 and 59 then 1000.0 / (240 + (sample_index % 3 - 1) * 3)
+        else 1000.0 / (300 + (sample_index % 5 - 2) * 4)
+    end
+from activities activity
+cross join generate_series(0, 180) as sample_index
+cross join lateral (
+    select case when sample_index >= 90 then sample_index + 40 else sample_index end as elapsed_s
+) timing
+where activity.user_id = (select id from users where username = :'e2e_username')
+  and activity.source = 'testbed'
+  and activity.source_id = 'testbed-activity-01';
 
 insert into activity_laps(
     activity_id, lap_index, start_time, elapsed_time_s, moving_time_s,

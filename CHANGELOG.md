@@ -24,6 +24,7 @@
 
 ### Fixes
 
+- Activity detail graphs now use metric-specific time and distance trends for pace, elevation, heart rate, cadence, and power, retain pauses and sensor gaps, and show recorded values alongside trends in tooltips.
 - Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
 - Planned and completed activity views now link to their corresponding Runnarr workout.
 - Removed the misleading managed-workout link to Garmin Connect because the app does not support exact-workout deep links and the website requires a separate browser login.

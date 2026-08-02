@@ -105,8 +105,10 @@ type ActivityNavigation struct {
 }
 
 // ActivitySeries is the bounded display representation of an activity's
-// samples. Full samples remain available to server-side exports and analysis,
-// but clients should use this response for charts and maps.
+// samples. Points contain processed trends and are not guaranteed to map
+// one-to-one to recorded samples. Full samples remain available to server-side
+// exports and analysis, but clients should use this response for charts and
+// maps.
 type ActivitySeries struct {
 	Samples      []ActivitySample      `json:"samples"`
 	Points       []ActivitySeriesPoint `json:"points"`
@@ -115,17 +117,21 @@ type ActivitySeries struct {
 }
 
 type ActivitySeriesPoint struct {
-	Index       int      `json:"index"`
-	Label       string   `json:"label"`
-	DistanceM   *float64 `json:"distanceM,omitempty"`
-	Latitude    *float64 `json:"latitude,omitempty"`
-	Longitude   *float64 `json:"longitude,omitempty"`
-	ElevationM  *float64 `json:"elevationM,omitempty"`
-	HeartRate   *int     `json:"heartRate,omitempty"`
-	PaceSPKM    *float64 `json:"paceSPKM,omitempty"`
-	RawPaceSPKM *float64 `json:"rawPaceSPKM,omitempty"`
-	Power       *int     `json:"power,omitempty"`
-	Cadence     *int     `json:"cadence,omitempty"`
+	Index         int      `json:"index"`
+	Label         string   `json:"label"`
+	DistanceM     *float64 `json:"distanceM,omitempty"`
+	Latitude      *float64 `json:"latitude,omitempty"`
+	Longitude     *float64 `json:"longitude,omitempty"`
+	ElevationM    *float64 `json:"elevationM,omitempty"`
+	RawElevationM *float64 `json:"rawElevationM,omitempty"`
+	HeartRate     *int     `json:"heartRate,omitempty"`
+	RawHeartRate  *int     `json:"rawHeartRate,omitempty"`
+	PaceSPKM      *float64 `json:"paceSPKM,omitempty"`
+	RawPaceSPKM   *float64 `json:"rawPaceSPKM,omitempty"`
+	Power         *int     `json:"power,omitempty"`
+	RawPower      *int     `json:"rawPower,omitempty"`
+	Cadence       *int     `json:"cadence,omitempty"`
+	RawCadence    *int     `json:"rawCadence,omitempty"`
 }
 
 type DeleteActivityMediaResult struct {

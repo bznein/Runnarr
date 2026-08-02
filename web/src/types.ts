@@ -266,11 +266,15 @@ export type ActivitySeriesPoint = {
   latitude?: number;
   longitude?: number;
   elevationM?: number;
+  rawElevationM?: number;
   heartRate?: number;
+  rawHeartRate?: number;
   paceSPKM?: number;
   rawPaceSPKM?: number;
   power?: number;
+  rawPower?: number;
   cadence?: number;
+  rawCadence?: number;
 };
 
 export type ActivityLap = {

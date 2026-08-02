@@ -20,6 +20,7 @@ import { calendarPlanMatchDescription } from "./calendarPlanMatch";
 import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
 import type { ThemePreference } from "./theme";
 import { chartDisplayDomain } from "./activityChartBounds";
+import { formatActivityChartTooltipValue, recordedActivityChartKey } from "./activityChartTooltip";
 import { supportsRouteMetrics } from "./activityMetrics";
 import { NotificationBell, NotificationSettingsSection, NotificationsPage, unregisterCurrentPushDevice } from "./notifications";
 import { hasIntervalAnalysis, resolveActivityAnalysisTab } from "./activityAnalysis";
@@ -74,11 +75,15 @@ type ActivityChartPoint = {
   latitude?: number;
   longitude?: number;
   elevationM?: number;
+  rawElevationM?: number;
   heartRate?: number;
+  rawHeartRate?: number;
   paceSPKM?: number;
   rawPaceSPKM?: number;
   power?: number;
+  rawPower?: number;
   cadence?: number;
+  rawCadence?: number;
 };
 type RouteColorSource = "pace" | "gap";
 type CalendarMonth = { year: number; month: number };
@@ -3308,10 +3313,9 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
   const pinningMedia = mediaItems.find((media) => media.id === pinningMediaId);
   const routePoints = routeForActivity(displayItem);
   const canExportGPX = (activitySeries.data?.totalSamples ?? 0) > 1;
-  const paceScale = paceScaleForActivity(displayItem, "pace");
   const routePaceScale = paceScaleForActivity(displayItem, routeColorSource);
   const paceRouteSegments = paceRouteSegmentsForActivity(displayItem, routePaceScale, routeColorSource);
-  const chartData: ActivityChartPoint[] = activitySeries.data?.points ?? chartDataFor(displayItem.samples ?? [], paceScale);
+  const chartData: ActivityChartPoint[] = activitySeries.data?.points ?? chartDataFor(displayItem.samples ?? []);
   const highlightedPoint = routePointForChartPoint(highlightedSample);
   const finalClimbs = showClimbAnalysis ? effectiveClimbs : [];
   const selectedClimb = selectedClimbIndex === undefined ? undefined : finalClimbs.find((climb) => climb.index === selectedClimbIndex);
@@ -6930,7 +6934,7 @@ function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint
                   stroke={series.color}
                   dot={false}
                   strokeWidth={2}
-                  connectNulls={series.key !== "paceSPKM"}
+                  connectNulls={false}
                 />
               ))}
             </LineChart>
@@ -7586,7 +7590,7 @@ function dateRangesMatch(left: ActivityDateRange, right: ActivityDateRange) {
   return (left.dateFrom ?? "") === (right.dateFrom ?? "") && (left.dateTo ?? "") === (right.dateTo ?? "");
 }
 
-function chartDataFor(samples: ActivitySample[], paceScale = paceScaleFromSpeeds(samples.map((sample) => sample.speedMPS))): ActivityChartPoint[] {
+function chartDataFor(samples: ActivitySample[]): ActivityChartPoint[] {
   const points = samples.map((sample, index) => {
     const rawPaceSPKM = speedToPaceSPKM(sample.speedMPS);
     return {
@@ -7596,11 +7600,15 @@ function chartDataFor(samples: ActivitySample[], paceScale = paceScaleFromSpeeds
       latitude: typeof sample.latitude === "number" ? sample.latitude : undefined,
       longitude: typeof sample.longitude === "number" ? sample.longitude : undefined,
       elevationM: typeof sample.elevationM === "number" ? sample.elevationM : undefined,
+      rawElevationM: typeof sample.elevationM === "number" ? sample.elevationM : undefined,
       heartRate: sample.heartRate,
-      paceSPKM: clampPaceToScale(rawPaceSPKM, paceScale),
+      rawHeartRate: sample.heartRate,
+      paceSPKM: rawPaceSPKM,
       rawPaceSPKM,
       power: sample.power,
-      cadence: sample.cadence
+      rawPower: sample.power,
+      cadence: sample.cadence,
+      rawCadence: sample.cadence
     };
   });
   return smoothElevationSeries(points);
@@ -7723,8 +7731,8 @@ function formatChartTooltip(value: unknown, name: string, seriesList: ActivityCh
   if (!series || !Number.isFinite(numericValue)) {
     return [String(value), name];
   }
-  const rawPace = series.key === "paceSPKM" ? chartPayloadNumber(item, "rawPaceSPKM") : undefined;
-  return [series.format(rawPace ?? numericValue), name];
+  const recorded = chartPayloadNumber(item, recordedActivityChartKey(series.key));
+  return [formatActivityChartTooltipValue(numericValue, recorded, series.format), name];
 }
 
 function chartPayloadNumber(item: unknown, key: keyof ActivityChartPoint) {
