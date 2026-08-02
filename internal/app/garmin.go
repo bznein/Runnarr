@@ -27,6 +27,31 @@ const maxGarminSyncActivities = 10_000
 const maxGarminGearActivities = 100_000
 
 var ErrGarminBridgeOutputTooLarge = errors.New("Garmin bridge response is too large")
+var ErrGarminNotFound = errors.New("Garmin resource not found")
+
+type garminBridgeError struct {
+	Code    string
+	Message string
+}
+
+func (e *garminBridgeError) Error() string {
+	return e.Message
+}
+
+func (e *garminBridgeError) Is(target error) bool {
+	return target == ErrGarminNotFound && garminBridgeErrorIsNotFound(e.Code, e.Message)
+}
+
+func garminBridgeErrorIsNotFound(code, message string) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if strings.Contains(code, "notfound") || strings.Contains(code, "not_found") {
+		return true
+	}
+	message = strings.ToLower(message)
+	return strings.Contains(message, "client error (404)") ||
+		strings.Contains(message, "api error 404") ||
+		strings.Contains(message, "notfoundexception")
+}
 
 type GarminService struct {
 	store        *Store
@@ -909,11 +934,15 @@ func (b PythonGarminBridge) DeleteWorkout(ctx context.Context, tokenStore, worko
 	var response struct {
 		OK bool `json:"ok"`
 	}
-	return b.run(ctx, map[string]any{
+	err := b.run(ctx, map[string]any{
 		"action":     "delete-workout",
 		"tokenStore": tokenStore,
 		"workoutId":  workoutID,
 	}, &response)
+	if errors.Is(err, ErrGarminNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (b PythonGarminBridge) ListScheduledWorkouts(ctx context.Context, tokenStore string, year, month int) ([]GarminBridgeScheduledWorkout, error) {
@@ -1022,7 +1051,7 @@ func (b PythonGarminBridge) run(ctx context.Context, request map[string]any, res
 			Code  string `json:"code"`
 		}
 		if json.Unmarshal(stdout.Bytes(), &bridgeErr) == nil && bridgeErr.Error != "" {
-			return errors.New(bridgeErr.Error)
+			return &garminBridgeError{Code: bridgeErr.Code, Message: bridgeErr.Error}
 		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
