@@ -1827,24 +1827,15 @@ textarea {
   cursor: pointer;
 }
 
-.planned-match-workout-link,
-.workout-garmin-link {
+.planned-match-workout-link {
   color: var(--color-primary-strong);
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
 }
 
-.planned-match-workout-link:hover,
-.workout-garmin-link:hover {
+.planned-match-workout-link:hover {
   text-decoration: underline;
-}
-
-.workout-garmin-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  width: fit-content;
 }
 
 .planned-match-badge {

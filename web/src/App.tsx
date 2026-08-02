@@ -5486,7 +5486,6 @@ function WorkoutEditorPage() {
           <div id="garmin" className="workout-garmin-summary">
             <strong>Garmin</strong>
             <span>{garminExcluded ? "Excluded" : current?.garmin.status || (scheduledDate ? "Pending sync" : "Not scheduled")}</span>
-            {current?.garmin.providerWorkoutId && <a className="workout-garmin-link" href={`https://connect.garmin.com/modern/workout/${encodeURIComponent(current.garmin.providerWorkoutId)}`} target="_blank" rel="noreferrer">Open in Garmin <ExternalLink size={13} /><span className="sr-only"> workout {current.garmin.providerWorkoutId}</span></a>}
             {current?.garmin.providerScheduleId && <span>Calendar ID {current.garmin.providerScheduleId}</span>}
           </div>
         </section>
