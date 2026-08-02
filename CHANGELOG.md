@@ -11,6 +11,7 @@
 
 ### Features
 
+- Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
 - Added structured workout authoring from training-sheet prescriptions or manual text, including nested repeats, time/distance/lap-button steps, exact and ranged pace targets, configurable pace tolerance, final-recovery skipping, editable manual copies, parse diagnostics, calendar links, and a dedicated Workouts UI.
 - Added opt-in seven-day Garmin workout scheduling with per-user timezone settings, exact provider/date auto-matching after activity import, template cleanup, reconciliation status, and an offline fake-Garmin testbed.

@@ -24,6 +24,8 @@ import { supportsRouteMetrics } from "./activityMetrics";
 import { NotificationBell, NotificationSettingsSection, NotificationsPage, unregisterCurrentPushDevice } from "./notifications";
 import { hasIntervalAnalysis, resolveActivityAnalysisTab } from "./activityAnalysis";
 import type { ActivityAnalysisTab } from "./activityAnalysis";
+import { fullPathForSimplePath, normalizeSimpleMatchFilter, shouldRedirectToSimple, simpleIntervalSummary, simpleMatchStatusLabel } from "./simpleMode";
+import type { SimpleMatchFilter } from "./simpleMode";
 import type {
   Activity,
   ActivityClimb,
@@ -241,6 +243,7 @@ function mergeUserPreference(current: UserPreference | undefined, updates: Parti
     themePreference: current?.themePreference ?? "system",
     activityTableColumns: current?.activityTableColumns ?? defaultActivityTableColumns,
     gearSortBy: current?.gearSortBy || defaultGearSortBy,
+    defaultExperience: current?.defaultExperience ?? "full",
     ...updates
   };
 }
@@ -341,20 +344,35 @@ export function App() {
   };
 
   return (
-    <AuthenticatedApp session={session.data} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={savePreferences.error} pwa={pwa} />
+    <AuthenticatedApp
+      session={session.data}
+      preferences={preferences.data}
+      preferencesLoading={preferences.isLoading}
+      themePreference={themePreference}
+      onThemePreferenceChange={onThemePreferenceChange}
+      onDefaultExperienceChange={(value) => savePreferences.mutateAsync({ defaultExperience: value })}
+      themePreferenceError={savePreferences.error}
+      pwa={pwa}
+    />
   );
 }
 
 function AuthenticatedApp({
   session,
+  preferences,
+  preferencesLoading,
   themePreference,
   onThemePreferenceChange,
+  onDefaultExperienceChange,
   themePreferenceError,
   pwa
 }: {
   session?: Session;
+  preferences?: UserPreference;
+  preferencesLoading: boolean;
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
+  onDefaultExperienceChange: (value: "full" | "simple") => Promise<UserPreference>;
   themePreferenceError?: Error | null;
   pwa: { canInstall: boolean; install: () => Promise<void> };
 }) {
@@ -369,7 +387,6 @@ function AuthenticatedApp({
     window.sessionStorage.removeItem("runnarrLoginNext");
     navigate(safeNextPath(storedNext), { replace: true });
   }, [navigate]);
-
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const notificationID = params.get("runnarrNotification");
@@ -385,6 +402,7 @@ function AuthenticatedApp({
     });
     return () => window.clearTimeout(timeout);
   }, [location.hash, location.pathname, location.search, navigate, queryClient, session?.canWrite]);
+
   const logout = useMutation({
     mutationFn: async () => {
       await unregisterCurrentPushDevice();
@@ -396,6 +414,25 @@ function AuthenticatedApp({
       navigate("/login");
     }
   });
+
+  if (preferencesLoading && location.pathname === "/") {
+    return <FullScreenMessage title="Runnarr" message="Loading preferences" />;
+  }
+
+  if (location.pathname.startsWith("/simple")) {
+    return (
+      <SimpleAppShell
+        session={session}
+        onDefaultExperienceChange={onDefaultExperienceChange}
+        onLogout={() => logout.mutate()}
+        loggingOut={logout.isPending}
+      />
+    );
+  }
+
+  if (shouldRedirectToSimple(location.pathname, preferences?.defaultExperience, session?.supportMode)) {
+    return <Navigate to="/simple" replace />;
+  }
 
   return (
     <div className="app-shell">
@@ -451,11 +488,175 @@ function AuthenticatedApp({
           <Route path="/gear" element={<GearPage />} />
           <Route path="/gear/:id" element={<GearDetailPage />} />
           <Route path="/imports" element={<Navigate to="/settings#import" replace />} />
-          <Route path="/settings" element={<SettingsPage canWrite={session?.canWrite !== false} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={themePreferenceError} />} />
+          <Route path="/settings" element={<SettingsPage canWrite={session?.canWrite !== false} defaultExperience={preferences?.defaultExperience ?? "full"} onDefaultExperienceChange={onDefaultExperienceChange} themePreference={themePreference} onThemePreferenceChange={onThemePreferenceChange} themePreferenceError={themePreferenceError} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
     </div>
+  );
+}
+
+function SimpleAppShell({
+  session,
+  onDefaultExperienceChange,
+  onLogout,
+  loggingOut
+}: {
+  session?: Session;
+  onDefaultExperienceChange: (value: "full" | "simple") => Promise<UserPreference>;
+  onLogout: () => void;
+  loggingOut: boolean;
+}) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [exitError, setExitError] = useState("");
+  const fullPath = fullPathForSimplePath(location.pathname);
+  const exitSimpleMode = async () => {
+    setExitError("");
+    if (session?.canWrite !== false) {
+      try {
+        await onDefaultExperienceChange("full");
+      } catch (error) {
+        setExitError(error instanceof Error ? error.message : "Could not change the default experience");
+        return;
+      }
+    }
+    navigate(fullPath);
+  };
+
+  return (
+    <div className="simple-app-shell">
+      <header className="simple-header">
+        <Link to="/simple" className="brand simple-brand" aria-label="Simple matching home">
+          <ActivityIcon size={22} />
+          <span>Runnarr</span>
+        </Link>
+        <div className="simple-account">
+          <span>{session?.user?.displayName || session?.user?.username}</span>
+          <button className="secondary-button small-button" type="button" disabled={loggingOut} onClick={onLogout}>
+            <LogOut size={15} />
+            {loggingOut ? "Logging out…" : "Log out"}
+          </button>
+        </div>
+      </header>
+      {session?.supportMode && (
+        <div className="support-banner">
+          <span>Read-only support view: {session.user?.displayName || session.user?.username}</span>
+          <button className="secondary-button small-button" type="button" onClick={() => {
+            void api.stopSupport().then(() => window.location.replace("/"));
+          }}>Exit support view</button>
+        </div>
+      )}
+      <div className="simple-mode-banner">
+        <span><strong>Simple matching mode</strong> · Training-sheet matching only</span>
+        <button className="secondary-button small-button" type="button" onClick={() => void exitSimpleMode()}>Exit simple mode</button>
+      </div>
+      {exitError && (
+        <div className="simple-exit-error error" role="alert">
+          {exitError}. <Link to={fullPath}>Open full Runnarr for now</Link>.
+        </div>
+      )}
+      <main className="simple-main">
+        <Routes>
+          <Route path="/simple" element={<SimpleActivitiesPage />} />
+          <Route path="/simple/activities/:id" element={<ActivityDetailPage simple canWrite={session?.canWrite !== false} />} />
+          <Route path="*" element={<Navigate to="/simple" replace />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+function SimpleActivitiesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const matchState = normalizeSimpleMatchFilter(searchParams.get("matchState"));
+  const config = useQuery({ queryKey: ["training-sheet-config"], queryFn: api.trainingSheetConfig });
+  const google = useQuery({ queryKey: ["google-sheets-status"], queryFn: api.googleSheetsStatus });
+  const activities = useInfiniteQuery({
+    queryKey: ["simple-activities", matchState],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api.activities(undefined, {
+      limit: ACTIVITY_LIST_PAGE_SIZE,
+      offset: pageParam,
+      view: "training-sheet-matching",
+      matchState
+    }),
+    getNextPageParam: (lastPage) => lastPage.hasMore ? lastPage.nextOffset : undefined,
+    refetchInterval: (query) => {
+      const data = query.state.data as { pages?: Array<{ activities: Activity[] | null }> } | undefined;
+      return data?.pages?.some((page) => page.activities?.some((activity) => activity.trainingSheetMatch?.state === "writing")) ? 1500 : false;
+    }
+  });
+  const items = activities.data?.pages.flatMap((page) => page.activities ?? []) ?? [];
+  const filters: Array<{ value: SimpleMatchFilter; label: string }> = [
+    { value: "all", label: "All" },
+    { value: "unmatched", label: "Unmatched" },
+    { value: "matched", label: "Matched" },
+    { value: "attention", label: "Needs attention" }
+  ];
+  const setMatchState = (value: SimpleMatchFilter) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === "all") next.delete("matchState"); else next.set("matchState", value);
+    setSearchParams(next, { replace: true });
+  };
+
+  return (
+    <section className="simple-page" aria-labelledby="simple-activities-title">
+      <div className="simple-page-heading">
+        <div>
+          <div className="eyebrow">Training sheet</div>
+          <h1 id="simple-activities-title">Match completed runs</h1>
+          <p className="muted">Choose a run, review the proposed sheet changes, and write them back.</p>
+        </div>
+        <div className="segmented-control simple-match-filters" aria-label="Matching status">
+          {filters.map((filter) => (
+            <button key={filter.value} type="button" className={matchState === filter.value ? "active" : ""} aria-pressed={matchState === filter.value} onClick={() => setMatchState(filter.value)}>
+              {filter.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {config.data && !config.data.enabled && (
+        <div className="simple-readiness-note">Automatic training-sheet sync is disabled. Existing imported plans remain available. <Link to="/settings#training-sheet">Open full settings</Link>.</div>
+      )}
+      {google.data && !google.data.writeReady && (
+        <div className="simple-readiness-note warning">Google Sheets write access is unavailable. You can inspect matches, but preview and apply require reconnecting in <Link to="/settings#training-sheet">full settings</Link>.</div>
+      )}
+      {(config.error || google.error) && <div className="error">Could not check training-sheet readiness.</div>}
+      {activities.isLoading && <LoadingRow />}
+      {activities.error && <div className="error">{activities.error instanceof Error ? activities.error.message : "Could not load runs"}</div>}
+      {!activities.isLoading && !activities.error && items.length === 0 && <EmptyState title="No runs in this view" message="Try another matching-status filter." />}
+      {items.length > 0 && (
+        <div className="simple-activity-list">
+          {items.map((activity) => {
+            const query = matchState === "all" ? "" : `?matchState=${matchState}`;
+            return (
+              <Link className="simple-activity-row" to={`/simple/activities/${encodeURIComponent(activity.id)}${query}`} key={activity.id}>
+                <div className="simple-activity-date">{formatDate(activity.startTime)}</div>
+                <div className="simple-activity-name">
+                  <strong>{activity.name}</strong>
+                  <span>{activity.sportType}</span>
+                </div>
+                <div className="simple-activity-metrics">
+                  {supportsRouteMetrics(activity.sportType) && <span>{formatDistance(activity.distanceM)}</span>}
+                  <span>{formatDuration(activity.movingTimeS || activity.elapsedTimeS)}</span>
+                </div>
+                <span className={`simple-match-status simple-match-status--${activity.trainingSheetMatch?.state ?? "unmatched"}`}>{simpleMatchStatusLabel(activity)}</span>
+                <ChevronRight size={17} aria-hidden="true" />
+              </Link>
+            );
+          })}
+        </div>
+      )}
+      {activities.hasNextPage && (
+        <div className="pagination-actions">
+          <button className="secondary-button" type="button" disabled={activities.isFetchingNextPage} onClick={() => void activities.fetchNextPage()}>
+            <ChevronDown size={16} />
+            {activities.isFetchingNextPage ? "Loading" : "Load more"}
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -625,12 +826,12 @@ function LoginPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const session = useQuery({ queryKey: ["session"], queryFn: api.session });
+  const next = safeNextPath(searchParams.get("next") || window.sessionStorage.getItem("runnarrLoginNext") || "/");
   const login = useMutation({
     mutationFn: ({ username, password }: { username: string; password: string }) => api.login(username, password),
     onSuccess: async (session) => {
       setCsrfToken(session.csrfToken);
       await queryClient.invalidateQueries({ queryKey: ["session"] });
-      const next = safeNextPath(searchParams.get("next") || window.sessionStorage.getItem("runnarrLoginNext") || "/");
       window.sessionStorage.removeItem("runnarrLoginNext");
       navigate(next);
     },
@@ -673,7 +874,7 @@ function LoginPage() {
           </button>
         </>}
         {!localLoginEnabled && callbackError && <div className="error">Google login was not completed.</div>}
-        {googleOIDCEnabled && <a className="secondary-button" href="/api/auth/google/login">Continue with Google</a>}
+        {googleOIDCEnabled && <a className="secondary-button" href="/api/auth/google/login" onClick={() => window.sessionStorage.setItem("runnarrLoginNext", next)}>Continue with Google</a>}
         {!localLoginEnabled && !googleOIDCEnabled && <div className="error">No login method is configured.</div>}
       </form>
     </div>
@@ -2763,7 +2964,7 @@ function ActivityNavigation({
   );
 }
 
-function ActivityDetailPage({ config }: { config?: AppConfig }) {
+function ActivityDetailPage({ config, simple = false, canWrite = true }: { config?: AppConfig; simple?: boolean; canWrite?: boolean }) {
   const { id } = useParams();
   const activityIdRef = useRef(id);
   activityIdRef.current = id;
@@ -2793,12 +2994,12 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   const activityNavigation = useQuery({
     queryKey: ["activity-navigation", id, activityListSearch],
     queryFn: () => api.activityNavigation(id!, activityFilters),
-    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
+    enabled: !simple && Boolean(id) && activity.data?.activity.source !== "training_sheet"
   });
   const activitySeries = useQuery({
     queryKey: ["activity-series", id],
     queryFn: () => api.activitySeries(id!, 1200),
-    enabled: Boolean(id) && activity.data?.activity.source !== "training_sheet"
+    enabled: !simple && Boolean(id) && activity.data?.activity.source !== "training_sheet"
   });
   const plannedMatchCandidates = useQuery({
     queryKey: ["planned-match-candidates", id, plannedMatchWindowDays],
@@ -2815,6 +3016,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       return writeback.jobStatus === "running" || writeback.summaryStatus === "running" || writeback.intervalsStatus === "running" || writeback.feedbackStatus === "running" ? 1500 : false;
     }
   });
+  const simpleTrainingSheetConfig = useQuery({ queryKey: ["training-sheet-config"], queryFn: api.trainingSheetConfig, enabled: simple });
+  const simpleGoogleStatus = useQuery({ queryKey: ["google-sheets-status"], queryFn: api.googleSheetsStatus, enabled: simple });
   const previewPlannedActivity = useMutation({
     mutationFn: ({ activityId, draft }: { activityId: string; activityViewGeneration: number; requestGeneration: number; draft: PlannedMatchDraft }) =>
       api.plannedMatchPreview(activityId, draft),
@@ -2843,7 +3046,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
         queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", activityId] }),
         queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
         queryClient.invalidateQueries({ queryKey: ["activity-calendar"] }),
-        queryClient.invalidateQueries({ queryKey: ["activity", activityId] })
+        queryClient.invalidateQueries({ queryKey: ["activity", activityId] }),
+        queryClient.invalidateQueries({ queryKey: ["simple-activities"] })
       ]);
       if (!plannedMatchRequestIsCurrent(
         activityId,
@@ -2877,7 +3081,8 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] }),
         queryClient.invalidateQueries({ queryKey: ["planned-activities"] }),
-        queryClient.invalidateQueries({ queryKey: ["activity-calendar"] })
+        queryClient.invalidateQueries({ queryKey: ["activity-calendar"] }),
+        queryClient.invalidateQueries({ queryKey: ["simple-activities"] })
       ]);
     }
   });
@@ -2926,7 +3131,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     mutationFn: () => api.retryPlannedWriteback(id!),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["sync-jobs"] });
-      await queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["planned-match-candidates", id] }),
+        queryClient.invalidateQueries({ queryKey: ["simple-activities"] })
+      ]);
     }
   });
   const uploadMedia = useMutation({
@@ -2996,7 +3204,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     queryKey: ["activity-climb-preview", id, climbSensitivityForPreview],
     queryFn: () => api.activityClimbPreview(id!, climbSensitivityForPreview),
     placeholderData: (previousData) => previousData,
-    enabled: Boolean(activity.data) && supportsClimbAnalysis(activity.data?.activity.sportType ?? "")
+    enabled: !simple && Boolean(activity.data) && supportsClimbAnalysis(activity.data?.activity.sportType ?? "")
   });
   useEffect(() => {
     if (!routeUsesGap) {
@@ -3033,11 +3241,11 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [id, configuredClimbSensitivity]);
 
   useEffect(() => {
-    if (!matchOpen || matchCandidateId || !plannedMatchCandidates.data?.suggestedId) {
+    if ((!matchOpen && !simple) || matchCandidateId || !plannedMatchCandidates.data?.suggestedId) {
       return;
     }
     setMatchCandidateId(plannedMatchCandidates.data.suggestedId);
-  }, [matchOpen, matchCandidateId, plannedMatchCandidates.data?.suggestedId]);
+  }, [simple, matchOpen, matchCandidateId, plannedMatchCandidates.data?.suggestedId]);
 
   useEffect(() => {
     const nextValue = clampClimbSensitivity(climbSensitivity);
@@ -3073,10 +3281,10 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
   }, [searchParams, writeback]);
 
   if (activity.isLoading) {
-    return <Page title="Activity"><LoadingRow /></Page>;
+    return simple ? <section className="simple-page"><LoadingRow /></section> : <Page title="Activity"><LoadingRow /></Page>;
   }
   if (!activity.data || !item) {
-    return <Page title="Activity"><EmptyState title="Activity not found" /></Page>;
+    return simple ? <section className="simple-page"><EmptyState title="Activity not found" /></section> : <Page title="Activity"><EmptyState title="Activity not found" /></Page>;
   }
   if (item.source === "training_sheet") {
     const notes = (item.notes ?? "").trim();
@@ -3210,6 +3418,111 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
     setMatchPreview(undefined);
     setMatchOpen(false);
   };
+  const handleLoadMorePlans = () => {
+    if (plannedMatchCandidates.isError) {
+      const retryActivityId = id!;
+      const retryActivityViewGeneration = activityViewRef.current.generation;
+      const retryGeneration = invalidatePlannedMatchRetry();
+      setRetryingPlannedMatchCandidates(true);
+      void plannedMatchCandidates.refetch().finally(() => {
+        if (plannedMatchRequestIsCurrent(
+          retryActivityId,
+          retryActivityViewGeneration,
+          activityIdRef.current,
+          activityViewRef.current.generation,
+          retryGeneration,
+          plannedMatchRetryGenerationRef.current
+        )) {
+          setRetryingPlannedMatchCandidates(false);
+        }
+      });
+      return;
+    }
+    setPlannedMatchWindowDays(30);
+  };
+
+  if (simple) {
+    const simpleFilter = normalizeSimpleMatchFilter(searchParams.get("matchState"));
+    const simpleBackPath = simpleFilter === "all" ? "/simple" : `/simple?matchState=${simpleFilter}`;
+    const matchable = confirmedItem.sportType === "Run" || confirmedItem.sportType === "Treadmill Run";
+    const writeReady = simpleGoogleStatus.data?.writeReady === true;
+    return (
+      <section className="simple-page simple-activity-detail" aria-labelledby="simple-activity-title">
+        <Link className="simple-back-link" to={simpleBackPath}><ChevronLeft size={16} />Back to runs</Link>
+        <div className="simple-activity-heading">
+          <div>
+            <div className="eyebrow">{confirmedItem.sportType} · {formatDate(confirmedItem.startTime)}</div>
+            <h1 id="simple-activity-title">{confirmedItem.name}</h1>
+          </div>
+          {matchedPlannedActivity && <span className="simple-match-status simple-match-status--complete">Matched</span>}
+        </div>
+        <section className="simple-run-facts" aria-label="Run summary">
+          {supportsRouteMetrics(confirmedItem.sportType) && <div><span>Distance</span><strong>{formatDistance(confirmedItem.distanceM)}</strong></div>}
+          <div><span>Duration</span><strong>{formatDuration(confirmedItem.movingTimeS || confirmedItem.elapsedTimeS)}</strong></div>
+          <div><span>Structure</span><strong>{simpleIntervalSummary(confirmedItem)}</strong></div>
+        </section>
+        {simpleTrainingSheetConfig.data && !simpleTrainingSheetConfig.data.enabled && (
+          <div className="simple-readiness-note">Automatic training-sheet sync is disabled. Existing imported plans remain available. <Link to="/settings#training-sheet">Open full settings</Link>.</div>
+        )}
+        {simpleGoogleStatus.isLoading && <div className="muted">Checking Google Sheets write access…</div>}
+        {simpleGoogleStatus.data && !writeReady && (
+          <div className="simple-readiness-note warning">Google Sheets write access is unavailable. Reconnect in <Link to="/settings#training-sheet">full settings</Link> before previewing or applying a match.</div>
+        )}
+        {!matchable && <EmptyState title="This activity cannot be matched" message="Training-sheet matching supports runs and treadmill runs." />}
+        {matchable && matchedPlannedActivity && (
+          <section className="panel simple-matched-panel">
+            <div className="simple-matched-heading">
+              <div>
+                <div className="panel-heading">Matched planned run</div>
+                <strong>{matchedPlannedActivity.name}</strong>
+                <span className="muted">{formatDate(matchedPlannedActivity.plannedDate)}</span>
+              </div>
+              <button className="danger-button small-button" type="button" disabled={!canWrite || unmatchPlannedActivity.isPending} onClick={() => {
+                if (window.confirm("Unmatch this run? Values already written to Google Sheets will not be reverted.")) {
+                  unmatchPlannedActivity.mutate();
+                }
+              }}>{unmatchPlannedActivity.isPending ? "Unmatching…" : "Unmatch"}</button>
+            </div>
+            {writeback ? (
+              <div className="activity-writeback-statuses">
+                <span>Summary <strong>{writeback.summaryStatus || "pending"}</strong></span>
+                <span>Intervals <strong>{writeback.intervalsStatus || "pending"}</strong></span>
+                <span>Feedback <strong>{writeback.feedbackStatus || "pending"}</strong></span>
+              </div>
+            ) : <p className="muted">Writeback has not started.</p>}
+            {writeback?.summaryError && <div className="row-error">Summary: {writeback.summaryError}</div>}
+            {writeback?.intervalsError && <div className="row-error">Intervals: {writeback.intervalsError}</div>}
+            {writeback?.feedbackError && <div className="row-error">Feedback: {writeback.feedbackError}</div>}
+            {canRetryWriteback && <button className="secondary-button small-button" type="button" disabled={!canWrite || !writeReady || retryWriteback.isPending} onClick={() => retryWriteback.mutate()}><RefreshCw size={14} />{retryWriteback.isPending ? "Retrying…" : "Retry writeback"}</button>}
+          </section>
+        )}
+        {matchable && !matchedPlannedActivity && (
+          <PlannedActivityMatchDialog
+            inline
+            canApply={canWrite && writeReady}
+            data={plannedMatchResponseForDialog(plannedMatchCandidates.data)}
+            targetDate={localDateString(new Date(confirmedItem.startTime))}
+            selectedCandidateId={matchCandidateId}
+            canLoadMore={canLoadMorePlans}
+            loadMoreLabel={loadMorePlansLabel}
+            loadingStatus={candidateLoadingStatus}
+            loadingMore={loadingCandidateRequest}
+            matching={previewPlannedActivity.isPending || applyPlannedActivity.isPending}
+            error={plannedMatchCandidates.error ?? previewPlannedActivity.error ?? applyPlannedActivity.error}
+            preview={matchPreview}
+            onSelectCandidate={setMatchCandidateId}
+            onPreview={handlePreviewMatch}
+            onApply={handleApplyMatch}
+            onPreviewReset={resetMatchPreview}
+            onLoadMore={handleLoadMorePlans}
+            onClose={closeMatchDialog}
+          />
+        )}
+        {unmatchPlannedActivity.error && <div className="error">{unmatchPlannedActivity.error instanceof Error ? unmatchPlannedActivity.error.message : "Could not unmatch planned run"}</div>}
+        {retryWriteback.error && <div className="error">{retryWriteback.error instanceof Error ? retryWriteback.error.message : "Could not retry sheet write-back"}</div>}
+      </section>
+    );
+  }
   const handleMediaFilesSelected = (files: File[]) => {
     if (files.length === 0 || uploadMedia.isPending) {
       return;
@@ -3363,28 +3676,7 @@ function ActivityDetailPage({ config }: { config?: AppConfig }) {
           onPreview={handlePreviewMatch}
           onApply={handleApplyMatch}
           onPreviewReset={resetMatchPreview}
-          onLoadMore={() => {
-            if (plannedMatchCandidates.isError) {
-              const retryActivityId = id!;
-              const retryActivityViewGeneration = activityViewRef.current.generation;
-              const retryGeneration = invalidatePlannedMatchRetry();
-              setRetryingPlannedMatchCandidates(true);
-              void plannedMatchCandidates.refetch().finally(() => {
-                if (plannedMatchRequestIsCurrent(
-                  retryActivityId,
-                  retryActivityViewGeneration,
-                  activityIdRef.current,
-                  activityViewRef.current.generation,
-                  retryGeneration,
-                  plannedMatchRetryGenerationRef.current
-                )) {
-                  setRetryingPlannedMatchCandidates(false);
-                }
-              });
-              return;
-            }
-            setPlannedMatchWindowDays(30);
-          }}
+          onLoadMore={handleLoadMorePlans}
           onClose={closeMatchDialog}
         />
       )}
@@ -3837,6 +4129,8 @@ function optionalWatts(value?: number) {
 }
 
 function PlannedActivityMatchDialog({
+  inline = false,
+  canApply = true,
   data,
   targetDate,
   selectedCandidateId,
@@ -3854,6 +4148,8 @@ function PlannedActivityMatchDialog({
   onLoadMore,
   onClose
 }: {
+  inline?: boolean;
+  canApply?: boolean;
   data: PlannedActivityMatchResponse;
   targetDate: string;
   selectedCandidateId?: string;
@@ -3900,16 +4196,15 @@ function PlannedActivityMatchDialog({
     onPreviewReset();
   };
 
-  return (
-    <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+  const form = (
       <form
-        className="filter-dialog notes-dialog"
-        role="dialog"
-        aria-modal="true"
+        className={inline ? "panel simple-match-form" : "filter-dialog notes-dialog"}
+        role={inline ? undefined : "dialog"}
+        aria-modal={inline ? undefined : true}
         aria-labelledby="planned-match-title"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!selectedCandidateId || !valid) {
+          if (!canApply || !selectedCandidateId || !valid) {
             return;
           }
           if (preview) {
@@ -3924,9 +4219,9 @@ function PlannedActivityMatchDialog({
             <div className="eyebrow">Activity</div>
             <h2 id="planned-match-title">Match planned run</h2>
           </div>
-          <button className="icon-button" type="button" aria-label="Close planned run matching" onClick={onClose}>
+          {!inline && <button className="icon-button" type="button" aria-label="Close planned run matching" onClick={onClose}>
             <X size={16} />
-          </button>
+          </button>}
         </div>
         <p className="muted">Review the sheet changes before matching and writing them back.</p>
         <PlannedActivityMatchAgenda
@@ -3983,14 +4278,17 @@ function PlannedActivityMatchDialog({
           {preview && (
             <button className="secondary-button" type="button" disabled={matching || loadingMore} onClick={resetPreview}>Edit</button>
           )}
-          <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>
-          <button className="primary-button" type="submit" disabled={matching || loadingMore || !selectedCandidateId || !valid}>
+          {!inline && <button className="secondary-button" type="button" disabled={matching} onClick={onClose}>Cancel</button>}
+          <button className="primary-button" type="submit" disabled={!canApply || matching || loadingMore || !selectedCandidateId || !valid}>
             {matching ? (preview ? "Applying..." : "Building preview...") : (preview ? "Apply match & write back" : "Preview changes")}
           </button>
         </div>
       </form>
-    </div>
   );
+  if (inline) {
+    return form;
+  }
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>{form}</div>;
 }
 
 function TrainingSheetPreviewPanel({ preview, overrides, onOverrideChange }: { preview: TrainingSheetWritebackPreview; overrides: Record<string, string>; onOverrideChange: (ref: string, value: string) => void }) {
@@ -5250,11 +5548,15 @@ function mutationErrorMessage(error: unknown, fallback: string) {
 
 function SettingsPage({
   canWrite,
+  defaultExperience,
+  onDefaultExperienceChange,
   themePreference,
   onThemePreferenceChange,
   themePreferenceError
 }: {
   canWrite: boolean;
+  defaultExperience: "full" | "simple";
+  onDefaultExperienceChange: (value: "full" | "simple") => Promise<UserPreference>;
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
   themePreferenceError?: Error | null;
@@ -5426,6 +5728,7 @@ function SettingsPage({
       <TrainingSheetSettings />
       <NotificationSettingsSection canWrite={canWrite} />
       <ClimbDetectionSettingsSection />
+      <SimpleModeSettings defaultExperience={defaultExperience} onDefaultExperienceChange={onDefaultExperienceChange} />
       <DisplaySettingsSection value={themePreference} onChange={onThemePreferenceChange} error={themePreferenceError} />
       <UserManagement />
       <section id="import" className="panel upload-panel">
@@ -5635,7 +5938,7 @@ function TrainingSheetSettings() {
   }, [trainingSheetJob?.id, trainingSheetJob?.status, queryClient]);
   const canSync = enabled && sheetURL.trim().length > 0 && google.data?.connected === true;
   return (
-    <details className="panel settings-advanced-details">
+    <details id="training-sheet" className="panel settings-advanced-details">
       <summary><span className="panel-heading">Training plan import (Experimental)</span></summary>
       <div className="settings-advanced-content">
         <p className="muted">Opt-in Google Sheets integration for a structured coach training workbook. Leave disabled if you do not use this workflow.</p>
@@ -5659,6 +5962,49 @@ function TrainingSheetSettings() {
         {sync.error && <div className="error">{sync.error instanceof Error ? sync.error.message : "Training sheet sync failed"}</div>}
       </div>
     </details>
+  );
+}
+
+function SimpleModeSettings({
+  defaultExperience,
+  onDefaultExperienceChange
+}: {
+  defaultExperience: "full" | "simple";
+  onDefaultExperienceChange: (value: "full" | "simple") => Promise<UserPreference>;
+}) {
+  const session = useQuery({ queryKey: ["session"], queryFn: api.session });
+  const [selectedExperience, setSelectedExperience] = useState(defaultExperience);
+  const save = useMutation({
+    mutationFn: onDefaultExperienceChange,
+    onError: () => setSelectedExperience(defaultExperience)
+  });
+  useEffect(() => setSelectedExperience(defaultExperience), [defaultExperience]);
+  const canWrite = session.data?.canWrite !== false;
+  return (
+    <section className="panel simple-mode-settings">
+      <div>
+        <div className="panel-heading">Experience</div>
+        <p className="muted">Simple mode contains only completed runs and the training-sheet matching workflow.</p>
+      </div>
+      <div className="simple-mode-settings-actions">
+        <Link className="secondary-button" to="/simple">Open simple mode</Link>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={selectedExperience === "simple"}
+            disabled={!canWrite || save.isPending}
+            onChange={(event) => {
+              const nextExperience = event.target.checked ? "simple" : "full";
+              setSelectedExperience(nextExperience);
+              save.mutate(nextExperience);
+            }}
+          />
+          <span>Use simple mode by default</span>
+        </label>
+      </div>
+      {save.isPending && <div className="muted">Saving experience preference…</div>}
+      {save.error && <div className="error" role="alert">{save.error instanceof Error ? save.error.message : "Could not save experience preference"}</div>}
+    </section>
   );
 }
 

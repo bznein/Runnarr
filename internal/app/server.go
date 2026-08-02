@@ -1631,14 +1631,25 @@ func calendarDayDateFromQuery(r *http.Request) (time.Time, error) {
 func activityFiltersFromQuery(r *http.Request) ActivityFilters {
 	values := r.URL.Query()
 	return ActivityFilters{
-		SportTypes:         compactQueryValues(values["sport"], values["sports"]),
-		ExcludedSportTypes: compactQueryValues(values["excludeSport"], values["excludeSports"]),
-		Search:             strings.TrimSpace(values.Get("search")),
-		DateFrom:           parseActivityFilterDate(values.Get("dateFrom")),
-		DateTo:             parseActivityFilterDate(values.Get("dateTo")),
-		SortBy:             strings.TrimSpace(values.Get("sortBy")),
-		SortOrder:          strings.TrimSpace(values.Get("sortOrder")),
-		SummaryPeriod:      normalizeSummaryPeriod(values.Get("period")),
+		SportTypes:              compactQueryValues(values["sport"], values["sports"]),
+		ExcludedSportTypes:      compactQueryValues(values["excludeSport"], values["excludeSports"]),
+		Search:                  strings.TrimSpace(values.Get("search")),
+		DateFrom:                parseActivityFilterDate(values.Get("dateFrom")),
+		DateTo:                  parseActivityFilterDate(values.Get("dateTo")),
+		SortBy:                  strings.TrimSpace(values.Get("sortBy")),
+		SortOrder:               strings.TrimSpace(values.Get("sortOrder")),
+		SummaryPeriod:           normalizeSummaryPeriod(values.Get("period")),
+		TrainingSheetMatching:   strings.EqualFold(strings.TrimSpace(values.Get("view")), "training-sheet-matching"),
+		TrainingSheetMatchState: normalizeTrainingSheetMatchFilter(values.Get("matchState")),
+	}
+}
+
+func normalizeTrainingSheetMatchFilter(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "unmatched", "matched", "attention":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "all"
 	}
 }
 

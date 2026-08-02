@@ -28,6 +28,7 @@ export type UserPreference = {
   themePreference: "system" | "runnarr" | "ocean" | "sunset" | "midnight";
   activityTableColumns?: string[];
   gearSortBy: string;
+  defaultExperience: "full" | "simple";
 };
 
 export type ToolsPaceRequest = {
@@ -435,7 +436,16 @@ export type Activity = {
   intervals?: ActivityInterval[];
   climbs?: ActivityClimb[];
   media?: ActivityMedia[];
+  trainingSheetMatch?: ActivityTrainingSheetMatch;
   createdAt: string;
+};
+
+export type ActivityTrainingSheetMatch = {
+  state: "unmatched" | "pending" | "writing" | "complete" | "attention";
+  plannedActivityId?: string;
+  plannedActivityName?: string;
+  plannedDate?: string;
+  matchedAt?: string;
 };
 
 export type DeleteActivityResult = {

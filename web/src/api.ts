@@ -66,6 +66,8 @@ export function activityGPXURL(id: string, includeSensors: boolean) {
 type ActivityPageOptions = {
   limit?: number;
   offset?: number;
+  view?: "training-sheet-matching";
+  matchState?: "all" | "unmatched" | "matched" | "attention";
 };
 
 type HealthRange = {
@@ -80,6 +82,12 @@ function activityFilterQuery(filters?: ActivityTypeFilters, page?: ActivityPageO
   }
   if (page?.offset !== undefined) {
     params.set("offset", String(page.offset));
+  }
+  if (page?.view) {
+    params.set("view", page.view);
+  }
+  if (page?.matchState) {
+    params.set("matchState", page.matchState);
   }
   for (const sport of filters?.sports ?? []) {
     params.append("sport", sport);

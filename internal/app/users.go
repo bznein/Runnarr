@@ -303,11 +303,11 @@ func (s *Store) ensureUserSettings(ctx context.Context, id string) error {
 func (s *Store) GetUserPreferences(ctx context.Context) (UserPreference, error) {
 	var preference UserPreference
 	err := s.db.QueryRow(ctx, `
-		select theme_preference, activity_table_columns, gear_sort_by
+		select theme_preference, activity_table_columns, gear_sort_by, default_experience
 		from user_settings where user_id = $1
-	`, scopedUserID(ctx)).Scan(&preference.ThemePreference, &preference.ActivityTableColumns, &preference.GearSortBy)
+	`, scopedUserID(ctx)).Scan(&preference.ThemePreference, &preference.ActivityTableColumns, &preference.GearSortBy, &preference.DefaultExperience)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return UserPreference{ThemePreference: "system", GearSortBy: "distance_percent"}, nil
+		return UserPreference{ThemePreference: "system", GearSortBy: "distance_percent", DefaultExperience: "full"}, nil
 	}
 	return preference, err
 }
@@ -322,12 +322,20 @@ func (s *Store) UpdateUserPreferences(ctx context.Context, preference UserPrefer
 	if columns == nil {
 		columns = []string{}
 	}
+	defaultExperience := normalizeDefaultExperience(preference.DefaultExperience)
 	_, err := s.db.Exec(ctx, `
 		update user_settings
-		set theme_preference = $2, activity_table_columns = $3, gear_sort_by = $4, updated_at = now()
+		set theme_preference = $2, activity_table_columns = $3, gear_sort_by = $4, default_experience = $5, updated_at = now()
 		where user_id = $1
-	`, scopedUserID(ctx), theme, columns, gearSort)
+	`, scopedUserID(ctx), theme, columns, gearSort, defaultExperience)
 	return err
+}
+
+func normalizeDefaultExperience(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "simple") {
+		return "simple"
+	}
+	return "full"
 }
 
 func normalizeThemePreference(value string) string {

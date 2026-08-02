@@ -74,6 +74,46 @@ func TestActivityFiltersFromQuerySort(t *testing.T) {
 	}
 }
 
+func TestActivityFiltersFromQueryTrainingSheetMatching(t *testing.T) {
+	request := httptest.NewRequest("GET", "/api/activities?view=training-sheet-matching&matchState=attention", nil)
+
+	filters := activityFiltersFromQuery(request)
+
+	if !filters.TrainingSheetMatching || filters.TrainingSheetMatchState != "attention" {
+		t.Fatalf("matching filters = %#v", filters)
+	}
+}
+
+func TestActivityFilterConditionsTrainingSheetMatching(t *testing.T) {
+	conditions, _ := activityFilterConditions(ActivityFilters{TrainingSheetMatching: true, TrainingSheetMatchState: "unmatched"}, 1)
+	joined := strings.Join(conditions, "\n")
+	for _, want := range []string{"source <> 'training_sheet'", "sport_type in ('Run', 'Treadmill Run')", "not exists ("} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("conditions = %q, want %q", joined, want)
+		}
+	}
+}
+
+func TestTrainingSheetMatchState(t *testing.T) {
+	tests := []struct {
+		name                              string
+		summary, intervals, feedback, job string
+		want                              string
+	}{
+		{name: "writing takes precedence over old failure", summary: "failed", intervals: "running", feedback: "not_provided", job: "running", want: "writing"},
+		{name: "conflict needs attention", summary: "completed_with_conflicts", intervals: "completed", feedback: "not_provided", job: "completed", want: "attention"},
+		{name: "completed", summary: "completed", intervals: "not_applicable", feedback: "not_provided", job: "completed", want: "complete"},
+		{name: "pending", summary: "pending", intervals: "not_applicable", feedback: "not_provided", job: "", want: "pending"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := trainingSheetMatchState(test.summary, test.intervals, test.feedback, test.job); got != test.want {
+				t.Fatalf("state = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeActivityPage(t *testing.T) {
 	limit, offset := normalizeActivityPage(0, -10)
 	if limit != 50 || offset != 0 {

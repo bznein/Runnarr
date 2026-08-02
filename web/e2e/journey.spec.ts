@@ -142,6 +142,145 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
   });
 
+  test("provides a complete training-sheet-only matching mode", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const name = activityName(testInfo.project.name);
+    let matchState: "unmatched" | "attention" | "complete" = "unmatched";
+    let initialCandidates: Record<string, unknown> | undefined;
+    const plannedDate = new Date().toISOString().slice(0, 10);
+    const matchedPlan = {
+      id: "00000000-0000-4000-8000-000000000203",
+      source: "training_sheet",
+      sourceId: "e2e-simple-plan",
+      workbookId: "e2e-workbook",
+      sheetId: "e2e-sheet",
+      sheetTitle: "E2E Plan",
+      planCell: "A1",
+      plannedDate,
+      name: "2mins E2E Planned Run",
+      sportType: "Run",
+      status: "completed"
+    };
+
+    await page.route("**/api/providers/google/status", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, connected: true, writeReady: true, provider: "google_sheets" }) });
+    });
+    await page.route("**/api/activities/*/planned-match-candidates?*", async (route) => {
+      if (matchState === "unmatched") {
+        if (!initialCandidates) {
+          const response = await route.fetch();
+          initialCandidates = await response.json() as Record<string, unknown>;
+        }
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(initialCandidates) });
+        return;
+      }
+      const complete = matchState === "complete";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          candidates: [],
+          hasMore: false,
+          matched: matchedPlan,
+          writeback: {
+            plannedActivityId: matchedPlan.id,
+            activityId: "e2e-simple-activity",
+            jobStatus: complete ? "completed" : "failed",
+            summaryStatus: complete ? "completed" : "failed",
+            summaryError: complete ? undefined : "E2E writeback failed",
+            intervalsStatus: "not_applicable",
+            feedbackStatus: "not_provided"
+          }
+        })
+      });
+    });
+    await page.route("**/api/activities/*/planned-match-preview", async (route) => {
+      const requestBody = route.request().postDataJSON() as { plannedActivityId: string };
+      const activityId = new URL(route.request().url()).pathname.split("/").filter(Boolean).at(-2)!;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ preview: {
+          activityId,
+          plannedActivityId: requestBody.plannedActivityId,
+          sheetTitle: "E2E Plan",
+          sheetUrl: "https://docs.google.com/spreadsheets/d/e2e-workbook/edit",
+          fingerprint: "e2e-simple-preview",
+          changes: [{ range: "A1", section: "summary", label: "Summary", currentValue: "", proposedValue: "Completed", status: "write" }],
+          grid: { startRow: 1, endRow: 1, startColumn: 1, endColumn: 1, formattingAvailable: false, columns: [], rows: [] },
+          writeCount: 1,
+          conflictCount: 0
+        } })
+      });
+    });
+    await page.route("**/api/activities/*/planned-match-apply", async (route) => {
+      matchState = "attention";
+      await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ planned: matchedPlan, writebackJobId: "e2e-writeback", status: "running" }) });
+    });
+    await page.route("**/api/activities/*/planned-writeback", async (route) => {
+      matchState = "complete";
+      await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ jobId: "e2e-retry", status: "running" }) });
+    });
+    await page.route("**/api/activities/*/planned-match", async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.continue();
+        return;
+      }
+      matchState = "unmatched";
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ matched: false }) });
+    });
+
+    await login(page, mobile);
+    await ensureActivityImported(page, testInfo.project.name, mobile);
+    await page.goto("/settings");
+    const experience = page.locator(".simple-mode-settings");
+    await expect(experience.getByRole("link", { name: "Open simple mode", exact: true })).toHaveAttribute("href", "/simple");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
+      experience.getByLabel("Use simple mode by default").check()
+    ]);
+
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/simple$/);
+    await expect(page.getByRole("heading", { name: "Match completed runs" })).toBeVisible();
+    await expect(page.locator(".sidebar")).toHaveCount(0);
+    await expect(page.locator(".mobile-bottom-nav")).toHaveCount(0);
+    await expect(page.getByText("E2E Cycling Activity", { exact: true })).toHaveCount(0);
+    const matchedRow = page.locator(".simple-activity-row").filter({ hasText: "E2E Calendar Matched Run" });
+    await expect(matchedRow.getByText("Needs attention", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Needs attention", exact: true }).click();
+    await expect(page).toHaveURL(/matchState=attention/);
+    await expect(matchedRow).toBeVisible();
+    await page.getByRole("button", { name: "All", exact: true }).click();
+
+    await page.getByRole("link", { name: new RegExp(name) }).click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.getByText("Continuous run", { exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Match planned run" })).toHaveCount(0);
+    const inlineMatch = page.locator(".simple-match-form");
+    await expect(inlineMatch.getByRole("heading", { name: "Match planned run" })).toBeVisible();
+    await expect(inlineMatch.getByText("2mins E2E Planned Run", { exact: true })).toBeVisible();
+    await inlineMatch.getByRole("button", { name: "Preview changes", exact: true }).click();
+    await expect(inlineMatch.getByText("Sheet preview", { exact: true })).toBeVisible();
+    await inlineMatch.getByRole("button", { name: "Apply match & write back", exact: true }).click();
+
+    const matchedPanel = page.locator(".simple-matched-panel");
+    await expect(matchedPanel.getByText("Matched planned run", { exact: true })).toBeVisible();
+    await expect(matchedPanel.getByText("E2E writeback failed", { exact: false })).toBeVisible();
+    await matchedPanel.getByRole("button", { name: "Retry writeback", exact: true }).click();
+    await expect(matchedPanel.getByText("completed", { exact: true }).first()).toBeVisible();
+    page.once("dialog", (dialog) => void dialog.accept());
+    await matchedPanel.getByRole("button", { name: "Unmatch", exact: true }).click();
+    await expect(inlineMatch.getByRole("heading", { name: "Match planned run" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Exit simple mode", exact: true }).click();
+    await expect.poll(() => new URL(page.url()).pathname).toMatch(/^\/activities\//);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    if (mobile) await expectNoHorizontalOverflow(page);
+  });
+
   test("imports and inspects an activity, media, and export", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
@@ -294,6 +433,7 @@ test.describe("local product journey", () => {
 
     await cyclingNextActivity.click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.locator(".activity-navigation")).toHaveAttribute("aria-busy", "false");
     if (mobile) {
       await expect(page.locator(".mobile-header-title")).toHaveText("Activity");
       await expectNoHorizontalOverflow(page);
