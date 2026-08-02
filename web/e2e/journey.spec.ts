@@ -817,9 +817,8 @@ test.describe("local product journey", () => {
     const scheduledWorkout = page.locator(".workout-list-row").filter({ hasText: "E2E Planned Speed Work" });
     await expect(scheduledWorkout.getByText("Scheduled", { exact: true })).toBeVisible();
     await scheduledWorkout.click();
-    const garminWorkoutLink = page.getByRole("link", { name: /Open in Garmin/ });
-    await expect(garminWorkoutLink).toHaveAttribute("href", /^https:\/\/connect\.garmin\.com\/modern\/workout\/\d+$/);
-    await expect(garminWorkoutLink).toHaveAttribute("target", "_blank");
+    await expect(page.locator(".workout-garmin-summary")).toContainText("Scheduled");
+    await expect(page.getByRole("link", { name: /Open in Garmin/ })).toHaveCount(0);
 
     await page.getByRole("link", { name: "Back", exact: true }).click();
     await page.getByRole("link", { name: /E2E Manual Tempo/ }).click();
