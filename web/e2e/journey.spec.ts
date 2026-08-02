@@ -602,6 +602,9 @@ test.describe("local product journey", () => {
     const dashboardBar = dashboardChart.locator(".recharts-bar-rectangle").first();
     await expect(dashboardBar).toBeVisible();
     await dashboardBar.tap();
+    // Chromium does not consistently move focus to an SVG after a synthetic tap,
+    // so reproduce the focused state that mobile browsers can leave behind.
+    await dashboardChart.focus();
     await expect(dashboardChart).toBeFocused();
     await expect(dashboardChart).toHaveCSS("outline-style", "none");
 
