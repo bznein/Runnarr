@@ -92,9 +92,18 @@ make testbed
 
 The command prints the selected URL and local login credentials, then keeps the
 stack running until Ctrl-C. It contains a synthetic multi-sport activity
-history with samples, laps, structured workouts, health history, gear, and
-training plans. Garmin and Google integrations remain disabled. Stopping the
-command removes its isolated containers, network, and volumes.
+history with samples, laps, structured workout prescriptions, health history,
+gear, and training plans. Garmin workout operations use a file-backed offline
+bridge with one deliberately foreign workout and calendar entry; the bridge
+rejects any attempt to mutate those foreign fixtures. Activity/health provider
+downloads and Google integration remain disabled. Stopping the command removes
+its isolated containers, network, and volumes.
+
+The testbed also supports notification UI and browser-push testing. Use the
+per-device Test action for a deterministic push without changing fixture data.
+Startup intentionally does not create historical notifications for seeded
+workouts. The direct device test sends push only; inbox timeline events appear
+after a real state transition performed during that testbed session.
 
 The browser tests intentionally use local password authentication and local
 fixtures. Garmin Connect, Google OAuth, MFA, and real provider syncs are not

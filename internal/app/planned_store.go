@@ -154,7 +154,10 @@ func (s *Store) UpsertPlannedActivity(ctx context.Context, planned PlannedActivi
 			original_provider_url = $8, updated_at = now()
 		where user_id = $1 and source = $2 and source_id = $3
 	`, scopedUserID(ctx), planned.Source, planned.SourceID, planned.Name, planned.SportType, planned.PlannedDate.UTC(), planned.Notes, planned.SourceURL)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.UpsertSheetWorkoutForPlanned(ctx, planned, true)
 }
 
 func (s *Store) PlannedActivityExists(ctx context.Context, source, sourceID string) (bool, error) {
@@ -173,17 +176,58 @@ func (s *Store) SupersedeStaleTrainingSheetPlans(ctx context.Context, workbookID
 		return 0, fmt.Errorf("training sheet workbook ID is required")
 	}
 	start, end := trainingSheetPlanYearBounds(planYear)
-	result, err := s.db.Exec(ctx, `
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `
 		update planned_activities
 		set status = 'superseded', updated_at = now()
 		where user_id = $1 and source = $2 and workbook_id <> $3
 			and planned_date >= $4::date and planned_date < $5::date
 			and status = 'pending'
+		returning id::text
 	`, scopedUserID(ctx), trainingSheetProvider, workbookID, start, end)
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected(), nil
+	plannedIDs := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		plannedIDs = append(plannedIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	workoutIDs := make([]string, 0)
+	for _, plannedID := range plannedIDs {
+		var workoutID string
+		err := tx.QueryRow(ctx, `
+			update workouts set archived_at = now(), garmin_excluded = true, updated_at = now()
+			where user_id = $1 and planned_activity_id = $2 and source = 'training_sheet' and archived_at is null
+			returning id::text
+		`, scopedUserID(ctx), plannedID).Scan(&workoutID)
+		if err == nil {
+			workoutIDs = append(workoutIDs, workoutID)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	for _, workoutID := range workoutIDs {
+		if workout, err := s.GetWorkout(ctx, workoutID); err == nil {
+			s.publishWorkoutChangeNotification(ctx, workout, "archived")
+		}
+	}
+	return int64(len(plannedIDs)), nil
 }
 
 func (s *Store) ListPlannedActivities(ctx context.Context, from, to time.Time) ([]PlannedActivity, error) {
@@ -372,15 +416,17 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 			if err = updateReflection(); err != nil {
 				return PlannedActivity{}, err
 			}
-			if _, err = tx.Exec(ctx, `
-				insert into training_sheet_writebacks(planned_activity_id, activity_id, manual_overrides)
-				values($1, $2, $3::jsonb)
-				on conflict(planned_activity_id) do update set
-					activity_id = excluded.activity_id,
-					manual_overrides = case when $4 then excluded.manual_overrides else training_sheet_writebacks.manual_overrides end,
-					updated_at = now()
-			`, planned.ID, activityID, manualOverrides, manualOverridesSet); err != nil {
-				return PlannedActivity{}, err
+			if planned.Source == trainingSheetProvider {
+				if _, err = tx.Exec(ctx, `
+					insert into training_sheet_writebacks(planned_activity_id, activity_id, manual_overrides)
+					values($1, $2, $3::jsonb)
+					on conflict(planned_activity_id) do update set
+						activity_id = excluded.activity_id,
+						manual_overrides = case when $4 then excluded.manual_overrides else training_sheet_writebacks.manual_overrides end,
+						updated_at = now()
+				`, planned.ID, activityID, manualOverrides, manualOverridesSet); err != nil {
+					return PlannedActivity{}, err
+				}
 			}
 			if err = tx.Commit(ctx); err != nil {
 				return PlannedActivity{}, err
@@ -407,21 +453,76 @@ func (s *Store) matchPlannedActivity(ctx context.Context, activityID, plannedAct
 	planned.Status = plannedActivityStatusCompleted
 	planned.MatchedActivityID = activityID
 	planned.MatchedAt = &matchedAt
-	if _, err = tx.Exec(ctx, `
-		insert into training_sheet_writebacks(planned_activity_id, activity_id, manual_overrides)
-		values($1, $2, $3::jsonb)
-		on conflict(planned_activity_id) do update set
-			activity_id = excluded.activity_id,
-			manual_overrides = case when $4 then excluded.manual_overrides else training_sheet_writebacks.manual_overrides end,
-			updated_at = now()
-	`, planned.ID, activityID, manualOverrides, manualOverridesSet); err != nil {
-		return PlannedActivity{}, err
+	if planned.Source == trainingSheetProvider {
+		if _, err = tx.Exec(ctx, `
+			insert into training_sheet_writebacks(planned_activity_id, activity_id, manual_overrides)
+			values($1, $2, $3::jsonb)
+			on conflict(planned_activity_id) do update set
+				activity_id = excluded.activity_id,
+				manual_overrides = case when $4 then excluded.manual_overrides else training_sheet_writebacks.manual_overrides end,
+				updated_at = now()
+		`, planned.ID, activityID, manualOverrides, manualOverridesSet); err != nil {
+			return PlannedActivity{}, err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return PlannedActivity{}, err
 	}
 	committed = true
 	return planned, nil
+}
+
+func (s *Store) AutoMatchManagedWorkout(ctx context.Context, activityID, providerWorkoutID string) (PlannedActivity, bool, error) {
+	providerWorkoutID = strings.TrimSpace(providerWorkoutID)
+	if providerWorkoutID == "" {
+		return PlannedActivity{}, false, nil
+	}
+	config, err := s.GetWorkoutConfig(ctx)
+	if err != nil {
+		return PlannedActivity{}, false, err
+	}
+	if !config.SyncEnabled || config.Timezone == "" {
+		return PlannedActivity{}, false, nil
+	}
+	rows, err := s.db.Query(ctx, `
+		select distinct planned.id::text
+		from activities activity
+		join garmin_workout_templates template
+			on template.user_id = activity.user_id and template.provider_workout_id = $3
+		join garmin_workout_schedules schedule
+			on schedule.user_id = activity.user_id and schedule.template_id = template.id
+		join workouts workout
+			on workout.user_id = activity.user_id and workout.id = schedule.workout_id
+		join planned_activities planned
+			on planned.user_id = activity.user_id and planned.id = workout.planned_activity_id
+		where activity.id = $1 and activity.user_id = $2
+			and schedule.scheduled_date = date(activity.start_time at time zone $4)
+			and planned.status = 'pending' and planned.matched_activity_id is null
+		limit 2
+	`, activityID, scopedUserID(ctx), providerWorkoutID, config.Timezone)
+	if err != nil {
+		return PlannedActivity{}, false, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0, 2)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return PlannedActivity{}, false, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return PlannedActivity{}, false, err
+	}
+	if len(ids) != 1 {
+		return PlannedActivity{}, false, nil
+	}
+	planned, err := s.MatchPlannedActivity(ctx, activityID, ids[0])
+	if errors.Is(err, errPlannedMatchConflict) {
+		return PlannedActivity{}, false, nil
+	}
+	return planned, err == nil, err
 }
 
 func (s *Store) UnmatchPlannedActivity(ctx context.Context, activityID string) error {
@@ -473,7 +574,15 @@ func (s *Store) UnmatchPlannedActivity(ctx context.Context, activityID string) e
 const plannedActivityColumns = `
 	id::text, source, source_id, workbook_id, sheet_id, sheet_title, plan_cell,
 	feedback_cell, planned_date, name, sport_type, notes, status, source_url, raw,
-	matched_activity_id::text, matched_at, created_at, updated_at`
+	matched_activity_id::text, matched_at,
+	coalesce((
+		select workout.id::text
+		from workouts workout
+		where workout.user_id = planned_activities.user_id
+			and workout.planned_activity_id = planned_activities.id
+		order by (workout.archived_at is null) desc, workout.updated_at desc
+		limit 1
+	), ''), created_at, updated_at`
 
 func scanPlannedActivity(row interface{ Scan(...any) error }, item *PlannedActivity) error {
 	var rawBytes []byte
@@ -482,7 +591,7 @@ func scanPlannedActivity(row interface{ Scan(...any) error }, item *PlannedActiv
 	if err := row.Scan(
 		&item.ID, &item.Source, &item.SourceID, &item.WorkbookID, &item.SheetID, &item.SheetTitle,
 		&item.PlanCell, &item.FeedbackCell, &item.PlannedDate, &item.Name, &item.SportType, &item.Notes, &item.Status,
-		&item.SourceURL, &rawBytes, &matchedActivityID, &matchedAt, &item.CreatedAt, &item.UpdatedAt,
+		&item.SourceURL, &rawBytes, &matchedActivityID, &matchedAt, &item.WorkoutID, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return err
 	}

@@ -87,9 +87,10 @@ async function logout(page: Page, mobile: boolean) {
   if (mobile) {
     const menu = await openMobileMenu(page);
     await menu.getByRole("button", { name: "Log out", exact: true }).click();
-    return;
+  } else {
+    await page.locator(".sidebar").getByRole("button", { name: "Log out", exact: true }).click();
   }
-  await page.locator(".sidebar").getByRole("button", { name: "Log out", exact: true }).click();
+  await expect(page).toHaveURL(/\/login(?:\?|$)/);
 }
 
 async function ensureActivityImported(page: Page, projectName: string, mobile: boolean, requestedName = activityName(projectName)) {
@@ -310,6 +311,7 @@ test.describe("local product journey", () => {
     await expect(structuredMismatchCandidate.locator(".planned-match-score--weak")).toHaveText("50/100");
     await expect(structuredMismatchCandidate.getByText("Planned intervals; activity is continuous", { exact: true })).toBeVisible();
     await expect(structuredMismatchCandidate.getByText("Suggested", { exact: true })).toHaveCount(0);
+    await expect(structuredMismatchCandidate.getByRole("link", { name: "View workout", exact: true })).toHaveAttribute("href", "/workouts/00000000-0000-4000-8000-000000000170");
     const durationMismatchCandidate = agendaDays.nth(2).locator(".planned-match-candidate").filter({ hasText: "2 hours E2E Planned Long Run" });
     await expect(durationMismatchCandidate).toBeVisible();
     await expect(durationMismatchCandidate.locator(".planned-match-score--weak")).toHaveText("48/100");
@@ -441,11 +443,20 @@ test.describe("local product journey", () => {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
       "base64"
     );
-    await page.locator('input[type="file"][accept="image/jpeg,image/png"]').setInputFiles({
+    const activityId = new URL(page.url()).pathname.split("/").pop();
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Add photos" }).click();
+    const fileChooser = await fileChooserPromise;
+    const uploadResponsePromise = page.waitForResponse((response) =>
+      response.url().includes(`/api/activities/${activityId}/media`) && response.request().method() === "POST"
+    );
+    await fileChooser.setFiles({
       name: "e2e-photo.png",
       mimeType: "image/png",
       buffer: png
     });
+    const uploadResponse = await uploadResponsePromise;
+    expect(uploadResponse.ok()).toBeTruthy();
     await expect(page.getByText("1 photo", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Match", exact: true })).toBeVisible();
     await expect(page.locator(".planned-match-panel")).toHaveCount(0);
@@ -765,6 +776,197 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
     await expect(page.locator(".sidebar")).toBeHidden();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("creates, inspects, and opens planned workouts from the calendar", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    await login(page, mobile);
+
+    await page.goto("/activities");
+    await visibleActivityLink(page, "E2E Calendar Matched Run", mobile).click();
+    await expect(page.getByRole("heading", { name: "E2E Calendar Matched Run" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Workout", exact: true })).toHaveAttribute("href", "/workouts/00000000-0000-4000-8000-000000000173");
+
+    await navigateTo(page, "Settings", mobile);
+    if (await page.getByText("Connected as Offline Garmin Testbed", { exact: true }).count() === 0) {
+      await page.getByPlaceholder("Garmin email").fill("offline@example.test");
+      await page.getByPlaceholder("Garmin password").fill("offline-testbed");
+      await page.getByRole("button", { name: "Connect", exact: true }).click();
+      await expect(page.getByText("Connected as Offline Garmin Testbed", { exact: true })).toBeVisible();
+    }
+    const workoutSettings = page.locator(".workout-settings-panel");
+    const enableScheduling = workoutSettings.getByRole("checkbox", { name: "Enable Garmin workout scheduling" });
+    if (!(await enableScheduling.isChecked())) {
+      await enableScheduling.check();
+    }
+    await workoutSettings.getByLabel("Workout timezone").fill("UTC");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/config/workouts") && response.request().method() === "PATCH" && response.ok()),
+      workoutSettings.getByRole("button", { name: "Save workout settings", exact: true }).click()
+    ]);
+    await expect.poll(async () => page.evaluate(async () => {
+      const response = await fetch("/api/sync-jobs");
+      const payload = await response.json();
+      return payload.jobs?.find((job: { provider: string; kind: string }) => job.provider === "garmin" && job.kind === "workouts")?.status;
+    }), { timeout: 15_000 }).toBe("completed");
+
+    await navigateTo(page, "Workouts", mobile);
+    await expect(page.getByRole("heading", { name: "Workouts" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /E2E Manual Tempo/ })).toBeVisible();
+    const scheduledWorkout = page.locator(".workout-list-row").filter({ hasText: "E2E Planned Speed Work" });
+    await expect(scheduledWorkout.getByText("Scheduled", { exact: true })).toBeVisible();
+    await scheduledWorkout.click();
+    const garminWorkoutLink = page.getByRole("link", { name: /Open in Garmin/ });
+    await expect(garminWorkoutLink).toHaveAttribute("href", /^https:\/\/connect\.garmin\.com\/modern\/workout\/\d+$/);
+    await expect(garminWorkoutLink).toHaveAttribute("target", "_blank");
+
+    await page.getByRole("link", { name: "Back", exact: true }).click();
+    await page.getByRole("link", { name: /E2E Manual Tempo/ }).click();
+    await expect(page.getByRole("heading", { name: "E2E Manual Tempo" })).toBeVisible();
+    await expect(page.getByLabel("Prescription")).toHaveValue("12mins warm up//20mins@4:15//8mins cool down");
+    await expect(page.locator(".workout-step.work")).toContainText("20:00");
+
+    await page.getByRole("link", { name: "Back", exact: true }).click();
+    await page.getByRole("link", { name: "New workout", exact: true }).click();
+    const createdName = `E2E ${testInfo.project.name} Track Repeats`;
+    const scheduled = new Date();
+    scheduled.setDate(scheduled.getDate() + 40);
+    const scheduledDate = scheduled.toISOString().slice(0, 10);
+    await page.getByLabel("Name").fill(createdName);
+    await page.getByLabel("Date").fill(scheduledDate);
+    await page.getByLabel("Prescription").fill("10mins warm up//3x2mins@4:00(1min)//10mins cool down");
+    await page.getByRole("button", { name: "Preview prescription", exact: true }).click();
+    await expect(page.getByText("3× repeat", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("heading", { name: createdName })).toBeVisible();
+
+    const seededDate = new Date();
+    seededDate.setDate(seededDate.getDate() + 40);
+    const seededDateText = seededDate.toISOString().slice(0, 10);
+    await page.goto(`/calendar/day/${seededDateText}`);
+    const seededWorkoutLink = page.getByRole("link", { name: "E2E Manual Tempo", exact: true });
+    await expect(seededWorkoutLink).toHaveAttribute("href", "/workouts/00000000-0000-4000-8000-000000000172");
+    await seededWorkoutLink.click();
+    await expect(page.getByRole("heading", { name: "E2E Manual Tempo" })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("uses notification inbox, links, and category settings", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const notificationID = "00000000-0000-4000-8000-000000000174";
+    const timestamp = "2026-07-30T12:00:00Z";
+    const notification = {
+      id: notificationID,
+      category: "workout_changes",
+      kind: "push_test",
+      severity: "success",
+      title: "Runnarr notifications are working",
+      body: "This event opens notification settings.",
+      actionPath: "/settings?section=notifications",
+      createdAt: timestamp,
+      lastEventAt: timestamp,
+      eventCount: 1
+    };
+    let notificationRead = false;
+    let notificationExists = true;
+
+    await page.route(/\/api\/notifications(?:\/[^?]+)?(?:\?.*)?$/, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (request.method() === "PATCH") {
+        notificationRead = JSON.parse(request.postData() ?? "{}").read === true;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ updated: true }) });
+        return;
+      }
+      if (request.method() === "POST" && url.pathname === "/api/notifications/read-all") {
+        notificationRead = true;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ updated: true }) });
+        return;
+      }
+      if (request.method() === "DELETE" && url.pathname === "/api/notifications") {
+        if (url.searchParams.get("scope") === "all" || notificationRead) notificationExists = false;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ deleted: true }) });
+        return;
+      }
+      if (url.pathname === `/api/notifications/${notificationID}`) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...notification,
+            ...(notificationRead ? { readAt: timestamp } : {}),
+            events: [{
+              id: "00000000-0000-4000-8000-000000000175",
+              category: notification.category,
+              kind: notification.kind,
+              severity: notification.severity,
+              title: notification.title,
+              body: notification.body,
+              actionPath: notification.actionPath,
+              createdAt: timestamp
+            }]
+          })
+        });
+        return;
+      }
+      if (url.searchParams.get("limit") === "5") {
+        expect(url.searchParams.get("unread")).toBe("true");
+      }
+      const visibleNotification = {
+        ...notification,
+        ...(notificationRead ? { readAt: timestamp } : {})
+      };
+      const includeNotification = notificationExists && (!url.searchParams.has("unread") || !notificationRead);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          notifications: includeNotification ? [visibleNotification] : [],
+          unreadCount: notificationExists && !notificationRead ? 1 : 0
+        })
+      });
+    });
+
+    await login(page, mobile);
+    await page.getByRole("button", { name: "1 unread notifications", exact: true }).click();
+    const popover = page.getByRole("dialog", { name: "Recent notifications" });
+    await expect(popover.getByText(notification.title, { exact: true })).toBeVisible();
+    await expect(popover.locator(".notification-severity.success")).toBeVisible();
+    await expect(popover.locator(".notification-dot")).toHaveCount(0);
+    await popover.getByRole("button").filter({ hasText: notification.title }).click();
+    await expect(page).toHaveURL(/\/settings\?section=notifications$/);
+    const settings = page.locator("#notifications");
+    await expect(settings).toBeVisible();
+
+    const activityMatching = settings.getByLabel(/Activity matching/);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/notification-settings") && response.request().method() === "PATCH" && response.ok()),
+      activityMatching.selectOption("off")
+    ]);
+    await expect(activityMatching).toHaveValue("off");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/notification-settings") && response.request().method() === "PATCH" && response.ok()),
+      activityMatching.selectOption("in_app")
+    ]);
+    await expect(activityMatching).toHaveValue("in_app");
+
+    await page.goto("/notifications");
+    await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
+    await expect(page.locator(".notification-card .notification-severity.success")).toBeVisible();
+    const markAllRead = page.getByRole("button", { name: "Mark all read", exact: true });
+    await expect(markAllRead).toBeDisabled();
+    await page.getByText(notification.title, { exact: true }).click();
+    await expect(page.locator(".notification-timeline-event").getByText(notification.body, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Mark unread", exact: true }).click();
+    await expect(markAllRead).toBeEnabled();
+    await markAllRead.click();
+    await expect(page.getByRole("status")).toHaveText("All notifications marked as read.");
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Clear read", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Read notifications cleared.");
+    await expect(page.getByText(notification.title, { exact: true })).toHaveCount(0);
+    await expect(markAllRead).toBeDisabled();
     await expectNoHorizontalOverflow(page);
   });
 });

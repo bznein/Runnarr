@@ -11,7 +11,7 @@ import { App } from "./App";
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js?v=2", { updateViaCache: "none" });
+    void navigator.serviceWorker.register("/sw.js?v=3", { updateViaCache: "none" });
   });
 }
 

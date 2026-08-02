@@ -572,13 +572,14 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 	rows, err := s.db.Query(ctx, fmt.Sprintf(`
 		select
 			%s as day,
-			id::text,
-			source,
-			coalesce(nullif(local_name, ''), name),
-			start_time,
-			sport_type,
-			coalesce(distance_m, 0),
-			coalesce(moving_time_s, 0),
+			activities.id::text,
+			coalesce(workout_link.workout_id, ''),
+			activities.source,
+			coalesce(nullif(activities.local_name, ''), activities.name),
+			activities.start_time,
+			activities.sport_type,
+			coalesce(activities.distance_m, 0),
+			coalesce(activities.moving_time_s, 0),
 			matched_plan.matched_plan_id,
 			matched_plan.matched_plan_name,
 			matched_plan.matched_plan_date
@@ -588,8 +589,18 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 			from planned_activities
 			where matched_activity_id = activities.id and user_id = activities.user_id
 		) matched_plan on true
+		left join lateral (
+			select workouts.id::text as workout_id
+			from planned_activities source_plan
+			join workouts on workouts.planned_activity_id = source_plan.id
+			where source_plan.user_id = activities.user_id
+				and workouts.archived_at is null
+				and ((source_plan.source = activities.source and source_plan.source_id = activities.source_id)
+					or source_plan.matched_activity_id = activities.id)
+			order by workouts.updated_at desc limit 1
+		) workout_link on true
 		`+where+`
-		order by day, start_time
+		order by day, activities.start_time
 	`, dayExpression), args...)
 	if err != nil {
 		return ActivityCalendar{}, err
@@ -602,7 +613,7 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 		var item CalendarActivity
 		var matchedPlanID, matchedPlanName sql.NullString
 		var matchedPlanDate sql.NullTime
-		if err := rows.Scan(&day, &item.ID, &item.Source, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS,
+		if err := rows.Scan(&day, &item.ID, &item.WorkoutID, &item.Source, &item.Name, &item.StartTime, &item.SportType, &item.DistanceM, &item.MovingTimeS,
 			&matchedPlanID, &matchedPlanName, &matchedPlanDate); err != nil {
 			return ActivityCalendar{}, err
 		}
@@ -612,6 +623,14 @@ func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (
 	}
 	if err := rows.Err(); err != nil {
 		return ActivityCalendar{}, err
+	}
+	manualWorkouts, err := s.ListManualCalendarWorkouts(ctx, filters.DateFrom, filters.DateTo)
+	if err != nil {
+		return ActivityCalendar{}, err
+	}
+	for _, workout := range manualWorkouts {
+		dayKey := workout.StartTime.Format("2006-01-02")
+		activityByDay[dayKey] = append(activityByDay[dayKey], workout)
 	}
 
 	healthMetrics, err := s.ListDailyHealthMetrics(ctx, garminProvider, filters.DateFrom, filters.DateTo)
@@ -664,13 +683,14 @@ func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string
 	where, args := activityFilterWhereForUser(filters, 1, scopedUserID(ctx))
 	rows, err := s.db.Query(ctx, `
 		select
-			id::text,
-			source,
-			coalesce(nullif(local_name, ''), name),
-			start_time,
-			sport_type,
-			coalesce(distance_m, 0),
-			coalesce(moving_time_s, 0),
+			activities.id::text,
+			coalesce(workout_link.workout_id, ''),
+			activities.source,
+			coalesce(nullif(activities.local_name, ''), activities.name),
+			activities.start_time,
+			activities.sport_type,
+			coalesce(activities.distance_m, 0),
+			coalesce(activities.moving_time_s, 0),
 			matched_plan.matched_plan_id,
 			matched_plan.matched_plan_name,
 			matched_plan.matched_plan_date
@@ -680,8 +700,18 @@ func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string
 			from planned_activities
 			where matched_activity_id = activities.id and user_id = activities.user_id
 		) matched_plan on true
+		left join lateral (
+			select workouts.id::text as workout_id
+			from planned_activities source_plan
+			join workouts on workouts.planned_activity_id = source_plan.id
+			where source_plan.user_id = activities.user_id
+				and workouts.archived_at is null
+				and ((source_plan.source = activities.source and source_plan.source_id = activities.source_id)
+					or source_plan.matched_activity_id = activities.id)
+			order by workouts.updated_at desc limit 1
+		) workout_link on true
 		`+where+`
-		order by start_time
+		order by activities.start_time
 	`, args...)
 	if err != nil {
 		return CalendarDayView{}, err
@@ -693,7 +723,7 @@ func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string
 		var activity CalendarActivity
 		var matchedPlanID, matchedPlanName sql.NullString
 		var matchedPlanDate sql.NullTime
-		if err := rows.Scan(&activity.ID, &activity.Source, &activity.Name, &activity.StartTime, &activity.SportType, &activity.DistanceM, &activity.MovingTimeS,
+		if err := rows.Scan(&activity.ID, &activity.WorkoutID, &activity.Source, &activity.Name, &activity.StartTime, &activity.SportType, &activity.DistanceM, &activity.MovingTimeS,
 			&matchedPlanID, &matchedPlanName, &matchedPlanDate); err != nil {
 			return CalendarDayView{}, err
 		}
@@ -703,6 +733,11 @@ func (s *Store) CalendarDay(ctx context.Context, date time.Time, timezone string
 	if err := rows.Err(); err != nil {
 		return CalendarDayView{}, err
 	}
+	manualWorkouts, err := s.ListManualCalendarWorkouts(ctx, date, date)
+	if err != nil {
+		return CalendarDayView{}, err
+	}
+	activities = append(activities, manualWorkouts...)
 
 	healthMetrics, err := s.ListDailyHealthMetrics(ctx, garminProvider, date, date)
 	if err != nil {

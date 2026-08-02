@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -202,6 +204,39 @@ func TestGarminBridgeGearResponseAcceptsArrayDefaults(t *testing.T) {
 	}
 }
 
+func TestPythonGarminBridgeTreatsMissingWorkoutDeleteAsSuccess(t *testing.T) {
+	script := t.TempDir() + "/not-found-bridge.sh"
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' '{\"error\":\"API call client error (404): API Error 404\",\"code\":\"NotFoundException\"}'\nexit 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bridge := PythonGarminBridge{Python: "sh", Script: script}
+
+	if _, err := bridge.GetWorkout(context.Background(), "tokens", "missing"); !errors.Is(err, ErrGarminNotFound) {
+		t.Fatalf("GetWorkout error = %v, want ErrGarminNotFound", err)
+	}
+	if err := bridge.DeleteWorkout(context.Background(), "tokens", "missing"); err != nil {
+		t.Fatalf("DeleteWorkout error = %v, want nil", err)
+	}
+}
+
+func TestGarminBridgeNotFoundClassificationPreservesOtherErrors(t *testing.T) {
+	for _, test := range []struct {
+		code, message string
+	}{
+		{code: "NotFoundException", message: "missing"},
+		{code: "GarminConnectConnectionError", message: "API call client error (404): API Error 404"},
+	} {
+		err := &garminBridgeError{Code: test.code, Message: test.message}
+		if !errors.Is(err, ErrGarminNotFound) {
+			t.Fatalf("error %#v was not classified as ErrGarminNotFound", err)
+		}
+	}
+	other := &garminBridgeError{Code: "RuntimeError", Message: "provider unavailable"}
+	if errors.Is(other, ErrGarminNotFound) {
+		t.Fatalf("error %#v was classified as ErrGarminNotFound", other)
+	}
+}
+
 type stubGarminBridge struct {
 	gearActivityPages map[int][]GarminBridgeGearActivity
 }
@@ -236,4 +271,36 @@ func (b stubGarminBridge) ListGear(context.Context, string) (GarminBridgeGearRes
 
 func (b stubGarminBridge) ListGearActivities(_ context.Context, _ string, _ string, start, _ int) ([]GarminBridgeGearActivity, error) {
 	return b.gearActivityPages[start], nil
+}
+
+func (b stubGarminBridge) ListWorkouts(context.Context, string, int, int) ([]GarminBridgeWorkout, error) {
+	return nil, nil
+}
+
+func (b stubGarminBridge) GetWorkout(context.Context, string, string) (GarminBridgeWorkout, error) {
+	return GarminBridgeWorkout{}, nil
+}
+
+func (b stubGarminBridge) UploadWorkout(context.Context, string, map[string]any) (GarminBridgeWorkout, error) {
+	return GarminBridgeWorkout{}, nil
+}
+
+func (b stubGarminBridge) DeleteWorkout(context.Context, string, string) error {
+	return nil
+}
+
+func (b stubGarminBridge) ListScheduledWorkouts(context.Context, string, int, int) ([]GarminBridgeScheduledWorkout, error) {
+	return nil, nil
+}
+
+func (b stubGarminBridge) GetScheduledWorkout(context.Context, string, string) (GarminBridgeScheduledWorkout, error) {
+	return GarminBridgeScheduledWorkout{}, nil
+}
+
+func (b stubGarminBridge) ScheduleWorkout(context.Context, string, string, string) (GarminBridgeScheduledWorkout, error) {
+	return GarminBridgeScheduledWorkout{}, nil
+}
+
+func (b stubGarminBridge) UnscheduleWorkout(context.Context, string, string) error {
+	return nil
 }

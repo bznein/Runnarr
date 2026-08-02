@@ -13,6 +13,10 @@
 
 - Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
+- Added structured workout authoring from training-sheet prescriptions or manual text, including nested repeats, time/distance/lap-button steps, exact and ranged pace targets, configurable pace tolerance, final-recovery skipping, editable manual copies, parse diagnostics, calendar links, and a dedicated Workouts UI.
+- Added opt-in seven-day Garmin workout scheduling with per-user timezone settings, exact provider/date auto-matching after activity import, template cleanup, reconciliation status, and an offline fake-Garmin testbed.
+- Garmin workout ownership is fail-closed: Runnarr schedules, unschedules, or deletes a remote object only when both its locally tracked provider ID and per-user Runnarr ownership marker match. Names never establish ownership, and foreign Garmin workouts are left untouched.
+- Added a per-user notification inbox for workout generation and changes, Garmin calendar reconciliation, automatic activity matching, and training-sheet writeback, with configurable category delivery, 90-day history, actionable links, an unread-only bell menu, explicit severity icons and bulk-action feedback, and optional encrypted browser push subscriptions per device.
 - Added an optional immutable-image deployment pipeline with isolated
   synthetic PR previews, persistent staging, Cloudflare Access protection,
   manually approved staging-to-production promotion, encrypted pre-deployment
@@ -20,6 +24,10 @@
 
 ### Fixes
 
+- Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
+- Planned and completed activity views now link to their corresponding Runnarr workout, and managed workouts link to their exact Garmin Connect workout.
+- Garmin workout ownership verification now handles numeric workout IDs and nested calendar response IDs from real Garmin responses without false conflicts.
+- Manual workout plans no longer create training-sheet writeback records or jobs when matched to an activity.
 - Planned-run matching now treats a single all-activity interval step as a continuous run instead of rejecting an otherwise exact continuous plan match.
 - Calendar entries for completed runs now retain matched-plan provenance and show the original planned date when it differs, without displaying the completed plan as a duplicate pending activity.
 - Activity details now hide the Intervals tab when there are no structured intervals or recorded laps.

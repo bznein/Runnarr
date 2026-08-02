@@ -386,3 +386,41 @@ on conflict (user_id, source, source_id) do update set
     matched_activity_id = null,
     matched_at = null,
     raw = excluded.raw;
+
+update workouts
+set name = case id
+        when '00000000-0000-4000-8000-000000000170'::uuid then 'Threshold Repeats'
+        when '00000000-0000-4000-8000-000000000172'::uuid then 'Canal Tempo'
+        else name
+    end,
+    updated_at = now()
+where user_id = (select id from users where username = :'e2e_username')
+  and id in (
+    '00000000-0000-4000-8000-000000000170'::uuid,
+    '00000000-0000-4000-8000-000000000172'::uuid
+  );
+
+update planned_activities
+set name = 'Canal Tempo', updated_at = now()
+where user_id = (select id from users where username = :'e2e_username')
+  and id = '00000000-0000-4000-8000-000000000171'::uuid;
+
+insert into provider_connections(user_id, provider, provider_account_id, display_name, scopes, metadata)
+select id, 'garmin', 'testbed-garmin', 'Offline Garmin Testbed', array['garmin-connect'],
+    '{"fixture":"testbed"}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict(user_id, provider) do update set
+    provider_account_id = excluded.provider_account_id,
+    display_name = excluded.display_name,
+    scopes = excluded.scopes,
+    metadata = excluded.metadata,
+    connected_at = now(),
+    updated_at = now();
+
+update user_settings
+set workout_sync_enabled = true,
+    workout_default_pace_tolerance_s = 0,
+    workout_timezone = 'UTC',
+    updated_at = now()
+where user_id = (select id from users where username = :'e2e_username');

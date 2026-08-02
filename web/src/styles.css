@@ -342,6 +342,7 @@ textarea {
 
 .sidebar {
   position: sticky;
+  z-index: 100;
   top: 0;
   display: flex;
   flex-direction: column;
@@ -371,6 +372,284 @@ textarea {
   display: grid;
   gap: 6px;
   margin-top: auto;
+}
+
+.notification-bell {
+  position: relative;
+}
+
+.notification-nav-button {
+  width: 100%;
+}
+
+.notification-badge {
+  min-width: 19px;
+  height: 19px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--color-white);
+  background: var(--color-danger);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 19px;
+  text-align: center;
+}
+
+.notification-popover {
+  position: absolute;
+  z-index: 1300;
+  bottom: 0;
+  left: calc(100% + 12px);
+  width: min(380px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-high);
+}
+
+.notification-popover-heading,
+.notification-card-actions,
+.notification-toolbar,
+.notification-toolbar-actions,
+.push-enable-row,
+.push-device-row,
+.push-device-row > div:last-child,
+.activity-writeback-statuses {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-popover-heading {
+  justify-content: space-between;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.notification-popover-list {
+  max-height: 390px;
+  overflow-y: auto;
+}
+
+.notification-popover-item,
+.notification-card-main,
+.notification-view-all {
+  width: 100%;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notification-popover-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.notification-popover-item:hover,
+.notification-popover-item.unread {
+  background: var(--color-surface-subtle);
+}
+
+.notification-popover-item > span:last-child,
+.notification-card-copy,
+.notification-category-row > span,
+.push-device-row > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.notification-popover-item strong,
+.notification-popover-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-popover-item small,
+.notification-popover-item time,
+.notification-card-copy time,
+.notification-timeline-event time,
+.notification-category-row small,
+.push-device-row small {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.notification-view-all {
+  padding: 12px 14px;
+  color: var(--color-primary-strong);
+  font-weight: 700;
+  text-align: center;
+}
+
+.notification-empty {
+  padding: 24px;
+  color: var(--color-muted);
+  text-align: center;
+}
+
+.notification-action-feedback,
+.notification-action-error {
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.notification-action-feedback {
+  color: var(--color-primary-text);
+  background: var(--color-success-soft);
+}
+
+.notification-action-error {
+  color: var(--color-danger-strong);
+  background: var(--color-danger-muted);
+}
+
+.notification-severity {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--color-muted);
+}
+
+.notification-severity.success { color: var(--color-primary-strong); }
+.notification-severity.warning { color: var(--color-warning); }
+.notification-severity.error { color: var(--color-danger); }
+.notification-severity.info { color: var(--color-primary); }
+
+.notification-toolbar {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.notification-list,
+.notification-timeline,
+.notification-category-settings,
+.push-device-settings,
+.push-device-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notification-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.notification-card.unread {
+  border-left: 3px solid var(--color-primary);
+}
+
+.notification-card-main {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 16px;
+}
+
+.notification-card-main:hover {
+  background: var(--color-surface-subtle);
+}
+
+.notification-timeline {
+  padding: 0 16px 16px 38px;
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.notification-timeline-event {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 0 2px;
+}
+
+.notification-timeline-event p {
+  margin: 4px 0;
+  color: var(--color-muted-strong);
+}
+
+.notification-card-actions {
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+
+.notification-settings-panel {
+  gap: 18px;
+}
+
+.notification-category-row,
+.push-device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.notification-category-row select {
+  min-width: 150px;
+}
+
+.push-device-settings {
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.push-enable-row input {
+  flex: 1;
+  min-width: 180px;
+}
+
+.push-device-row > div:last-child {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.error-text {
+  color: var(--color-danger-strong) !important;
+}
+
+.activity-writeback-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  scroll-margin-top: 80px;
+}
+
+.activity-writeback-statuses {
+  flex-wrap: wrap;
+}
+
+.activity-writeback-statuses span {
+  display: grid;
+  gap: 2px;
+  min-width: 88px;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.activity-writeback-statuses strong {
+  color: var(--color-text);
+  text-transform: capitalize;
+}
+
+#garmin,
+#workouts,
+#notifications {
+  scroll-margin-top: 80px;
 }
 
 .nav-link,
@@ -1542,6 +1821,30 @@ textarea {
 .planned-match-candidate-title strong {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.planned-match-candidate-title label {
+  cursor: pointer;
+}
+
+.planned-match-workout-link,
+.workout-garmin-link {
+  color: var(--color-primary-strong);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.planned-match-workout-link:hover,
+.workout-garmin-link:hover {
+  text-decoration: underline;
+}
+
+.workout-garmin-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
 }
 
 .planned-match-badge {
@@ -2748,6 +3051,268 @@ textarea {
   padding: 10px;
 }
 
+.workout-page-actions,
+.workout-settings-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workout-list-panel,
+.workout-editor-form,
+.workout-preview-panel,
+.workout-settings-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.workout-filter-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+
+.workout-filter-tabs button {
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--color-muted-strong);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workout-filter-tabs button.active {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
+.workout-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--color-warning-strong);
+  border-radius: 6px;
+  color: var(--color-text-soft);
+  background: var(--color-warning-soft);
+  font-size: 13px;
+}
+
+.workout-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workout-list-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 8px;
+  background: var(--color-surface);
+  text-decoration: none;
+}
+
+.workout-list-row:hover {
+  border-color: var(--color-border-control);
+  background: var(--color-surface-soft);
+}
+
+.workout-list-date,
+.workout-list-main,
+.workout-garmin-summary {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workout-list-date strong {
+  color: var(--color-heading);
+  font-size: 20px;
+}
+
+.workout-list-date span,
+.workout-list-main span,
+.workout-garmin-summary span {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.workout-list-main > strong {
+  overflow: hidden;
+  color: var(--color-heading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workout-list-main .workout-row-error {
+  overflow: hidden;
+  color: var(--color-danger-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status.muted {
+  color: var(--color-muted-strong);
+  background: var(--color-surface-soft);
+}
+
+.workout-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.workout-editor-form .field textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  background: var(--color-surface);
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.workout-parse-button {
+  justify-self: start;
+}
+
+.workout-operation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border-muted);
+}
+
+.workout-operation-grid .checkbox-field:last-child {
+  grid-column: 1 / -1;
+}
+
+.workout-step-list,
+.workout-step-children {
+  display: grid;
+  gap: 8px;
+}
+
+.workout-step {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) minmax(70px, 1fr) auto;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--color-border-control);
+  border-radius: 4px;
+  background: var(--color-surface-soft);
+  font-size: 13px;
+}
+
+.workout-step.work,
+.workout-step.repeat {
+  border-left-color: var(--color-primary);
+}
+
+.workout-step.recovery {
+  border-left-color: var(--color-warning-strong);
+}
+
+.workout-step small {
+  grid-column: 1 / -1;
+  color: var(--color-muted);
+}
+
+.workout-step.repeat {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.workout-step-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workout-step-heading span {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.workout-step-children {
+  padding-left: 10px;
+}
+
+.workout-duration {
+  padding-top: 6px;
+  color: var(--color-muted-strong);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.workout-parse-messages {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--color-muted-strong);
+  font-size: 13px;
+}
+
+.workout-parse-messages .error {
+  color: var(--color-danger-strong);
+}
+
+.workout-garmin-summary {
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border-muted);
+}
+
+.workout-settings-panel .panel-heading {
+  margin-bottom: 6px;
+}
+
+.workout-settings-controls .compact-field input {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+
+.workout-ownership-note {
+  margin: 0;
+  max-width: 900px;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .workout-editor-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workout-list-row {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .workout-list-row > .status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .workout-operation-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workout-operation-grid .checkbox-field:last-child {
+    grid-column: auto;
+  }
+}
+
 .climb-sensitivity-range {
   display: flex;
   align-items: center;
@@ -3915,6 +4480,53 @@ textarea {
 
   .mobile-menu-button {
     margin-left: auto;
+  }
+
+  .mobile-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: auto;
+  }
+
+  .mobile-header-actions .mobile-menu-button {
+    margin-left: 0;
+  }
+
+  .mobile-notification-bell .notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -6px;
+  }
+
+  .mobile-notification-bell .notification-popover {
+    position: fixed;
+    inset: calc(var(--mobile-header-height) + 8px) 12px auto;
+    width: auto;
+    max-height: calc(100svh - var(--mobile-header-height) - var(--mobile-nav-height) - 28px);
+  }
+
+  .notification-toolbar,
+  .notification-category-row,
+  .push-device-row,
+  .activity-writeback-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .notification-category-row select,
+  .push-enable-row input,
+  .push-enable-row button {
+    width: 100%;
+  }
+
+  .push-enable-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .push-device-row > div:last-child {
+    justify-content: flex-start;
   }
 
   .mobile-bottom-nav {

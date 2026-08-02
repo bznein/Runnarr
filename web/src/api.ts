@@ -31,7 +31,16 @@ import type {
   ToolsVdotRequest,
   ToolsVdotResponse,
   User,
-  UserPreference
+  UserPreference,
+  Workout,
+  WorkoutConfig,
+  WorkoutMutation,
+  WorkoutParseResult,
+  WorkoutReconcileResult,
+  NotificationPage,
+  NotificationSettings,
+  PushSubscriptionDevice,
+  RunnarrNotification
 } from "./types";
 
 export class ApiError extends Error {
@@ -170,6 +179,41 @@ export const api = {
     method: "PATCH",
     body: JSON.stringify(body)
   }),
+  notifications: (options: { limit?: number; cursor?: string; unread?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (options.limit) params.set("limit", String(options.limit));
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.unread) params.set("unread", "true");
+    return request<NotificationPage>(`/api/notifications${params.size ? `?${params}` : ""}`);
+  },
+  notification: (id: string) => request<RunnarrNotification>(`/api/notifications/${encodeURIComponent(id)}`),
+  setNotificationRead: (id: string, read: boolean) => request<{ updated: boolean }>(`/api/notifications/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ read })
+  }),
+  markAllNotificationsRead: () => request<{ updated: boolean }>("/api/notifications/read-all", { method: "POST" }),
+  deleteNotification: (id: string) => request<{ deleted: boolean }>(`/api/notifications/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  clearNotifications: (scope: "read" | "all") => request<{ deleted: boolean }>(`/api/notifications?scope=${scope}`, { method: "DELETE" }),
+  notificationSettings: () => request<NotificationSettings>("/api/notification-settings"),
+  updateNotificationSettings: (categories: NotificationSettings["categories"]) => request<NotificationSettings>("/api/notification-settings", {
+    method: "PATCH",
+    body: JSON.stringify({ categories })
+  }),
+  pushSubscriptions: () => request<{ subscriptions: PushSubscriptionDevice[] }>("/api/push-subscriptions"),
+  createPushSubscription: (body: PushSubscriptionJSON & { deviceName: string }) => request<PushSubscriptionDevice>("/api/push-subscriptions", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
+  renamePushSubscription: (id: string, deviceName: string) => request<{ updated: boolean }>(`/api/push-subscriptions/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ deviceName })
+  }),
+  deletePushSubscription: (id: string) => request<{ deleted: boolean }>(`/api/push-subscriptions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  deleteCurrentPushSubscription: (endpoint: string) => request<{ deleted: boolean }>("/api/push-subscriptions/current", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint })
+  }),
+  testPushSubscription: (id: string) => request<{ delivered: boolean }>(`/api/push-subscriptions/${encodeURIComponent(id)}/test`, { method: "POST" }),
   config: () => request<AppConfig>("/api/config"),
   summary: (filters?: ActivityTypeFilters, period: "weekly" | "monthly" | "yearly" = "weekly") => {
     const params = new URLSearchParams(activityFilterQuery(filters));
@@ -298,6 +342,29 @@ export const api = {
   }),
   trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
   plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
+  workoutConfig: () => request<WorkoutConfig>("/api/config/workouts"),
+  updateWorkoutConfig: (body: Partial<WorkoutConfig>) => request<WorkoutConfig>("/api/config/workouts", {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  workouts: (filter = "upcoming") => request<{ workouts: Workout[] }>(`/api/workouts?filter=${encodeURIComponent(filter)}`),
+  workout: (id: string) => request<Workout>(`/api/workouts/${encodeURIComponent(id)}`),
+  parseWorkout: (sourceText: string) => request<WorkoutParseResult>("/api/workouts/parse", {
+    method: "POST",
+    body: JSON.stringify({ sourceText })
+  }),
+  createWorkout: (body: WorkoutMutation) => request<Workout>("/api/workouts", {
+    method: "POST",
+    body: JSON.stringify(body)
+  }),
+  updateWorkout: (id: string, body: WorkoutMutation) => request<Workout>(`/api/workouts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  duplicateWorkout: (id: string) => request<Workout>(`/api/workouts/${encodeURIComponent(id)}/duplicate`, { method: "POST" }),
+  deleteWorkout: (id: string) => request<{ deleted: boolean; archived: boolean }>(`/api/workouts/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  previewWorkoutReconcile: () => request<WorkoutReconcileResult>("/api/workouts/reconcile"),
+  reconcileWorkouts: () => request<{ jobId: string; status: string }>("/api/workouts/reconcile", { method: "POST" }),
   plannedMatchCandidates: (activityID: string, windowDays = 7) => request<PlannedActivityMatchResponse>(`/api/activities/${activityID}/planned-match-candidates?windowDays=${windowDays}`),
   plannedMatchPreview: (activityID: string, body: { plannedActivityId: string; feedback?: string; rpe: number | null; rpeSet: boolean; overrides?: Record<string, string> }) =>
     request<{ preview: TrainingSheetWritebackPreview }>(`/api/activities/${activityID}/planned-match-preview`, {

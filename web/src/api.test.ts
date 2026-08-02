@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api } from "./api";
+import { api, setCsrfToken } from "./api";
 
 describe("shared backend API contract", () => {
   afterEach(() => {
+    setCsrfToken("");
     vi.unstubAllGlobals();
   });
 
@@ -92,5 +93,42 @@ describe("shared backend API contract", () => {
     const requestURL = String(fetchMock.mock.calls[0][0]);
     expect(requestURL).toContain("view=training-sheet-matching");
     expect(requestURL).toContain("matchState=attention");
+  });
+
+  it("encodes notification pagination and unread filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      notifications: [],
+      unreadCount: 0
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.notifications({ limit: 25, cursor: "cursor/value", unread: true });
+
+    const requestURL = String(fetchMock.mock.calls[0][0]);
+    expect(requestURL).toContain("/api/notifications?");
+    expect(requestURL).toContain("limit=25");
+    expect(requestURL).toContain("cursor=cursor%2Fvalue");
+    expect(requestURL).toContain("unread=true");
+  });
+
+  it("sends notification preference mutations with CSRF protection", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      categories: { activity_matching: "in_app" }
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    setCsrfToken("test-csrf");
+
+    await api.updateNotificationSettings({
+      workout_changes: "in_app_push",
+      garmin_calendar: "in_app_push",
+      activity_matching: "in_app",
+      sheet_writeback: "in_app_push"
+    });
+
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/notification-settings");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers.get("X-CSRF-Token")).toBe("test-csrf");
+    expect(JSON.parse(init.body)).toMatchObject({ categories: { activity_matching: "in_app" } });
   });
 });
