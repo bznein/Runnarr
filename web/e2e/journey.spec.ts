@@ -817,7 +817,7 @@ test.describe("local product journey", () => {
     const scheduledWorkout = page.locator(".workout-list-row").filter({ hasText: "E2E Planned Speed Work" });
     await expect(scheduledWorkout.getByText("Scheduled", { exact: true })).toBeVisible();
     await scheduledWorkout.click();
-    await expect(page.locator(".workout-garmin-summary")).toContainText("Scheduled");
+    await expect(page.locator(".workout-garmin-summary")).toContainText("scheduled");
     await expect(page.getByRole("link", { name: /Open in Garmin/ })).toHaveCount(0);
 
     await page.getByRole("link", { name: "Back", exact: true }).click();
