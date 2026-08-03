@@ -285,13 +285,15 @@ on conflict (activity_id, lap_index) do update set
 -- Provider identifiers, raw payloads, and route coordinates are deliberately
 -- omitted; the 1,503 recorded metric samples are otherwise preserved so this
 -- activity exercises both sensor-trend processing and the 1,200-point bound.
+-- Its distinct source prevents older host-cached testbed seeds from applying
+-- broad generated-fixture updates to these exact recorded samples.
 insert into activities(
     user_id, source, source_id, name, sport_type, start_time,
     distance_m, moving_time_s, elapsed_time_s, elevation_gain_m,
     avg_heart_rate, max_heart_rate, avg_pace_s_per_km,
     calories_kcal, avg_grade_adjusted_pace_s_per_km, local_notes, raw
 )
-select users.id, 'testbed', 'testbed-production-admin-run',
+select users.id, 'testbed-production', 'testbed-production-admin-run',
     'Production-derived 5 km Sensor Run', 'Run',
     '2026-06-19 16:57:42+00'::timestamptz,
     5074.93, 1501, 1501, 138,
@@ -321,7 +323,7 @@ delete from activity_samples samples
 using activities activity
 where samples.activity_id = activity.id
   and activity.user_id = (select id from users where username = :'e2e_username')
-  and activity.source = 'testbed'
+  and activity.source = 'testbed-production'
   and activity.source_id = 'testbed-production-admin-run';
 
 with fixture_samples as (
@@ -891,7 +893,7 @@ select activity.id, sample.sample_index,
 from activities activity
 cross join fixture_samples sample
 where activity.user_id = (select id from users where username = :'e2e_username')
-  and activity.source = 'testbed'
+  and activity.source = 'testbed-production'
   and activity.source_id = 'testbed-production-admin-run';
 
 create temporary table production_graph_fixture_check(
@@ -903,7 +905,7 @@ select count(*) = 1503
 from activity_samples samples
 join activities activity on activity.id = samples.activity_id
 where activity.user_id = (select id from users where username = :'e2e_username')
-  and activity.source = 'testbed'
+  and activity.source = 'testbed-production'
   and activity.source_id = 'testbed-production-admin-run';
 
 drop table production_graph_fixture_check;
