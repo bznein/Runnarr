@@ -224,7 +224,10 @@ comment with the private URL, commit, digest, and deployment ID.
 Every PR revision gets a fresh database and the deterministic E2E/testbed seed
 bundled in that exact candidate image. The app applies the fixtures before it
 reports healthy, so fixture changes are reviewable in the same preview without
-depending on install-time host copies. Provider credentials are absent.
+depending on install-time host copies. Preview mode is identified from both
+the runtime deployment setting and the immutable `pr-<number>-<commit>` build
+identity so hosts installed before this behavior remain compatible. Provider
+credentials are absent.
 Closing the PR removes its stack, volumes, network state, and DNS. Hourly
 reconciliation repairs missed cleanup.
 

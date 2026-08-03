@@ -59,3 +59,17 @@ func TestSyntheticSeedSkipsNonPreviewEnvironments(t *testing.T) {
 		t.Fatalf("non-preview seed = %v", err)
 	}
 }
+
+func TestSyntheticPreviewUsesImmutablePRBuildIdentityAsCompatibilityFallback(t *testing.T) {
+	previousVersion := BuildVersion
+	t.Cleanup(func() { BuildVersion = previousVersion })
+
+	BuildVersion = "pr-235-0123456789ab"
+	if !syntheticPreviewEnabled(Config{}) {
+		t.Fatal("PR candidate build identity did not enable preview seeding")
+	}
+	BuildVersion = "main-0123456789ab"
+	if syntheticPreviewEnabled(Config{DeployEnvironment: "production"}) {
+		t.Fatal("main production build identity enabled preview seeding")
+	}
+}

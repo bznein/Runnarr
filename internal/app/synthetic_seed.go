@@ -23,7 +23,7 @@ var syntheticSeedFiles = []string{"seed.sql", "testbed-seed.sql"}
 // revision, so running candidate-controlled fixture SQL does not grant the
 // image access beyond the database it already owns.
 func SeedSyntheticPreview(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
-	if cfg.DeployEnvironment != previewDeployEnvironment {
+	if !syntheticPreviewEnabled(cfg) {
 		return nil
 	}
 	if strings.TrimSpace(cfg.SyntheticSeedDir) == "" {
@@ -57,6 +57,10 @@ func SeedSyntheticPreview(ctx context.Context, pool *pgxpool.Pool, cfg Config) e
 		return fmt.Errorf("commit synthetic preview seed: %w", err)
 	}
 	return nil
+}
+
+func syntheticPreviewEnabled(cfg Config) bool {
+	return cfg.DeployEnvironment == previewDeployEnvironment || strings.HasPrefix(BuildVersion, "pr-")
 }
 
 func prepareSyntheticSeedSQL(name, contents string) (string, error) {
