@@ -24,6 +24,7 @@
 
 ### Fixes
 
+- PR previews now load synthetic fixtures from their exact candidate image, so fixture changes are present in the preview instead of being silently replaced by an install-time host seed.
 - Activity detail graphs now use metric-specific time and distance trends for pace, elevation, heart rate, cadence, and power, retain pauses and sensor gaps, and show recorded values alongside trends in tooltips.
 - Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
 - Planned and completed activity views now link to their corresponding Runnarr workout.

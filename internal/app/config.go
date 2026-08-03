@@ -13,6 +13,8 @@ type Config struct {
 	HTTPAddr           string
 	DatabaseURL        string
 	BaseURL            string
+	DeployEnvironment  string
+	SyntheticSeedDir   string
 	PublicMode         bool
 	LocalAuthEnabled   bool
 	TrustProxy         bool
@@ -42,6 +44,8 @@ func LoadConfig() (Config, error) {
 		HTTPAddr:           env("RUNNARR_HTTP_ADDR", ":8080"),
 		DatabaseURL:        env("DATABASE_URL", ""),
 		BaseURL:            strings.TrimRight(env("RUNNARR_BASE_URL", "http://localhost:8080"), "/"),
+		DeployEnvironment:  env("RUNNARR_DEPLOY_ENVIRONMENT", ""),
+		SyntheticSeedDir:   env("RUNNARR_SYNTHETIC_SEED_DIR", "/app/seeds"),
 		PublicMode:         publicMode,
 		LocalAuthEnabled:   envBool("RUNNARR_LOCAL_AUTH_ENABLED", !publicMode),
 		TrustProxy:         envBool("RUNNARR_TRUST_PROXY", false),

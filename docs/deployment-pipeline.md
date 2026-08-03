@@ -19,7 +19,10 @@ not authorize a production cutover by itself.
 - Only non-draft, same-repository PRs authored by users with write access can
   produce a host preview.
 - The candidate image is built and scanned before GHCR credentials are used.
-  Deployment jobs do not check out or execute PR scripts.
+  Deployment jobs do not check out or execute PR scripts. The candidate app
+  applies its bundled SQL fixtures only to its own isolated preview database
+  before reporting healthy; trusted PR code already has access to that same
+  database through the app connection.
 - Preview, staging, and production use different Compose projects, databases,
   volumes, state, credentials, and networks.
 - Each non-production app owns its unique ingress alias on its isolated
@@ -218,9 +221,12 @@ After CI succeeds, the default-branch-controlled candidate workflow builds,
 scans, publishes, deploys, seeds, and smoke-tests the PR. It updates one PR
 comment with the private URL, commit, digest, and deployment ID.
 
-Every PR revision gets a fresh database and the deterministic E2E/testbed seed.
-Provider credentials are absent. Closing the PR removes its stack, volumes,
-network state, and DNS. Hourly reconciliation repairs missed cleanup.
+Every PR revision gets a fresh database and the deterministic E2E/testbed seed
+bundled in that exact candidate image. The app applies the fixtures before it
+reports healthy, so fixture changes are reviewable in the same preview without
+depending on install-time host copies. Provider credentials are absent.
+Closing the PR removes its stack, volumes, network state, and DNS. Hourly
+reconciliation repairs missed cleanup.
 
 The initial limit is ten previews. Each app and PostgreSQL container is limited
 to 0.5 CPU and 512 MiB. New previews are deferred below 12 GiB available memory

@@ -75,6 +75,7 @@ jq -e \
    and (.services.db.ports == null)
    and (.services.app.mem_limit | tonumber) == 536870912
    and (.services.db.mem_limit | tonumber) == 536870912
+   and .services.app.environment.RUNNARR_DEPLOY_ENVIRONMENT == "preview"
    and (.services.app.networks.runnarr.aliases | index("runnarr-pr-179")) != null
    and ((.services.app.networks | has("nonprod-ingress")) | not)
    and ((.services.db.networks | has("nonprod-ingress")) | not)
@@ -125,6 +126,7 @@ jq -e \
   '.services.app.image == $digest
    and (.services.app.ports == null)
    and (.services.db.ports == null)
+   and .services.app.environment.RUNNARR_DEPLOY_ENVIRONMENT == "production"
    and (.services.app.networks | has("proxy"))
    and ((.services.db.networks | has("proxy")) | not)
    and .networks.runnarr.ipam.config[0].subnet == "10.89.0.0/24"' \
@@ -161,6 +163,13 @@ grep -Fq '/var/cache/nginx:uid=101,gid=101,mode=0750' \
 grep -Fq 'chmod 0644 "${CONFIG_ROOT}/ingress/default.conf"' \
   "${ROOT}/deploy/install-host.sh" ||
   fail "the unprivileged gateway cannot read its non-secret routing config"
+grep -Fq 'COPY web/e2e/seed.sql web/e2e/testbed-seed.sql /app/seeds/' \
+  "${ROOT}/Dockerfile" ||
+  fail "candidate images do not contain their exact synthetic fixture bundle"
+grep -Fq 'SeedSyntheticPreview(ctx, pool, cfg)' "${ROOT}/cmd/runnarr/main.go" ||
+  fail "candidate apps do not apply preview fixtures before reporting healthy"
+! grep -Fq 'seed_environment "previews/${pr}"' "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview deployment still replays host-cached synthetic fixtures"
 [[ -x "${ROOT}/deploy/verify-staging-oidc.sh" ]] ||
   fail "the staging OIDC verifier is not executable"
 

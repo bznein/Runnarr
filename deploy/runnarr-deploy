@@ -385,7 +385,6 @@ preview_up() {
 
   if ! compose "previews/${pr}" up --detach --no-build --remove-orphans ||
     ! (wait_for_health "previews/${pr}" "${commit}") ||
-    ! seed_environment "previews/${pr}" "preview-admin" ||
     ! connect_gateway "previews/${pr}"; then
     disconnect_gateway "previews/${pr}"
     compose "previews/${pr}" down --volumes --remove-orphans || true

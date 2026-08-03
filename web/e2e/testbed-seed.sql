@@ -894,18 +894,19 @@ where activity.user_id = (select id from users where username = :'e2e_username')
   and activity.source = 'testbed'
   and activity.source_id = 'testbed-production-admin-run';
 
-select count(*) = 1503 as production_graph_fixture_complete
+create temporary table production_graph_fixture_check(
+    complete boolean not null check (complete)
+);
+
+insert into production_graph_fixture_check(complete)
+select count(*) = 1503
 from activity_samples samples
 join activities activity on activity.id = samples.activity_id
 where activity.user_id = (select id from users where username = :'e2e_username')
   and activity.source = 'testbed'
-  and activity.source_id = 'testbed-production-admin-run'
-\gset
-\if :production_graph_fixture_complete
-\else
-    \echo 'production-derived graph fixture does not contain 1,503 samples'
-    \quit 1
-\endif
+  and activity.source_id = 'testbed-production-admin-run';
+
+drop table production_graph_fixture_check;
 
 insert into activity_workouts(
     activity_id, provider, provider_workout_id, name, sport_type, steps, raw

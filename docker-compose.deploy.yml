@@ -13,6 +13,8 @@ services:
     image: ${RUNNARR_IMAGE:?an immutable image digest is required}
     pull_policy: never
     ports: !override []
+    environment:
+      RUNNARR_DEPLOY_ENVIRONMENT: ${RUNNARR_DEPLOY_ENVIRONMENT:?deployment environment is required}
     cpus: ${RUNNARR_APP_CPU_LIMIT:-1.0}
     mem_limit: ${RUNNARR_APP_MEMORY_LIMIT:-1g}
     pids_limit: ${RUNNARR_APP_PIDS_LIMIT:-128}

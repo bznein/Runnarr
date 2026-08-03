@@ -39,6 +39,7 @@ COPY --from=api-build /out/runnarr /app/runnarr
 COPY --from=web-build /src/web/dist /app/web/dist
 COPY internal/app/garmin_bridge.py /app/garmin_bridge.py
 COPY internal/app/garmin_bridge_testbed.py /app/garmin_bridge_testbed.py
+COPY web/e2e/seed.sql web/e2e/testbed-seed.sql /app/seeds/
 RUN addgroup --system --gid 10001 runnarr \
   && adduser --system --uid 10001 --gid 10001 --home /app runnarr \
   && mkdir -p /app/data \

@@ -47,6 +47,10 @@ func main() {
 		logger.Error("create server", "error", err)
 		os.Exit(1)
 	}
+	if err := app.SeedSyntheticPreview(ctx, pool, cfg); err != nil {
+		logger.Error("seed synthetic preview", "error", err)
+		os.Exit(1)
+	}
 	server.StartBackgroundSync(ctx)
 
 	httpServer := &http.Server{
