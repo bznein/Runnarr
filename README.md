@@ -55,7 +55,9 @@ GPX tracks, segments, and routes. Imports show invalid segments, duplicates,
 discarded GPX data, route geometry, and available elevation before committing.
 Course detail supports local metadata, favorites, duplication, permanent
 deletion, GPX export, and a one-shot current-location overlay. Location is
-requested only after pressing the control and is not stored by Runnarr.
+requested only after pressing the control and is not stored separately by
+Runnarr. When a saved course is available, its starting point seeds the next
+new course draft.
 
 The waypoint planner can keep individual legs direct or route them through an
 optional backend-connected Valhalla service. The normal stack leaves this

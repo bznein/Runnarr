@@ -5574,6 +5574,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const initializedCourseRef = useRef<string>();
+  const initializedCourseStartRef = useRef(false);
   const [name, setName] = useState("");
   const [sportType, setSportType] = useState<CourseSport>("Run");
   const [notes, setNotes] = useState("");
@@ -5583,6 +5584,23 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
   const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
+  const previousCourse = useQuery({
+    queryKey: ["courses", "planner-start"],
+    queryFn: async () => {
+      const page = await api.courses({ sort: "updated", order: "desc", limit: 1 });
+      return page.courses[0] ? api.course(page.courses[0].id) : null;
+    },
+    enabled: !editing
+  });
+
+  useEffect(() => {
+    if (editing || previousCourse.isLoading || initializedCourseStartRef.current) return;
+    initializedCourseStartRef.current = true;
+    const start = previousCourse.data?.waypoints[0];
+    if (waypoints.length === 0 && start) {
+      setWaypoints([{ index: 0, latitude: start.latitude, longitude: start.longitude }]);
+    }
+  }, [editing, previousCourse.data, previousCourse.isLoading, waypoints.length]);
 
   useEffect(() => {
     if (!id || !course.data || initializedCourseRef.current === id) return;
