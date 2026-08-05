@@ -23,6 +23,7 @@ The repository Makefile provides the standard checks in one place:
 make check       # Go format, vet, backend tests, frontend tests, and build
 make test-race   # Backend race-enabled tests
 make e2e         # Isolated Docker Compose Playwright suite
+make visual-review # Selected before/after Playwright recordings
 make deployment-check # Deployment script and rendered Compose invariants
 ```
 
@@ -57,9 +58,9 @@ The frontend uses Vite proxy rules for `/api` and `/healthz`, routed from `scrip
 ## Browser end-to-end tests
 
 The Playwright suite exercises the full local web app in desktop Chromium and
-mobile Chromium emulation. It starts an isolated Docker Compose project with a
-fresh PostgreSQL database, seeds deterministic health and gear records, runs
-the tests, and removes only that test project when finished.
+Google Pixel 8 Pro Chrome emulation. It starts an isolated Docker Compose
+project with a fresh PostgreSQL database, seeds deterministic health and gear
+records, runs the tests, and removes only that test project when finished.
 
 Install the web dependencies and browser once:
 
@@ -82,6 +83,65 @@ the npm command, for example `npm run e2e -- --project=mobile-chromium`.
 Videos are written for every executed test under `web/test-results/`. Set
 `PLAYWRIGHT_SLOW_MO` to add a delay between browser actions when reviewing
 them, for example `PLAYWRIGHT_SLOW_MO=250 npm run e2e`.
+
+### Before/after visual review
+
+Material user-facing pull requests can select up to two recording profiles
+from `.github/visual-review-profiles.json`. Each profile combines one tagged
+E2E journey with either the desktop or Pixel 8 Pro viewport. The PR labels use
+the form `visual:<viewport>:<scenario>`, for example:
+
+```text
+visual:desktop:activity-inspection
+visual:mobile:mobile-navigation
+```
+
+A collaborator with write access can add a profile label to record the
+selected journey against both the PR's `main` merge base and its head. An
+untrusted push, reopen, or ready-for-review event removes all visual labels;
+the collaborator must inspect the new head and reapply the affected profiles.
+This prevents outside contributors from authorizing paid recording or media
+work and makes the approval specific to one commit.
+
+The two revisions use separate Docker Compose projects, the same synthetic
+seed and fixture clock, and no provider credentials. Recordings are at most 60
+seconds and 25 MiB each. A default-branch-controlled publisher accepts at most
+two profiles (four videos), converts the WebM recordings to H.264 MP4 with
+small poster images, and embeds direct seven-day links in one bot comment.
+Separately named before/after GitHub artifacts retain the original video,
+Playwright failure diagnostics, and Compose logs as a ZIP fallback. R2 or
+transcoding failure leaves those ZIPs available, adds a warning to the comment,
+and fails the visual publishing workflow visibly.
+
+The recorder checks the triggering actor before checking out or executing PR
+code. The R2 credentials are available only to the later trusted publisher,
+which independently rechecks the original actor, current PR head, latest run,
+default-branch profile catalog, artifact names and sizes, and sanitized file
+types. The guard and publisher are `pull_request_target`/`workflow_run`
+workflows, so a pull request that first introduces or changes them cannot use
+the new trusted path until those definitions have merged to the default
+branch.
+
+Generate the same comparison locally from a clean, committed branch with:
+
+```bash
+VISUAL_PROFILES="visual:desktop:activity-inspection" make visual-review
+```
+
+Select two profiles with a comma-separated value. Set `VISUAL_BASE_REF` when
+the comparison base is not `origin/main`:
+
+```bash
+VISUAL_BASE_REF=main \
+VISUAL_PROFILES="visual:desktop:auth,visual:mobile:auth" \
+make visual-review
+```
+
+The command creates a temporary detached worktree for the merge base, runs
+only isolated E2E stacks, and writes both revisions under
+`web/test-results/visual-review/`. A failed before journey is retained as
+comparison evidence; a failed after journey makes the command fail. The
+generated `.webm` files can be attached manually to a PR when needed.
 
 For free-form product exploration against disposable data, start the permanent
 testbed workflow without Playwright driving the browser:

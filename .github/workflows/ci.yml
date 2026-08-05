@@ -64,6 +64,16 @@ jobs:
       - name: Test
         run: npm test -- --passWithNoTests
 
+      - name: Install visual media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+
+      - name: Validate visual review profiles
+        run: |
+          node --test ../scripts/visual-review-*.test.mjs
+          bash ../scripts/visual-review-catalog-check.sh
+
       - name: Build
         run: npm run build
 

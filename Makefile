@@ -1,10 +1,10 @@
 GOCACHE ?= /tmp/runnarr-go-cache
 
-.PHONY: all check test test-race vet fmt-check web-test web-build e2e testbed deployment-check
+.PHONY: all check test test-race vet fmt-check web-test web-build e2e visual-review visual-review-check testbed deployment-check
 
 all: check
 
-check: fmt-check vet test web-test web-build deployment-check
+check: fmt-check vet test web-test web-build visual-review-check deployment-check
 
 test:
 	GOCACHE="$(GOCACHE)" go test ./...
@@ -26,6 +26,13 @@ web-build:
 
 e2e:
 	cd web && npm run e2e
+
+visual-review:
+	bash scripts/visual-review.sh
+
+visual-review-check:
+	node --test scripts/visual-review-*.test.mjs
+	bash scripts/visual-review-catalog-check.sh
 
 testbed:
 	cd web && npm run testbed

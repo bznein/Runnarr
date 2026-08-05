@@ -209,13 +209,14 @@ network.
 
 ## GitHub configuration
 
-Create three Environments:
+Create four Environments:
 
 | Environment | Required secrets | Variables |
 | --- | --- | --- |
 | `preview` | `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_SSH_HOST_KEY`, `CF_DNS_API_TOKEN`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | `DEPLOY_BASE_DOMAIN`, `CF_ZONE_ID`, `CF_TUNNEL_ID` |
 | `staging` | `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_SSH_HOST_KEY`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | `DEPLOY_BASE_DOMAIN` |
 | `production` | `DEPLOY_SSH_HOST`, `DEPLOY_SSH_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_SSH_HOST_KEY`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | `PRODUCTION_URL` |
+| `visual-review-publish` | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | None |
 
 Use the non-production key in `preview` and `staging`, and the separate
 production key in `production`. `DEPLOY_SSH_HOST_KEY` is the complete pinned
@@ -231,6 +232,57 @@ Configure `production` with:
 - at least one required reviewer;
 - no wait timer;
 - environment secrets unavailable until approval.
+
+### Visual-review R2 media
+
+The inline PR videos use a separate private Cloudflare R2 bucket. Provision it
+manually; the repository deliberately does not own Cloudflare account or
+billing configuration.
+
+1. Enable R2 on the Cloudflare account and create a private Standard-storage
+   bucket named `runnarr-visual-review`. Do not enable `r2.dev`, a custom public
+   domain, Data Catalog, or Infrequent Access.
+2. Add an object lifecycle rule for the `visual/` prefix that deletes objects
+   after seven days. Newly uploaded objects must return an `x-amz-expiration`
+   date no more than eight days away; the workflow deletes its uploads and
+   fails if that cannot be verified.
+3. Create an R2 API token restricted to Object Read & Write for only this
+   bucket. Record its access key ID and secret once; do not reuse a deployment,
+   DNS, or account-wide token.
+4. Create the `visual-review-publish` GitHub Environment, restrict its
+   deployment branch to `main`, and add the four secrets listed above. Set
+   `R2_BUCKET=runnarr-visual-review`. Do not add a required reviewer because
+   publishing is already gated before the environment job and is intended to
+   finish automatically.
+5. On a pay-as-you-go Cloudflare account, create an account-level **$1 budget
+   alert** under Billing > Billable Usage and add the maintainer email. This is
+   an informational alert, not a spending cap; inspect the daily R2 storage and
+   Class A/Class B operation totals if it fires.
+
+The code bounds accepted work to two profiles, four 60-second/25-MiB videos,
+four 1-MiB posters, eight PUTs, and eight lifecycle HEAD requests per accepted
+run. It uses fixed object keys under
+`visual/pr-<number>/<head>/<revision>/`, so a rerun replaces rather than
+accumulates the same revision. Objects stay private and the comment receives
+only seven-day SigV4 GET URLs. Uploads are rolled back if validation, upload,
+or lifecycle verification fails. GitHub ZIP artifacts remain the diagnostic
+fallback and also expire after seven days.
+
+R2 Standard currently includes monthly free allowances and free direct
+egress, but that is not a hard guarantee of zero cost. Anyone who can read a
+PR comment can reuse its signed GET URLs until they expire, so sufficiently
+large repeated-read traffic can consume Class B operations. A Worker gateway
+with per-link rate limits would add stronger read-abuse control, at the cost of
+another deployed service, Worker request accounting, and more secrets; the
+initial implementation intentionally avoids that operational surface. If the
+budget alert fires unexpectedly, remove the visual labels, revoke the
+bucket-scoped token (which invalidates its signed URLs), delete the affected
+`visual/` objects, and remove the environment secrets before investigating.
+
+Cloudflare references: [R2 pricing](https://developers.cloudflare.com/r2/pricing/),
+[presigned URL limits](https://developers.cloudflare.com/r2/api/s3/presigned-urls/),
+[object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/),
+and [budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/).
 
 Protect `main` with pull requests and these required CI checks:
 

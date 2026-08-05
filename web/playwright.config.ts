@@ -30,7 +30,7 @@ export default defineConfig({
     },
     {
       name: "mobile-chromium",
-      use: { ...devices["Pixel 7"] }
+      use: { ...devices["Pixel 8 Pro"] }
     }
   ]
 });

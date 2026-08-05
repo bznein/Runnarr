@@ -80,7 +80,7 @@ cross join lateral (
             when 5 then 'Swimming'
             else 'Hiking'
         end as sport_type,
-        (current_date - sequence * 2) + make_time(6 + sequence % 4, sequence * 7 % 60, 0) as start_time,
+        (:'e2e_date'::date - sequence * 2) + make_time(6 + sequence % 4, sequence * 7 % 60, 0) as start_time,
         case sequence % 7
             when 0 then 6000 + sequence * 80
             when 1 then 8000 + sequence * 100
@@ -245,7 +245,7 @@ on conflict (activity_id) do update set
     sport_type = excluded.sport_type,
     steps = excluded.steps,
     raw = excluded.raw,
-    updated_at = now();
+    updated_at = :'e2e_now'::timestamptz;
 
 insert into activity_intervals(
     activity_id, interval_index, category, provider_type,
@@ -289,7 +289,7 @@ insert into daily_health_metrics(
     body_battery_avg, body_battery_min, body_battery_max, hrv_avg_ms,
     hrv_status, weight_kg, body_fat_pct
 )
-select users.id, 'garmin', current_date - day,
+select users.id, 'garmin', :'e2e_date'::date - day,
     6500 + day * 137 % 9000,
     2050 + day * 17 % 650,
     350 + day * 23 % 700,
@@ -342,7 +342,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'testbed', 'testbed-current-run', 'Morning Shakeout', 'Run',
-    current_date + time '06:15', 400, 120, 120, '{"fixture":"testbed"}'::jsonb
+    :'e2e_date'::date + time '06:15', 400, 120, 120, '{"fixture":"testbed"}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -359,7 +359,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'testbed', 'testbed-historic-run', 'Canal Recovery Run', 'Run',
-    (current_date - 45) + time '06:15', 400, 120, 120, '{"fixture":"testbed"}'::jsonb
+    (:'e2e_date'::date - 45) + time '06:15', 400, 120, 120, '{"fixture":"testbed"}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -376,7 +376,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select users.id, 'training_sheet', fixture.source_id, 'testbed-workbook', 'testbed-sheet',
-    'Testbed Plan', fixture.plan_cell, current_date - 45, fixture.name, 'Run', 'pending',
+    'Testbed Plan', fixture.plan_cell, :'e2e_date'::date - 45, fixture.name, 'Run', 'pending',
     '{"planCellBackgroundColor":"#ffffff"}'::jsonb
 from users
 cross join (values
@@ -399,7 +399,7 @@ set name = case id
         when '00000000-0000-4000-8000-000000000172'::uuid then 'Canal Tempo'
         else name
     end,
-    updated_at = now()
+    updated_at = :'e2e_now'::timestamptz
 where user_id = (select id from users where username = :'e2e_username')
   and id in (
     '00000000-0000-4000-8000-000000000170'::uuid,
@@ -407,7 +407,7 @@ where user_id = (select id from users where username = :'e2e_username')
   );
 
 update planned_activities
-set name = 'Canal Tempo', updated_at = now()
+set name = 'Canal Tempo', updated_at = :'e2e_now'::timestamptz
 where user_id = (select id from users where username = :'e2e_username')
   and id = '00000000-0000-4000-8000-000000000171'::uuid;
 
@@ -421,12 +421,12 @@ on conflict(user_id, provider) do update set
     display_name = excluded.display_name,
     scopes = excluded.scopes,
     metadata = excluded.metadata,
-    connected_at = now(),
-    updated_at = now();
+    connected_at = :'e2e_now'::timestamptz,
+    updated_at = :'e2e_now'::timestamptz;
 
 update user_settings
 set workout_sync_enabled = true,
     workout_default_pace_tolerance_s = 0,
     workout_timezone = 'UTC',
-    updated_at = now()
+    updated_at = :'e2e_now'::timestamptz
 where user_id = (select id from users where username = :'e2e_username');

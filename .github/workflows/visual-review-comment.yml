@@ -1,0 +1,491 @@
+name: Visual review publishing
+
+on:
+  workflow_run:
+    workflows:
+      - Visual review recordings
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: visual-review-publish-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Validate recording provenance
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.validate.outputs.mode }}
+      profiles: ${{ steps.validate.outputs.profiles }}
+      artifacts: ${{ steps.validate.outputs.artifacts }}
+      artifact_ids: ${{ steps.validate.outputs.artifact_ids }}
+      pull_number: ${{ steps.validate.outputs.pull_number }}
+      head_sha: ${{ steps.validate.outputs.head_sha }}
+      run_url: ${{ steps.validate.outputs.run_url }}
+    steps:
+      - name: Revalidate actor, head, labels, run, and artifacts
+        id: validate
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            core.setOutput("mode", "ignore");
+            core.setOutput("profiles", "[]");
+            core.setOutput("artifacts", "[]");
+            core.setOutput("artifact_ids", "");
+
+            const run = context.payload.workflow_run;
+            if (run.pull_requests.length !== 1) {
+              core.info("Publishing requires exactly one associated pull request.");
+              return;
+            }
+
+            const trusted = new Set(["admin", "maintain", "write"]);
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: run.actor.login
+              });
+              if (!trusted.has(data.permission) && !trusted.has(data.role_name)) {
+                core.info(`Original run actor ${run.actor.login} did not have write access.`);
+                return;
+              }
+            } catch (error) {
+              if (error.status === 404) {
+                core.info(`Original run actor ${run.actor.login} is not a collaborator.`);
+                return;
+              }
+              throw error;
+            }
+
+            const { data: currentRun } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id
+            });
+            if (currentRun.run_attempt !== run.run_attempt || currentRun.status !== "completed") {
+              core.info("Ignoring a superseded or incomplete recording attempt.");
+              return;
+            }
+
+            const pullNumber = run.pull_requests[0].number;
+            const { data: pull } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullNumber
+            });
+            if (pull.state !== "open" || pull.draft || pull.head.sha !== run.head_sha) {
+              core.info("Ignoring a recording that is no longer for the current open PR head.");
+              return;
+            }
+
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: run.workflow_id,
+              event: "pull_request",
+              head_sha: run.head_sha,
+              per_page: 100
+            });
+            const latest = runs
+              .filter(candidate => candidate.pull_requests?.some(item => item.number === pullNumber))
+              .sort((left, right) => right.run_number - left.run_number)[0];
+            if (latest?.id !== run.id || latest?.run_attempt !== run.run_attempt) {
+              core.info("Ignoring an older recording for the same PR revision.");
+              return;
+            }
+
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              filter: "latest",
+              per_page: 100
+            });
+            const resolveJob = jobs.find(item => item.name === "Resolve visual profiles");
+            if (!resolveJob || resolveJob.conclusion === "skipped") {
+              core.info("Ignoring a recording triggered by an unrelated label event.");
+              return;
+            }
+
+            const { data: repository } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            const { data: catalogFile } = await github.rest.repos.getContent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: ".github/visual-review-profiles.json",
+              ref: repository.default_branch
+            });
+            if (Array.isArray(catalogFile) || catalogFile.type !== "file" || catalogFile.encoding !== "base64") {
+              throw new Error("Default-branch visual profile catalog is unavailable.");
+            }
+            const catalog = JSON.parse(Buffer.from(catalogFile.content, "base64").toString("utf8"));
+            if (catalog.version !== 1 || !Array.isArray(catalog.scenarios)) {
+              throw new Error("Default-branch visual profile catalog is invalid.");
+            }
+            const scenarios = new Map(catalog.scenarios.map(scenario => [scenario.id, scenario]));
+            if (scenarios.size !== catalog.scenarios.length) throw new Error("Visual profile IDs must be unique.");
+            const labels = pull.labels
+              .map(label => typeof label === "string" ? label : label.name)
+              .filter(label => label.startsWith("visual:"))
+              .sort();
+            if (labels.length === 0) {
+              core.setOutput("mode", "disabled");
+              core.setOutput("pull_number", String(pullNumber));
+              core.setOutput("head_sha", pull.head.sha);
+              core.setOutput("run_url", run.html_url);
+              return;
+            }
+            if (labels.length > 2) throw new Error("At most two visual profiles may be published.");
+            const profiles = labels.map(label => {
+              const match = /^visual:(desktop|mobile):([a-z0-9]+(?:-[a-z0-9]+)*)$/.exec(label);
+              if (!match) throw new Error(`Invalid visual profile label: ${label}`);
+              const [, viewport, id] = match;
+              const scenario = scenarios.get(id);
+              if (!scenario || !Array.isArray(scenario.viewports) || !scenario.viewports.includes(viewport)) {
+                throw new Error(`Unknown visual profile label: ${label}`);
+              }
+              if (!/^@visual-[a-z0-9]+(?:-[a-z0-9]+)*$/.test(scenario.tag ?? "")) {
+                throw new Error(`Invalid visual profile tag for ${label}.`);
+              }
+              return {
+                label,
+                id,
+                tag: scenario.tag,
+                viewport,
+                project: viewport === "mobile" ? "mobile-chromium" : "chromium"
+              };
+            });
+
+            const runArtifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              per_page: 100
+            });
+            const selectedArtifacts = [];
+            for (const revision of ["before", "after"]) {
+              const prefix = `runnarr-visual-${revision}-pr-${pullNumber}-`;
+              const candidates = runArtifacts.filter(item => item.name.startsWith(prefix));
+              if (candidates.length > 1) throw new Error(`Multiple ${revision} recording artifacts were produced.`);
+              if (candidates.length === 0) continue;
+              const artifact = candidates[0];
+              const sha = artifact.name.slice(prefix.length);
+              if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error(`Invalid ${revision} artifact commit SHA.`);
+              if (revision === "after" && sha !== pull.head.sha) throw new Error("After artifact is not for the current head.");
+              if (artifact.expired || artifact.size_in_bytes < 1 || artifact.size_in_bytes > 60 * 1024 * 1024) {
+                throw new Error(`${revision} recording artifact is expired or exceeds 60 MB.`);
+              }
+              const job = jobs.find(item => item.name.toLowerCase() === `record ${revision}`);
+              const journey = job?.steps?.find(step => step.name === "Run selected journeys");
+              selectedArtifacts.push({
+                revision,
+                id: artifact.id,
+                name: artifact.name,
+                sha,
+                outcome: journey?.conclusion ?? job?.conclusion ?? "not run",
+                url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/artifacts/${artifact.id}`
+              });
+            }
+
+            core.setOutput("mode", "enabled");
+            core.setOutput("profiles", JSON.stringify(profiles));
+            core.setOutput("artifacts", JSON.stringify(selectedArtifacts));
+            core.setOutput("artifact_ids", selectedArtifacts.map(item => item.id).join(","));
+            core.setOutput("pull_number", String(pullNumber));
+            core.setOutput("head_sha", pull.head.sha);
+            core.setOutput("run_url", run.html_url);
+
+  sanitize:
+    name: Sanitize visual media
+    needs:
+      - authorize
+    if: needs.authorize.outputs.mode == 'enabled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      outcome: ${{ steps.media.outcome }}
+    steps:
+      - name: Checkout trusted publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+
+      - name: Prepare bounded directories
+        run: mkdir -p source-artifacts sanitized-media
+
+      - name: Install visual media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+
+      - name: Download recording artifacts
+        if: needs.authorize.outputs.artifact_ids != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.authorize.outputs.artifact_ids }}
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          path: source-artifacts
+
+      - name: Validate and transcode recordings
+        id: media
+        continue-on-error: true
+        env:
+          RUNNARR_VISUAL_PROFILES_JSON: ${{ needs.authorize.outputs.profiles }}
+        run: >-
+          node scripts/visual-review-media.mjs
+          --artifacts source-artifacts
+          --output sanitized-media
+          --profiles-json "${RUNNARR_VISUAL_PROFILES_JSON}"
+
+      - name: Upload sanitized media
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runnarr-visual-media-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: sanitized-media
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish bounded R2 media
+    needs:
+      - authorize
+      - sanitize
+    if: always() && needs.authorize.outputs.mode == 'enabled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: visual-review-publish
+    outputs:
+      outcome: ${{ steps.r2.outcome }}
+    steps:
+      - name: Checkout trusted publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+
+      - name: Prepare publisher output
+        run: mkdir -p sanitized-media published-links
+
+      - name: Download sanitized media
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: runnarr-visual-media-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: sanitized-media
+
+      - name: Revalidate and publish private media
+        id: r2
+        continue-on-error: true
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: >-
+          node scripts/visual-review-r2.mjs
+          --media sanitized-media
+          --output published-links/stream-links.json
+
+      - name: Upload stream-link manifest
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: runnarr-visual-links-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: published-links/stream-links.json
+          if-no-files-found: error
+          retention-days: 7
+
+  comment:
+    name: Update visual review comment
+    needs:
+      - authorize
+      - sanitize
+      - publish
+    if: always() && needs.authorize.outputs.mode != 'ignore' && needs.authorize.outputs.mode != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download stream-link manifest
+        if: needs.authorize.outputs.mode == 'enabled'
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: runnarr-visual-links-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: published-links
+
+      - name: Add or update recording links
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          MODE: ${{ needs.authorize.outputs.mode }}
+          PROFILES_JSON: ${{ needs.authorize.outputs.profiles }}
+          ARTIFACTS_JSON: ${{ needs.authorize.outputs.artifacts }}
+          PULL_NUMBER: ${{ needs.authorize.outputs.pull_number }}
+          HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
+          RUN_URL: ${{ needs.authorize.outputs.run_url }}
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- runnarr-visual-review -->";
+            const pullNumber = Number(process.env.PULL_NUMBER);
+            if (!Number.isInteger(pullNumber) || pullNumber < 1) throw new Error("Invalid pull request output.");
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pullNumber,
+              per_page: 100
+            });
+            const existing = comments.find(comment =>
+              comment.user.type === "Bot" && comment.body.includes(marker)
+            );
+            const upsert = async body => {
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullNumber,
+                  body
+                });
+              }
+            };
+
+            if (process.env.MODE === "disabled") {
+              if (existing) {
+                await upsert(`${marker}
+            ### Visual review
+
+            Visual review is not requested for the current PR revision.
+            `);
+              }
+              return;
+            }
+
+            const profiles = JSON.parse(process.env.PROFILES_JSON);
+            const artifacts = JSON.parse(process.env.ARTIFACTS_JSON);
+            const artifactFor = revision => artifacts.find(item => item.revision === revision);
+            const diagnosticCell = revision => {
+              const artifact = artifactFor(revision);
+              return artifact ? `[Download ZIP](${artifact.url})` : "Artifact not produced";
+            };
+            const diagnosticRow = revision => {
+              const artifact = artifactFor(revision);
+              return `| ${revision === "before" ? "Before" : "After"} | ${artifact?.outcome ?? "not run"} | \`${artifact?.sha ?? "unknown"}\` | ${diagnosticCell(revision)} |`;
+            };
+
+            let stream;
+            try {
+              stream = JSON.parse(fs.readFileSync("published-links/stream-links.json", "utf8"));
+              if (stream.version !== 1 || stream.status !== "success" || !Array.isArray(stream.entries)) {
+                stream = undefined;
+              }
+            } catch {
+              stream = undefined;
+            }
+
+            let mediaSection;
+            if (stream) {
+              const expectedHead = process.env.HEAD_SHA;
+              const expectedLabels = new Set(profiles.map(profile => profile.label));
+              const combinations = new Set(stream.entries.map(entry => `${entry.profile?.label}/${entry.revision}`));
+              const expectedCombinations = profiles.flatMap(profile =>
+                ["before", "after"].map(revision => `${profile.label}/${revision}`)
+              );
+              const expiresAt = new Date(stream.expiresAt);
+              const valid = stream.entries.length === profiles.length * 2 &&
+                combinations.size === stream.entries.length &&
+                expectedCombinations.every(combination => combinations.has(combination)) &&
+                Number.isFinite(expiresAt.getTime()) &&
+                stream.entries.every(entry =>
+                  ["before", "after"].includes(entry.revision) &&
+                  Number(entry.pullNumber) === pullNumber &&
+                  expectedLabels.has(entry.profile?.label) &&
+                  (entry.revision !== "after" || entry.sha === expectedHead) &&
+                  typeof entry.videoUrl === "string" && entry.videoUrl.startsWith("https://") &&
+                  typeof entry.posterUrl === "string" && entry.posterUrl.startsWith("https://")
+                );
+              if (!valid) stream = undefined;
+            }
+            if (stream) {
+              const cell = (profile, revision) => {
+                const entry = stream.entries.find(item => item.profile.label === profile.label && item.revision === revision);
+                const title = `${revision === "before" ? "Before" : "After"} ${profile.viewport} ${profile.id}`;
+                return `[![${title}](${entry.posterUrl})](${entry.videoUrl})<br>[Play MP4](${entry.videoUrl}) · \`${entry.sha.slice(0, 12)}\``;
+              };
+              const rows = profiles.map(profile =>
+                `| \`${profile.label}\` | ${cell(profile, "before")} | ${cell(profile, "after")} |`
+              ).join("\n");
+              mediaSection = `| Profile | Before | After |
+            | --- | --- | --- |
+            ${rows}
+
+            Private stream links expire at \`${stream.expiresAt}\`.`;
+            } else {
+              mediaSection = `> **Inline playback is unavailable.** Secure media publishing failed; use the diagnostic ZIPs below. The publishing workflow is marked failed.`;
+            }
+
+            const body = `${marker}
+            ### Visual review
+
+            Profiles: ${profiles.map(profile => `\`${profile.label}\``).join(", ")}
+
+            ${mediaSection}
+
+            | Revision | Result | Commit | Recording and diagnostics |
+            | --- | --- | --- | --- |
+            ${diagnosticRow("before")}
+            ${diagnosticRow("after")}
+
+            - [Workflow run](${process.env.RUN_URL})
+            - Synthetic fixtures only; all recordings are bounded and scheduled to expire after seven days.
+            `;
+            await upsert(body);
+
+  streaming-status:
+    name: Visual review streaming
+    needs:
+      - authorize
+      - publish
+    if: always() && needs.authorize.outputs.mode == 'enabled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require successful secure publishing
+        env:
+          PUBLISH_OUTCOME: ${{ needs.publish.outputs.outcome }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+        run: |
+          if [ "${PUBLISH_RESULT}" != "success" ] || [ "${PUBLISH_OUTCOME}" != "success" ]; then
+            echo "Inline visual-review publishing failed; diagnostic artifacts remain available."
+            exit 1
+          fi
