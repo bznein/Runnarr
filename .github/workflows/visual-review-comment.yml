@@ -231,6 +231,11 @@ jobs:
       - name: Prepare bounded directories
         run: mkdir -p source-artifacts sanitized-media
 
+      - name: Install visual media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+
       - name: Download recording artifacts
         if: needs.authorize.outputs.artifact_ids != ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

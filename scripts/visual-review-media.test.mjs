@@ -28,6 +28,7 @@ function makeVideo(filePath) {
     "-f", "lavfi", "-i", "color=c=blue:s=800x450:r=10:d=1",
     "-c:v", "libvpx", "-threads", "1", "-an", filePath
   ], { encoding: "utf8" });
+  if (result.error && result.status === null) throw result.error;
   assert.equal(result.status, 0, result.stderr);
 }
 
