@@ -265,8 +265,9 @@ to 0.5 CPU and 512 MiB. New previews are deferred below 12 GiB available memory
 or 10 GiB free disk. Deployment networks use explicit non-overlapping subnets
 so hosts with exhausted Docker default pools can still create them: production
 retains `10.89.0.0/24`, ingress uses `10.90.0.0/24`, staging uses
-`10.91.0.0/24`, and preview subnets are deterministically allocated from
-the `10.100.0.0` through `10.199.255.0` range.
+`10.91.0.0/24`, shared preview routing uses `10.92.0.0/24`, and preview
+subnets are deterministically allocated from the `10.100.0.0` through
+`10.199.255.0` range.
 
 ### Staging
 

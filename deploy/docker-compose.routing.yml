@@ -29,3 +29,10 @@ services:
 volumes:
   valhalla-data:
     name: runnarr-nonprod-valhalla-data
+
+networks:
+  default:
+    name: runnarr-preview-routing
+    ipam:
+      config:
+        - subnet: ${RUNNARR_PREVIEW_ROUTING_SUBNET:-10.92.0.0/24}

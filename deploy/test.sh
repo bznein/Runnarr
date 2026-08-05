@@ -123,6 +123,7 @@ grep -Fq 'docker logs --tail=200 "${name}"' "${ROOT}/deploy/runnarr-deploy" ||
 cat > "${TEMPORARY}/routing.env" <<EOF
 RUNNARR_PREVIEW_ROUTING_ENABLED=true
 RUNNARR_PREVIEW_ROUTING_CONTAINER=runnarr-nonprod-valhalla
+RUNNARR_PREVIEW_ROUTING_SUBNET=10.92.0.0/24
 RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LAT=53.3438
 RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LON=-6.2546
 RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LAT=53.3382
@@ -148,7 +149,9 @@ jq -e \
    and (.services.valhalla.ports == null)
    and (.services.valhalla.mem_limit | tonumber) == 6442450944
    and .services.valhalla.labels["com.runnarr.environment"] == "preview-routing"
-   and .volumes["valhalla-data"].name == "runnarr-nonprod-valhalla-data"' \
+   and .volumes["valhalla-data"].name == "runnarr-nonprod-valhalla-data"
+   and .networks.default.name == "runnarr-preview-routing"
+   and .networks.default.ipam.config[0].subnet == "10.92.0.0/24"' \
   "${TEMPORARY}/routing.json" >/dev/null
 
 cat > "${TEMPORARY}/production.env" <<'EOF'
