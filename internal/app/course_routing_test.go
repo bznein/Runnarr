@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"testing"
 )
@@ -79,6 +80,12 @@ func TestCourseRoutingUsesSportCostingAndExactWaypoints(t *testing.T) {
 	if len(result.Legs[0].ElevationsM) != 3 || result.Legs[0].ElevationsM[1] == nil || *result.Legs[0].ElevationsM[1] != 18.4 {
 		t.Fatalf("routed elevations = %#v", result.Legs[0].ElevationsM)
 	}
+	if len(result.Profile) != 3 || result.ElevationCoverage != 1 || result.ElevationGainM == nil || result.ElevationLossM == nil {
+		t.Fatalf("routing preview = %#v", result)
+	}
+	if math.Abs(*result.ElevationGainM-8.2) > 0.001 || math.Abs(*result.ElevationLossM-5.8) > 0.001 {
+		t.Fatalf("routing preview gain/loss = %v/%v", *result.ElevationGainM, *result.ElevationLossM)
+	}
 }
 
 func TestCourseRoutingKeepsGeometryWhenElevationUnavailable(t *testing.T) {
@@ -103,6 +110,9 @@ func TestCourseRoutingKeepsGeometryWhenElevationUnavailable(t *testing.T) {
 	}
 	if result.Legs[0].Mode != CourseLegRouted || result.Legs[0].Warning == "" || result.Legs[0].ElevationsM[0] != nil {
 		t.Fatalf("result = %#v", result.Legs[0])
+	}
+	if len(result.Profile) != 2 || result.ElevationCoverage != 0 || result.ElevationGainM != nil || result.ElevationLossM != nil {
+		t.Fatalf("routing preview without elevation = %#v", result)
 	}
 }
 

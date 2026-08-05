@@ -3612,6 +3612,27 @@ textarea {
   cursor: pointer;
 }
 
+.course-waypoint-heading-actions,
+.course-back-to-start-button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.course-waypoint-heading-actions {
+  gap: 10px;
+}
+
+.course-waypoint-heading .course-back-to-start-button {
+  gap: 4px;
+  color: var(--color-primary-strong);
+  font-weight: 680;
+}
+
+.course-waypoint-heading button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .course-waypoint-list {
   display: grid;
   gap: 7px;
@@ -3679,6 +3700,15 @@ textarea {
 
 .course-planner-map .leaflet-container {
   cursor: crosshair;
+}
+
+.course-planner-elevation-preview {
+  display: grid;
+  gap: 14px;
+}
+
+.course-planner-elevation-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .course-waypoint-marker {

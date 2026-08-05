@@ -575,7 +575,17 @@ test.describe("local product journey", () => {
     await plannerMap.click({ position: { x: 90, y: 110 } });
     await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
     if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
-    await expect(page.locator(".course-waypoint-list li")).toHaveCount(mobile ? 3 : 2);
+    const waypointRows = page.locator(".course-waypoint-list li");
+    await expect(waypointRows).toHaveCount(mobile ? 3 : 2);
+    const startCoordinates = await waypointRows.first().locator("small").innerText();
+    const backToStart = page.getByRole("button", { name: "Back to start", exact: true });
+    await expect(backToStart).toBeEnabled();
+    await backToStart.click();
+    await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
+    await expect(waypointRows.last().locator("small")).toHaveText(startCoordinates);
+    await expect(backToStart).toBeDisabled();
+    await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
+    await expect(page.getByText("Elevation coverage", { exact: true })).toBeVisible();
     const plannedName = `E2E ${testInfo.project.name} Planned Course`;
     await page.locator(".course-planner-sidebar").getByLabel("Name").fill(plannedName);
     page.once("dialog", (dialog) => void dialog.accept());

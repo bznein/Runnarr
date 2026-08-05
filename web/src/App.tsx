@@ -5581,6 +5581,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [seedLegs, setSeedLegs] = useState<CourseLeg[]>([]);
   const [geometryDirty, setGeometryDirty] = useState(!editing);
   const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
+  const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
 
   useEffect(() => {
@@ -5611,7 +5612,12 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
       ? routed.data.legs
       : fallbackLegs;
   const directLegs = plannerLegs.filter((leg) => leg.mode === "direct");
-  const routeDistanceM = courseLegDistance(plannerLegs);
+  const routeDistanceM = !geometryDirty ? course.data?.distanceM ?? courseLegDistance(plannerLegs) : routed.data?.distanceM ?? courseLegDistance(plannerLegs);
+  const elevationGainM = !geometryDirty ? course.data?.elevationGainM : routed.data?.elevationGainM;
+  const elevationLossM = !geometryDirty ? course.data?.elevationLossM : routed.data?.elevationLossM;
+  const elevationCoverage = !geometryDirty ? course.data?.elevationCoverage : routed.data?.elevationCoverage;
+  const elevationProfile = !geometryDirty ? course.data?.profile ?? [] : routed.data?.profile ?? [];
+  const returnsToStart = plannerReturnsToStart(waypoints);
   const canSave = canWrite && name.trim().length > 0 && waypoints.length >= 2 && plannerLegs.length === waypoints.length - 1 && !routed.isFetching;
   const save = useMutation({
     mutationFn: () => {
@@ -5631,6 +5637,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
 
   const markGeometryDirty = () => {
     setGeometryDirty(true);
+    setHighlighted(undefined);
     save.reset();
   };
   const reindexWaypoints = (items: typeof waypoints) => items.map((point, index) => ({ ...point, index }));
@@ -5640,7 +5647,17 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     markGeometryDirty();
   };
   const moveWaypoint = (index: number, point: RoutePoint) => {
-    setWaypoints((current) => current.map((item) => item.index === index ? { ...item, latitude: point[0], longitude: point[1] } : item));
+    setWaypoints((current) => {
+      const keepClosed = index === 0 && plannerReturnsToStart(current);
+      const finishIndex = current.length - 1;
+      return current.map((item) => item.index === index || (keepClosed && item.index === finishIndex) ? { ...item, latitude: point[0], longitude: point[1] } : item);
+    });
+    markGeometryDirty();
+  };
+  const addReturnToStart = () => {
+    if (!canWrite || waypoints.length < 2 || waypoints.length >= 100 || returnsToStart) return;
+    const start = waypoints[0];
+    setWaypoints((current) => reindexWaypoints([...current, { index: current.length, latitude: start.latitude, longitude: start.longitude }]));
     markGeometryDirty();
   };
   const removeWaypoint = (index: number) => {
@@ -5685,7 +5702,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
           <span><strong>{plannerLegs.length}</strong> legs</span>
           <span><strong>{formatDistance(routeDistanceM)}</strong> distance</span>
         </div>
-        <div className="course-waypoint-heading"><strong>Waypoints</strong>{waypoints.length > 0 && <button className="danger-text-button" type="button" disabled={!canWrite} onClick={() => { setWaypoints([]); setDirectLegIndexes([]); markGeometryDirty(); }}>Clear</button>}</div>
+        <div className="course-waypoint-heading"><strong>Waypoints</strong>{waypoints.length > 0 && <span className="course-waypoint-heading-actions">{waypoints.length >= 2 && <button className="course-back-to-start-button" type="button" title={returnsToStart ? "The course already finishes at its start." : "Add a final leg back to the starting point."} disabled={!canWrite || returnsToStart || waypoints.length >= 100} onClick={addReturnToStart}><RotateCcw size={13} />Back to start</button>}<button className="danger-text-button" type="button" disabled={!canWrite} onClick={() => { setWaypoints([]); setDirectLegIndexes([]); markGeometryDirty(); }}>Clear</button></span>}</div>
         {waypoints.length === 0 && <p className="muted">Click the map to add a start and finish.</p>}
         <ol className="course-waypoint-list">
           {waypoints.map((waypoint, index) => <li key={`${waypoint.index}-${waypoint.latitude}-${waypoint.longitude}`}>
@@ -5697,9 +5714,17 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
       </aside>
       <section className="panel course-planner-map-panel">
         <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">Click to add; drag numbered waypoints to adjust.</span></div>{routed.isFetching && <span className="muted">Routing…</span>}</div>
-        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} onAdd={addWaypoint} onMove={moveWaypoint} />
+        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} onAdd={addWaypoint} onMove={moveWaypoint} />
       </section>
     </section>
+    {plannerLegs.length > 0 && <section className="course-planner-elevation-preview">
+      <section className="metric-grid course-planner-elevation-metrics">
+        <Metric label="Ascent" value={formatCourseElevation(elevationGainM)} icon={<Mountain size={18} />} />
+        <Metric label="Descent" value={formatCourseElevation(elevationLossM)} icon={<ArrowDown size={18} />} />
+        <Metric label="Elevation coverage" value={elevationCoverage === undefined ? "" : `${Math.round(elevationCoverage * 100)}%`} />
+      </section>
+      <CourseElevationProfile profile={elevationProfile} onHighlight={setHighlighted} emptyMessage={routed.isFetching ? "Elevation is being calculated with the route." : "The planned route does not contain enough usable elevation data."} />
+    </section>}
     {plannerLegs.length > 0 && <section className="panel course-leg-panel"><div className="course-leg-heading"><div><div className="panel-heading">Legs</div><span className="muted">Routing failures are isolated; direct legs stay editable and visible.</span></div>{routed.error && <button className="secondary-button small-button" type="button" onClick={() => void routed.refetch()}><RefreshCw size={14} />Retry routing</button>}</div><div className="course-leg-list">{plannerLegs.map((leg, index) => {
       const manuallyDirect = directLegIndexes.includes(index);
       return <div className={`course-leg-row ${leg.mode === "direct" ? "direct" : ""}`} key={index}><span className="course-leg-index">{index + 1}</span><span><strong>{leg.mode === "direct" ? "Direct" : "Routed"}</strong><small>{formatDistance(courseLegDistance([leg]))} · {leg.pointCount.toLocaleString()} points</small>{leg.warning && <small className="warning-text">{leg.warning}</small>}</span><button className="secondary-button small-button" type="button" disabled={!canWrite || routed.isFetching} onClick={() => { if (leg.mode === "direct" && !manuallyDirect) { void routed.refetch(); } else { setDirect(index, !manuallyDirect); } }}>{leg.mode === "direct" ? manuallyDirect ? "Try routing" : "Retry routing" : "Use direct"}</button></div>;
@@ -5707,7 +5732,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   </Page>;
 }
 
-function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
+function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
   const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
   const waypointPoints = waypoints.map((point) => [point.latitude, point.longitude] as RoutePoint);
   const allPoints = pointsByLeg.flat();
@@ -5728,6 +5753,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, onAdd, onMove }: 
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
       {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={`Waypoint ${index + 1}`} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
       {canEdit && <MapLocationPicker onSelect={onAdd} />}
+      {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
       {position && <><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
       <FitMapContent points={fitPoints} />
     </MapContainer>
@@ -5743,6 +5769,13 @@ function plannerDirectLegs(waypoints: Array<{ latitude: number; longitude: numbe
     const points: RoutePoint[] = [[start.latitude, start.longitude], [end.latitude, end.longitude]];
     return { index, mode: "direct", encodedPolyline: encodeCoursePolyline(points, 6), elevationsM: [null, null], pointCount: 2, warning };
   });
+}
+
+function plannerReturnsToStart(waypoints: Array<{ latitude: number; longitude: number }>) {
+  if (waypoints.length < 2) return false;
+  const start = waypoints[0];
+  const finish = waypoints[waypoints.length - 1];
+  return routePointDistance([start.latitude, start.longitude], [finish.latitude, finish.longitude]) <= 0.5;
 }
 
 function encodeCoursePolyline(points: RoutePoint[], precision: number) {
@@ -5933,10 +5966,10 @@ function CourseMap({ legs, tileURL, highlighted, allowLocation = false }: { legs
   </div>;
 }
 
-function CourseElevationProfile({ profile, onHighlight }: { profile: CourseProfilePoint[]; onHighlight?: (point?: CourseProfilePoint) => void }) {
+function CourseElevationProfile({ profile, onHighlight, emptyMessage = "The source did not contain enough usable elevation data." }: { profile: CourseProfilePoint[]; onHighlight?: (point?: CourseProfilePoint) => void; emptyMessage?: string }) {
   const data = profile.filter((point) => point.elevationM !== undefined).map((point) => ({ ...point, distanceKm: point.distanceM / 1000 }));
   return <section className="panel course-profile-panel"><div className="panel-heading">Elevation profile</div>
-    {data.length < 2 ? <EmptyState title="No elevation profile" message="The source did not contain enough usable elevation data." /> : <div className="course-profile-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={data} onMouseMove={(state) => onHighlight?.(courseProfilePointFromMouseState(state, data))} onMouseLeave={() => onHighlight?.(undefined)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="distanceKm" tickFormatter={(value) => `${Number(value).toFixed(1)} km`} minTickGap={24} /><YAxis width={50} tickFormatter={(value) => `${Math.round(Number(value))} m`} domain={["dataMin", "dataMax"]} /><Tooltip contentStyle={chartTooltipContentStyle} labelFormatter={(value) => `${Number(value).toFixed(2)} km`} formatter={(value) => [`${Math.round(Number(value))} m`, "Elevation"]} /><Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.45} dot={false} /></AreaChart></ResponsiveContainer></div>}
+    {data.length < 2 ? <EmptyState title="No elevation profile" message={emptyMessage} /> : <div className="course-profile-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={data} onMouseMove={(state) => onHighlight?.(courseProfilePointFromMouseState(state, data))} onMouseLeave={() => onHighlight?.(undefined)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="distanceKm" tickFormatter={(value) => `${Number(value).toFixed(1)} km`} minTickGap={24} /><YAxis width={50} tickFormatter={(value) => `${Math.round(Number(value))} m`} domain={["dataMin", "dataMax"]} /><Tooltip contentStyle={chartTooltipContentStyle} labelFormatter={(value) => `${Number(value).toFixed(2)} km`} formatter={(value) => [`${Math.round(Number(value))} m`, "Elevation"]} /><Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.45} dot={false} /></AreaChart></ResponsiveContainer></div>}
   </section>;
 }
 

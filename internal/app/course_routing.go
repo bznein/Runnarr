@@ -39,8 +39,13 @@ type CourseRoutingLeg struct {
 }
 
 type CourseRoutingResponse struct {
-	RoutingEnabled bool               `json:"routingEnabled"`
-	Legs           []CourseRoutingLeg `json:"legs"`
+	RoutingEnabled    bool                 `json:"routingEnabled"`
+	Legs              []CourseRoutingLeg   `json:"legs"`
+	DistanceM         float64              `json:"distanceM"`
+	ElevationGainM    *float64             `json:"elevationGainM,omitempty"`
+	ElevationLossM    *float64             `json:"elevationLossM,omitempty"`
+	ElevationCoverage float64              `json:"elevationCoverage"`
+	Profile           []CourseProfilePoint `json:"profile"`
 }
 
 type valhallaRouteResponse struct {
@@ -120,7 +125,28 @@ func (service *CourseRoutingService) Route(ctx context.Context, input CourseRout
 		response.Legs = append(response.Legs, leg)
 		totalPoints = projected
 	}
+	addCourseRoutingPreview(&response)
 	return response, nil
+}
+
+func addCourseRoutingPreview(response *CourseRoutingResponse) {
+	points := make([]CoursePoint, 0)
+	for index, leg := range response.Legs {
+		if index == 0 {
+			points = append(points, leg.Points...)
+			continue
+		}
+		points = append(points, leg.Points[1:]...)
+	}
+	if len(points) < 2 {
+		return
+	}
+	distance, coverage, gain, loss, profile := courseGeometryMetrics(points)
+	response.DistanceM = distance
+	response.ElevationCoverage = coverage
+	response.ElevationGainM = gain
+	response.ElevationLossM = loss
+	response.Profile = boundedCourseProfile(profile, maxCourseProfilePoints)
 }
 
 func plannerLegPointContribution(index, pointCount int) int {

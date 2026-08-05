@@ -215,6 +215,11 @@ export type CourseRoutingLeg = CourseLeg & {
 export type CourseRoutingResponse = {
   routingEnabled: boolean;
   legs: CourseRoutingLeg[];
+  distanceM: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
+  elevationCoverage: number;
+  profile: CourseProfilePoint[];
 };
 
 export type CoursePlanInput = {
