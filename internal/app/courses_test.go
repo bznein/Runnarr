@@ -75,7 +75,7 @@ func TestPreservedCourseAnchorsKeepExactGeometry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(course.Waypoints) > 100 {
+	if len(course.Waypoints) > maxPreservedCourseAnchors {
 		t.Fatalf("waypoints = %d", len(course.Waypoints))
 	}
 	flattened := flattenCoursePoints(course.Legs)

@@ -180,6 +180,7 @@ export type CourseImportCandidate = {
   elevationLossM?: number;
   elevationCoverage?: number;
   pointCount?: number;
+  waypointCount?: number;
   profile?: CourseProfilePoint[];
   duplicateCourse?: CourseSummary;
   diagnostics?: CourseImportDiagnostic[];

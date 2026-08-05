@@ -5852,7 +5852,7 @@ function CourseImportPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
                   <input type="checkbox" aria-label={`Import ${candidate.name}`} checked={draft?.selected ?? false} disabled={!selectable || commit.isPending} onChange={(event) => updateDraft(candidate.key, { selected: event.target.checked })} />
                   <button type="button" onClick={() => setActiveKey(candidate.key)}>
                     <strong>{candidate.name}</strong>
-                    <span>{candidate.valid ? `${candidate.kind} · ${formatDistance(candidate.distanceM ?? 0)} · ${(candidate.pointCount ?? 0).toLocaleString()} points` : candidate.error}</span>
+                    <span>{candidate.valid ? `${candidate.kind} · ${formatDistance(candidate.distanceM ?? 0)} · ${(candidate.pointCount ?? 0).toLocaleString()} source samples · ${(candidate.waypointCount ?? 0).toLocaleString()} editable points` : candidate.error}</span>
                     {candidate.duplicateCourse && <span className="warning-text">Already saved as {candidate.duplicateCourse.name}</span>}
                   </button>
                 </div>;
