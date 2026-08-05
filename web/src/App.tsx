@@ -3,11 +3,11 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Database, Download, ExternalLink, Filter, Flame, Footprints, HeartPulse, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, HeartPulse, LocateFixed, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
 import { divIcon } from "leaflet";
-import { MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { Circle, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { activityGPXURL, api, ApiError, setCsrfToken } from "./api";
+import { activityGPXURL, courseGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
 import { PACE_ROUTE_COLORS, clampPaceToScale, formatPaceMinutesSeconds, paceColorForPace, paceForRouteSegment, paceScaleFromPaces, paceScaleFromSpeeds, speedToPaceSPKM } from "./paceDisplay";
 import type { PaceDisplayScale } from "./paceDisplay";
@@ -41,6 +41,15 @@ import type {
   ActivityTypeFilters as ActivityTypeFiltersValue,
   AppConfig,
   CalendarActivitySummary,
+  Course,
+  CourseImportCandidate,
+  CourseImportPreview,
+  CourseImportSelection,
+  CourseLeg,
+  CourseProfilePoint,
+  CourseRoutingLeg,
+  CourseSport,
+  CourseSummary,
   DailyHealthMetric,
   HealthChartPoint,
   Gear,
@@ -447,6 +456,7 @@ function AuthenticatedApp({
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/calendar" icon={<CalendarDays size={18} />} label="Calendar" />
+          <NavItem to="/courses" icon={<RouteIcon size={18} />} label="Courses" />
           <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
           <NavItem to="/health" icon={<HeartPulse size={18} />} label="Health" />
           <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
@@ -478,12 +488,18 @@ function AuthenticatedApp({
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/activities" element={<ActivitiesPage />} />
-          <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} />} />
+          <Route path="/activities/:id" element={<ActivityDetailPage config={config.data} canWrite={session?.canWrite !== false} />} />
           <Route path="/calendar" element={<ActivityCalendarPage />} />
           <Route path="/calendar/day/:date" element={<CalendarDayPage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />
           <Route path="/workouts/new" element={<WorkoutEditorPage />} />
           <Route path="/workouts/:id" element={<WorkoutEditorPage />} />
+          <Route path="/courses" element={<CoursesPage canWrite={session?.canWrite !== false} />} />
+          <Route path="/courses/new" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
+          <Route path="/courses/import" element={<CourseImportPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
+          <Route path="/courses/imports/:id" element={<CourseImportResultPage />} />
+          <Route path="/courses/:id/plan" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
+          <Route path="/courses/:id" element={<CourseDetailPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/notifications" element={<NotificationsPage canWrite={session?.canWrite !== false} />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/tools" element={<ToolsPage />} />
@@ -686,8 +702,10 @@ function MobileNavigation({
       ? "Activities"
       : location.pathname.startsWith("/calendar/day/")
         ? "Day view"
-        : location.pathname.startsWith("/calendar")
-          ? "Calendar"
+          : location.pathname.startsWith("/calendar")
+            ? "Calendar"
+          : location.pathname.startsWith("/courses")
+            ? "Courses"
           : location.pathname.startsWith("/workouts")
             ? "Workouts"
           : location.pathname.startsWith("/notifications")
@@ -763,6 +781,7 @@ function MobileNavigation({
                 </button>
               )}
               <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
+              <NavItem to="/courses" icon={<RouteIcon size={18} />} label="Courses" />
               <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
               <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
               <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />
@@ -3193,12 +3212,20 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
   const [matchPreview, setMatchPreview] = useState<TrainingSheetWritebackPreview>();
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [courseSaveOpen, setCourseSaveOpen] = useState(false);
   const [mediaFileInputKey, setMediaFileInputKey] = useState(0);
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
   const [pinningMediaId, setPinningMediaId] = useState<string>();
   const [analysisTab, setAnalysisTab] = useState<ActivityAnalysisTab>("stats");
   const [climbSensitivityDraft, setClimbSensitivityDraft] = useState(defaultClimbSensitivity);
   const [climbSensitivityPreview, setClimbSensitivityPreview] = useState(defaultClimbSensitivity);
+  const saveAsCourse = useMutation({
+    mutationFn: (input: { name: string; sportType: CourseSport; notes: string }) => api.saveActivityAsCourse(id!, input),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({ queryKey: ["courses"] });
+      navigate(`/courses/${encodeURIComponent(created.id)}`);
+    }
+  });
   const routeUsesGap = (activity.data?.activity.laps ?? []).some((lap) => lap.avgGradeAdjustedPaceSPKM !== undefined);
   const configuredClimbSensitivity = config?.climbDetection?.sensitivity ?? defaultClimbSensitivity;
   const climbSensitivity = clampClimbSensitivity(climbSensitivityDraft);
@@ -3231,6 +3258,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
     setPlannedMatchWindowDays(7);
     setRetryingPlannedMatchCandidates(false);
     setExportOpen(false);
+    setCourseSaveOpen(false);
     setSelectedMediaId(undefined);
     setPinningMediaId(undefined);
     setAnalysisTab("stats");
@@ -3238,6 +3266,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
     uploadMedia.reset();
+    saveAsCourse.reset();
     updateMediaLocation.reset();
     setMediaFileInputKey((key) => key + 1);
     setClimbSensitivityDraft(configuredClimbSensitivity);
@@ -3631,6 +3660,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
             open={actionsOpen}
             deleting={deleteActivity.isPending}
             canExportGPX={canExportGPX}
+            canSaveCourse={canExportGPX && canWrite}
             canOpenCheckIn={Boolean(matchedPlannedActivity)}
             feedbackAvailable={feedbackAvailable}
             canRetryWriteback={canRetryWriteback}
@@ -3648,6 +3678,11 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
             }}
             onExportGPX={() => {
               setExportOpen(true);
+              setActionsOpen(false);
+            }}
+            onSaveCourse={() => {
+              saveAsCourse.reset();
+              setCourseSaveOpen(true);
               setActionsOpen(false);
             }}
             onCheckIn={() => {
@@ -3714,6 +3749,15 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
         <ActivityExportGPXDialog
           activity={item}
           onClose={() => setExportOpen(false)}
+        />
+      )}
+      {courseSaveOpen && (
+        <ActivitySaveCourseDialog
+          activity={item}
+          saving={saveAsCourse.isPending}
+          error={saveAsCourse.error}
+          onSave={(input) => saveAsCourse.mutate(input)}
+          onClose={() => setCourseSaveOpen(false)}
         />
       )}
       {plannedMatchCandidates.error && <div className="error">{plannedMatchCandidates.error instanceof Error ? plannedMatchCandidates.error.message : "Could not load planned activity matches"}</div>}
@@ -5002,6 +5046,7 @@ function ActivityDetailActions({
   open,
   deleting,
   canExportGPX,
+  canSaveCourse,
   canOpenCheckIn,
   feedbackAvailable,
   canRetryWriteback,
@@ -5010,6 +5055,7 @@ function ActivityDetailActions({
   onRename,
   onNotes,
   onExportGPX,
+  onSaveCourse,
   onCheckIn,
   onRetryWriteback,
   onDelete
@@ -5018,6 +5064,7 @@ function ActivityDetailActions({
   open: boolean;
   deleting: boolean;
   canExportGPX: boolean;
+  canSaveCourse: boolean;
   canOpenCheckIn: boolean;
   feedbackAvailable: boolean;
   canRetryWriteback: boolean;
@@ -5026,6 +5073,7 @@ function ActivityDetailActions({
   onRename: () => void;
   onNotes: () => void;
   onExportGPX: () => void;
+  onSaveCourse: () => void;
   onCheckIn: () => void;
   onRetryWriteback: () => void;
   onDelete: () => void;
@@ -5054,6 +5102,10 @@ function ActivityDetailActions({
           <button className="action-menu-item" type="button" role="menuitem" disabled={!canExportGPX} onClick={onExportGPX}>
             <Download size={16} />
             Export GPX
+          </button>
+          <button className="action-menu-item" type="button" role="menuitem" disabled={!canSaveCourse} onClick={onSaveCourse}>
+            <RouteIcon size={16} />
+            Save as course
           </button>
           {activity.originalProviderUrl && (
             <a className="action-menu-item" role="menuitem" href={activity.originalProviderUrl} target="_blank" rel="noreferrer">
@@ -5154,6 +5206,34 @@ function ActivityRenameDialog({
       </form>
     </div>
   );
+}
+
+function ActivitySaveCourseDialog({ activity, saving, error, onSave, onClose }: { activity: Activity; saving: boolean; error: unknown; onSave: (input: { name: string; sportType: CourseSport; notes: string }) => void; onClose: () => void }) {
+  const [name, setName] = useState(activity.name);
+  const [sportType, setSportType] = useState<CourseSport | "">(inferCourseSport(activity.sportType));
+  const [notes, setNotes] = useState(activity.notes ?? "");
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <form className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-save-course-title" onSubmit={(event) => { event.preventDefault(); if (name.trim() && sportType) onSave({ name: name.trim(), sportType, notes }); }}>
+        <div className="dialog-header"><div><div className="eyebrow">GPS activity</div><h2 id="activity-save-course-title">Save as course</h2></div><button className="icon-button" type="button" aria-label="Close" onClick={onClose}><X size={16} /></button></div>
+        <label className="field"><span>Name</span><input autoFocus maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label className="field"><span>Sport</span><select value={sportType} onChange={(event) => setSportType(event.target.value as CourseSport | "")}><option value="" disabled>Choose a sport</option>{courseSports.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="field"><span>Notes</span><textarea maxLength={5000} rows={5} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+        <p className="muted">Runnarr copies the activity route into a private course. The activity and provider data are not changed.</p>
+        {Boolean(error) && <div className="error">{courseMutationMessage(error)}</div>}
+        <div className="dialog-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !name.trim() || !sportType}>{saving ? "Saving…" : "Save course"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function inferCourseSport(activitySport: string): CourseSport | "" {
+  const sport = activitySport.toLowerCase();
+  if (sport.includes("hike")) return "Hike";
+  if (sport.includes("walk")) return "Walk";
+  if (sport.includes("cycl") || sport.includes("bike") || sport.includes("biking")) return "Cycling";
+  if (sport.includes("run")) return "Run";
+  return "";
 }
 
 function ActivityClimbsPanel({
@@ -5284,6 +5364,654 @@ function ClimbStat({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+const courseSports: CourseSport[] = ["Run", "Walk", "Hike", "Cycling"];
+
+function CoursesPage({ canWrite }: { canWrite: boolean }) {
+  const queryClient = useQueryClient();
+  const [query, setQuery] = useState("");
+  const [sport, setSport] = useState<CourseSport | "">("");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const courses = useQuery({
+    queryKey: ["courses", query, sport, favoritesOnly],
+    queryFn: () => api.courses({ q: query, sport, favorite: favoritesOnly ? true : undefined, sort: "updated", order: "desc", limit: 100 })
+  });
+  const favorite = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) => api.setCourseFavorite(id, value),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["courses"] })
+  });
+  const items = courses.data?.courses ?? [];
+
+  return (
+    <Page
+      title="Courses"
+      eyebrow="Reusable routes"
+      actions={canWrite ? <><Link className="secondary-button" to="/courses/import"><FileUp size={16} />Upload GPX</Link><Link className="primary-button" to="/courses/new"><RouteIcon size={16} />New course</Link></> : undefined}
+    >
+      <section className="panel course-library-panel">
+        <div className="course-library-filters">
+          <label className="field course-search-field">
+            <span>Search</span>
+            <input type="search" value={query} placeholder="Name or notes" onChange={(event) => setQuery(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Sport</span>
+            <select value={sport} onChange={(event) => setSport(event.target.value as CourseSport | "")}>
+              <option value="">All sports</option>
+              {courseSports.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label className="course-favorite-filter">
+            <input type="checkbox" checked={favoritesOnly} onChange={(event) => setFavoritesOnly(event.target.checked)} />
+            Favorites only
+          </label>
+        </div>
+        {courses.isLoading && <LoadingRow />}
+        {courses.error && <div className="error">{courses.error instanceof Error ? courses.error.message : "Could not load courses"}</div>}
+        {!courses.isLoading && !courses.error && items.length === 0 && (
+          <EmptyState title="No courses in this view" message={query || sport || favoritesOnly ? "Try clearing a filter." : "Upload a GPX file or save a GPS activity as a course."} />
+        )}
+        {items.length > 0 && (
+          <div className="table-wrap">
+            <table className="data-table course-table">
+              <thead><tr><th><span className="visually-hidden">Favorite</span></th><th>Name</th><th>Sport</th><th>Distance</th><th>Ascent</th><th>Updated</th></tr></thead>
+              <tbody>
+                {items.map((course) => (
+                  <tr key={course.id}>
+                    <td>
+                      <button
+                        className={`icon-button course-favorite-button ${course.favorite ? "active" : ""}`}
+                        type="button"
+                        aria-label={course.favorite ? `Remove ${course.name} from favorites` : `Add ${course.name} to favorites`}
+                        aria-pressed={course.favorite}
+                        disabled={!canWrite || favorite.isPending}
+                        onClick={() => favorite.mutate({ id: course.id, value: !course.favorite })}
+                      ><Star size={17} fill={course.favorite ? "currentColor" : "none"} /></button>
+                    </td>
+                    <td><Link to={`/courses/${encodeURIComponent(course.id)}`}>{course.name}</Link>{course.notes && <span className="course-row-note">{course.notes}</span>}</td>
+                    <td>{course.sportType}</td>
+                    <td>{formatDistance(course.distanceM)}</td>
+                    <td>{formatCourseElevation(course.elevationGainM)}</td>
+                    <td>{formatDate(course.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </Page>
+  );
+}
+
+function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTileURL?: string }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
+  const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: Boolean(id) });
+  const favorite = useMutation({
+    mutationFn: (value: boolean) => api.setCourseFavorite(id!, value),
+    onSuccess: async () => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["course", id] }), queryClient.invalidateQueries({ queryKey: ["courses"] })]);
+    }
+  });
+  const update = useMutation({
+    mutationFn: (input: { name: string; sportType: CourseSport; notes: string }) => api.updateCourseDetails(id!, { revision: course.data!.revision, ...input }),
+    onSuccess: async () => {
+      setEditOpen(false);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["course", id] }), queryClient.invalidateQueries({ queryKey: ["courses"] })]);
+    }
+  });
+  const duplicate = useMutation({
+    mutationFn: (input: { name: string; notes: string }) => api.duplicateCourse(id!, { revision: course.data!.revision, ...input }),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({ queryKey: ["courses"] });
+      navigate(`/courses/${encodeURIComponent(created.id)}`);
+    }
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteCourse(id!, course.data!.revision),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["courses"] });
+      navigate("/courses");
+    }
+  });
+
+  if (course.isLoading) return <Page title="Course"><LoadingRow /></Page>;
+  if (!course.data) return <Page title="Course"><EmptyState title="Course not found" /></Page>;
+  const item = course.data;
+  const diagnostics = Object.entries(item.diagnostics ?? {});
+
+  return (
+    <Page
+      title={item.name}
+      eyebrow={`${item.sportType} course`}
+      actions={<>
+        <button className={`icon-button course-favorite-button ${item.favorite ? "active" : ""}`} type="button" title={item.favorite ? "Remove from favorites" : "Add to favorites"} aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"} aria-pressed={item.favorite} disabled={!canWrite || favorite.isPending} onClick={() => favorite.mutate(!item.favorite)}><Star size={18} fill={item.favorite ? "currentColor" : "none"} /></button>
+        {canWrite && <button className="secondary-button small-button" type="button" onClick={() => { update.reset(); setEditOpen(true); }}><Pencil size={15} />Details</button>}
+        {canWrite && <Link className="secondary-button small-button" to={`/courses/${encodeURIComponent(item.id)}/plan`}><RouteIcon size={15} />Edit route</Link>}
+        {canWrite && <button className="secondary-button small-button" type="button" onClick={() => { duplicate.reset(); setDuplicateOpen(true); }}><Copy size={15} />Duplicate</button>}
+        <a className="secondary-button small-button" href={courseGPXURL(item.id)}><Download size={15} />GPX</a>
+        {canWrite && <button className="danger-button small-button" type="button" disabled={remove.isPending} onClick={() => { if (window.confirm(`Permanently delete “${item.name}”? This cannot be undone.`)) remove.mutate(); }}><Trash2 size={15} />Delete</button>}
+      </>}
+    >
+      {(favorite.error || update.error || duplicate.error || remove.error) && <div className="error">{courseMutationMessage(favorite.error ?? update.error ?? duplicate.error ?? remove.error)}</div>}
+      {editOpen && <CourseDetailsDialog course={item} saving={update.isPending} error={update.error} onSave={(input) => update.mutate(input)} onClose={() => setEditOpen(false)} />}
+      {duplicateOpen && <CourseDuplicateDialog course={item} saving={duplicate.isPending} error={duplicate.error} onSave={(input) => duplicate.mutate(input)} onClose={() => setDuplicateOpen(false)} />}
+      <section className="metric-grid course-metric-grid">
+        <Metric label="Distance" value={formatDistance(item.distanceM)} icon={<RouteIcon size={18} />} />
+        <Metric label="Ascent" value={formatCourseElevation(item.elevationGainM)} icon={<Mountain size={18} />} />
+        <Metric label="Descent" value={formatCourseElevation(item.elevationLossM)} icon={<ArrowDown size={18} />} />
+      </section>
+      {item.elevationCoverage < 0.9995 && <CourseElevationCoverageNotice coverage={item.elevationCoverage} />}
+      <section className="course-detail-grid">
+        <section className="panel course-map-panel">
+          <div className="panel-heading">Route</div>
+          <CourseMap legs={item.legs} tileURL={mapTileURL} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} allowLocation />
+        </section>
+        <CourseElevationProfile profile={item.profile} onHighlight={setHighlighted} />
+      </section>
+      {item.notes && <section className="panel"><div className="panel-heading">Notes</div><p className="course-notes">{item.notes}</p></section>}
+      {(item.directLegCount > 0 || diagnostics.length > 0) && (
+        <details className="panel course-diagnostics">
+          <summary>Diagnostics {item.directLegCount > 0 && <span className="warning-badge">{item.directLegCount} direct {item.directLegCount === 1 ? "leg" : "legs"}</span>}</summary>
+          {item.directLegCount > 0 && <p>Direct legs are shown dashed because they were not matched to a routed path.</p>}
+          {diagnostics.map(([key, value]) => <div className="course-diagnostic-row" key={key}><strong>{courseDiagnosticLabel(key)}</strong><span>{formatCourseDiagnostic(value)}</span></div>)}
+        </details>
+      )}
+    </Page>
+  );
+}
+
+function CourseDetailsDialog({ course, saving, error, onSave, onClose }: { course: Course; saving: boolean; error: unknown; onSave: (input: { name: string; sportType: CourseSport; notes: string }) => void; onClose: () => void }) {
+  const [name, setName] = useState(course.name);
+  const [sportType, setSportType] = useState(course.sportType);
+  const [notes, setNotes] = useState(course.notes ?? "");
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <form className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="course-details-title" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onSave({ name: name.trim(), sportType, notes }); }}>
+        <div className="dialog-header"><div><div className="eyebrow">Course</div><h2 id="course-details-title">Edit details</h2></div><button className="icon-button" type="button" aria-label="Close" onClick={onClose}><X size={16} /></button></div>
+        <CourseDetailsFields name={name} sportType={sportType} notes={notes} onName={setName} onSport={setSportType} onNotes={setNotes} />
+        {Boolean(error) && <div className="error">{courseMutationMessage(error)}</div>}
+        <div className="dialog-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function CourseDuplicateDialog({ course, saving, error, onSave, onClose }: { course: Course; saving: boolean; error: unknown; onSave: (input: { name: string; notes: string }) => void; onClose: () => void }) {
+  const [name, setName] = useState(`${course.name} copy`);
+  const [notes, setNotes] = useState(course.notes ?? "");
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <form className="filter-dialog" role="dialog" aria-modal="true" aria-labelledby="course-duplicate-title" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onSave({ name: name.trim(), notes }); }}>
+        <div className="dialog-header"><div><div className="eyebrow">Course</div><h2 id="course-duplicate-title">Duplicate</h2></div><button className="icon-button" type="button" aria-label="Close" onClick={onClose}><X size={16} /></button></div>
+        <label className="field"><span>Name</span><input autoFocus maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label className="field"><span>Notes</span><textarea maxLength={5000} rows={5} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+        <p className="muted">The duplicate starts unfavorited and has independent details and geometry.</p>
+        {Boolean(error) && <div className="error">{courseMutationMessage(error)}</div>}
+        <div className="dialog-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !name.trim()}>{saving ? "Duplicating…" : "Duplicate"}</button></div>
+      </form>
+    </div>
+  );
+}
+
+function CourseDetailsFields({ name, sportType, notes, onName, onSport, onNotes }: { name: string; sportType: CourseSport; notes: string; onName: (value: string) => void; onSport: (value: CourseSport) => void; onNotes: (value: string) => void }) {
+  return <>
+    <label className="field"><span>Name</span><input maxLength={160} value={name} onChange={(event) => onName(event.target.value)} /></label>
+    <label className="field"><span>Sport</span><select value={sportType} onChange={(event) => onSport(event.target.value as CourseSport)}>{courseSports.map((item) => <option key={item}>{item}</option>)}</select></label>
+    <label className="field"><span>Notes</span><textarea maxLength={5000} rows={5} value={notes} onChange={(event) => onNotes(event.target.value)} /></label>
+  </>;
+}
+
+function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite: boolean; mapTileURL?: string; routingEnabled: boolean }) {
+  const { id } = useParams();
+  const editing = Boolean(id);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const initializedCourseRef = useRef<string>();
+  const [name, setName] = useState("");
+  const [sportType, setSportType] = useState<CourseSport>("Run");
+  const [notes, setNotes] = useState("");
+  const [waypoints, setWaypoints] = useState<Array<{ index: number; latitude: number; longitude: number }>>([]);
+  const [seedLegs, setSeedLegs] = useState<CourseLeg[]>([]);
+  const [geometryDirty, setGeometryDirty] = useState(!editing);
+  const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
+  const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
+  const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
+
+  useEffect(() => {
+    if (!id || !course.data || initializedCourseRef.current === id) return;
+    initializedCourseRef.current = id;
+    setName(course.data.name);
+    setSportType(course.data.sportType);
+    setNotes(course.data.notes ?? "");
+    setWaypoints(course.data.waypoints.map((waypoint, index) => ({ index, latitude: waypoint.latitude, longitude: waypoint.longitude })));
+    setSeedLegs(course.data.legs);
+    setDirectLegIndexes(course.data.legs.filter((leg) => leg.mode === "direct").map((leg) => leg.index));
+    setGeometryDirty(false);
+  }, [course.data, id]);
+
+  const waypointKey = waypoints.map((point) => `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`).join(";");
+  const directKey = directLegIndexes.slice().sort((a, b) => a - b).join(",");
+  const routed = useQuery({
+    queryKey: ["course-routing", sportType, waypointKey, directKey],
+    queryFn: () => api.routeCourseLegs({ sportType, waypoints, directLegIndexes }),
+    enabled: canWrite && geometryDirty && waypoints.length >= 2,
+    retry: false,
+    staleTime: 0
+  });
+  const fallbackLegs = plannerDirectLegs(waypoints, routed.error ? "Routing request failed; this leg is direct." : "");
+  const plannerLegs: CourseRoutingLeg[] = !geometryDirty
+    ? seedLegs.map((leg) => ({ ...leg }))
+    : routed.data?.legs.length === waypoints.length - 1
+      ? routed.data.legs
+      : fallbackLegs;
+  const directLegs = plannerLegs.filter((leg) => leg.mode === "direct");
+  const routeDistanceM = !geometryDirty ? course.data?.distanceM ?? courseLegDistance(plannerLegs) : routed.data?.distanceM ?? courseLegDistance(plannerLegs);
+  const elevationGainM = !geometryDirty ? course.data?.elevationGainM : routed.data?.elevationGainM;
+  const elevationLossM = !geometryDirty ? course.data?.elevationLossM : routed.data?.elevationLossM;
+  const elevationCoverage = !geometryDirty ? course.data?.elevationCoverage : routed.data?.elevationCoverage;
+  const elevationProfile = !geometryDirty ? course.data?.profile ?? [] : routed.data?.profile ?? [];
+  const returnsToStart = plannerReturnsToStart(waypoints);
+  const canSave = canWrite && name.trim().length > 0 && waypoints.length >= 2 && plannerLegs.length === waypoints.length - 1 && !routed.isFetching;
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        name: name.trim(),
+        sportType,
+        notes,
+        legs: plannerLegs.map((leg) => ({ mode: leg.mode, encodedPolyline: leg.encodedPolyline, elevationsM: leg.elevationsM }))
+      };
+      return editing ? api.updateCoursePlan(id!, { ...body, revision: course.data!.revision }) : api.createCourse(body);
+    },
+    onSuccess: async (saved) => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["courses"] }), queryClient.invalidateQueries({ queryKey: ["course", saved.id] })]);
+      navigate(`/courses/${encodeURIComponent(saved.id)}`);
+    }
+  });
+
+  const markGeometryDirty = () => {
+    setGeometryDirty(true);
+    setHighlighted(undefined);
+    save.reset();
+  };
+  const reindexWaypoints = (items: typeof waypoints) => items.map((point, index) => ({ ...point, index }));
+  const addWaypoint = (point: RoutePoint) => {
+    if (!canWrite || waypoints.length >= 100) return;
+    setWaypoints((current) => reindexWaypoints([...current, { index: current.length, latitude: point[0], longitude: point[1] }]));
+    markGeometryDirty();
+  };
+  const moveWaypoint = (index: number, point: RoutePoint) => {
+    setWaypoints((current) => {
+      const keepClosed = index === 0 && plannerReturnsToStart(current);
+      const finishIndex = current.length - 1;
+      return current.map((item) => item.index === index || (keepClosed && item.index === finishIndex) ? { ...item, latitude: point[0], longitude: point[1] } : item);
+    });
+    markGeometryDirty();
+  };
+  const addReturnToStart = () => {
+    if (!canWrite || waypoints.length < 2 || waypoints.length >= 100 || returnsToStart) return;
+    const start = waypoints[0];
+    setWaypoints((current) => reindexWaypoints([...current, { index: current.length, latitude: start.latitude, longitude: start.longitude }]));
+    markGeometryDirty();
+  };
+  const removeWaypoint = (index: number) => {
+    setWaypoints((current) => reindexWaypoints(current.filter((item) => item.index !== index)));
+    setDirectLegIndexes([]);
+    markGeometryDirty();
+  };
+  const reorderWaypoint = (index: number, direction: -1 | 1) => {
+    setWaypoints((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return reindexWaypoints(next);
+    });
+    setDirectLegIndexes([]);
+    markGeometryDirty();
+  };
+  const setDirect = (index: number, direct: boolean) => {
+    setDirectLegIndexes((current) => direct ? Array.from(new Set([...current, index])).sort((a, b) => a - b) : current.filter((item) => item !== index));
+    markGeometryDirty();
+  };
+  const submit = () => {
+    if (!canSave) return;
+    if (directLegs.length > 0 && !window.confirm(`${directLegs.length} ${directLegs.length === 1 ? "leg is" : "legs are"} direct rather than routed. Save this course anyway?`)) return;
+    save.mutate();
+  };
+
+  if (editing && course.isLoading) return <Page title="Course planner"><LoadingRow /></Page>;
+  if (editing && !course.data) return <Page title="Course planner"><EmptyState title="Course not found" /></Page>;
+
+  return <Page title={editing ? "Edit course route" : "Plan a course"} eyebrow={editing ? course.data?.name : "Waypoint planner"} actions={<><Link className="secondary-button" to={editing ? `/courses/${encodeURIComponent(id!)}` : "/courses"}>Cancel</Link><button className="primary-button" type="button" disabled={!canSave || save.isPending} onClick={submit}>{save.isPending ? "Saving…" : editing ? "Save changes" : "Save course"}</button></>}>
+    {!canWrite && <div className="error">The planner is disabled in read-only support mode.</div>}
+    {!routingEnabled && <div className="course-routing-notice"><strong>Routing is not enabled.</strong> Waypoints are connected with direct dashed legs. Configure the optional Valhalla service to follow paths and roads.</div>}
+    {save.error && <div className="error">{save.error instanceof ApiError && save.error.status === 409 ? "This course changed after you opened it. Reload the latest version before saving." : courseMutationMessage(save.error)}</div>}
+    <section className="course-planner-layout">
+      <aside className="panel course-planner-sidebar">
+        <div className="panel-heading">Course details</div>
+        <CourseDetailsFields name={name} sportType={sportType} notes={notes} onName={setName} onSport={(value) => { setSportType(value); markGeometryDirty(); }} onNotes={setNotes} />
+        <div className="course-planner-summary">
+          <span><strong>{waypoints.length}</strong> waypoints</span>
+          <span><strong>{plannerLegs.length}</strong> legs</span>
+        </div>
+        <div className="course-waypoint-heading"><strong>Waypoints</strong>{waypoints.length > 0 && <span className="course-waypoint-heading-actions">{waypoints.length >= 2 && <button className="course-back-to-start-button" type="button" title={returnsToStart ? "The course already finishes at its start." : "Add a final leg back to the starting point."} disabled={!canWrite || returnsToStart || waypoints.length >= 100} onClick={addReturnToStart}><RotateCcw size={13} />Back to start</button>}<button className="danger-text-button" type="button" disabled={!canWrite} onClick={() => { setWaypoints([]); setDirectLegIndexes([]); markGeometryDirty(); }}>Clear</button></span>}</div>
+        {waypoints.length === 0 && <p className="muted">Click the map to add a start and finish.</p>}
+        <ol className="course-waypoint-list">
+          {waypoints.map((waypoint, index) => <li key={`${waypoint.index}-${waypoint.latitude}-${waypoint.longitude}`}>
+            <span className="course-waypoint-number">{index + 1}</span>
+            <span><strong>{index === 0 ? "Start" : index === waypoints.length - 1 ? "Finish" : `Waypoint ${index + 1}`}</strong><small>{waypoint.latitude.toFixed(5)}, {waypoint.longitude.toFixed(5)}</small></span>
+            <span className="course-waypoint-actions"><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} earlier`} disabled={!canWrite || index === 0} onClick={() => reorderWaypoint(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} later`} disabled={!canWrite || index === waypoints.length - 1} onClick={() => reorderWaypoint(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger" type="button" aria-label={`Remove waypoint ${index + 1}`} disabled={!canWrite} onClick={() => removeWaypoint(index)}><X size={14} /></button></span>
+          </li>)}
+        </ol>
+      </aside>
+      <section className="panel course-planner-map-panel">
+        <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">Click to add; drag numbered waypoints to adjust.</span></div>{routed.isFetching && <span className="muted">Routing…</span>}</div>
+        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} onAdd={addWaypoint} onMove={moveWaypoint} />
+      </section>
+    </section>
+    {plannerLegs.length > 0 && <section className="course-planner-elevation-preview">
+      <section className="metric-grid course-planner-elevation-metrics">
+        <Metric label="Distance" value={formatDistance(routeDistanceM)} icon={<RouteIcon size={18} />} />
+        <Metric label="Ascent" value={formatCourseElevation(elevationGainM)} icon={<Mountain size={18} />} />
+        <Metric label="Descent" value={formatCourseElevation(elevationLossM)} icon={<ArrowDown size={18} />} />
+      </section>
+      {elevationCoverage !== undefined && elevationCoverage < 0.9995 && <CourseElevationCoverageNotice coverage={elevationCoverage} />}
+      <CourseElevationProfile profile={elevationProfile} onHighlight={setHighlighted} emptyMessage={routed.isFetching ? "Elevation is being calculated with the route." : "The planned route does not contain enough usable elevation data."} />
+    </section>}
+    {plannerLegs.length > 0 && <section className="panel course-leg-panel"><div className="course-leg-heading"><div><div className="panel-heading">Legs</div><span className="muted">Routing failures are isolated; direct legs stay editable and visible.</span></div>{routed.error && <button className="secondary-button small-button" type="button" onClick={() => void routed.refetch()}><RefreshCw size={14} />Retry routing</button>}</div><div className="course-leg-list">{plannerLegs.map((leg, index) => {
+      const manuallyDirect = directLegIndexes.includes(index);
+      return <div className={`course-leg-row ${leg.mode === "direct" ? "direct" : ""}`} key={index}><span className="course-leg-index">{index + 1}</span><span><strong>{leg.mode === "direct" ? "Direct" : "Routed"}</strong><small>{formatDistance(courseLegDistance([leg]))} · {leg.pointCount.toLocaleString()} points</small>{leg.warning && <small className="warning-text">{leg.warning}</small>}</span><button className="secondary-button small-button" type="button" disabled={!canWrite || routed.isFetching} onClick={() => { if (leg.mode === "direct" && !manuallyDirect) { void routed.refetch(); } else { setDirect(index, !manuallyDirect); } }}>{leg.mode === "direct" ? manuallyDirect ? "Try routing" : "Retry routing" : "Use direct"}</button></div>;
+    })}</div></section>}
+  </Page>;
+}
+
+function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
+  const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
+  const waypointPoints = waypoints.map((point) => [point.latitude, point.longitude] as RoutePoint);
+  const allPoints = pointsByLeg.flat();
+  const fitPoints = allPoints.length > 0 ? allPoints : waypointPoints;
+  const center = fitPoints[0] ?? [53.3498, -6.2603] as RoutePoint;
+  const [position, setPosition] = useState<{ point: RoutePoint; accuracy: number }>();
+  const [locationError, setLocationError] = useState("");
+  const [locating, setLocating] = useState(false);
+  const locate = () => {
+    setLocationError("");
+    setLocating(true);
+    if (!navigator.geolocation) { setLocating(false); setLocationError("Location is not available in this browser."); return; }
+    navigator.geolocation.getCurrentPosition((value) => { setPosition({ point: [value.coords.latitude, value.coords.longitude], accuracy: value.coords.accuracy }); setLocating(false); }, (error) => { setLocationError(error.message || "Could not get your location."); setLocating(false); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+  };
+  return <div className="map-frame course-map-frame course-planner-map">
+    <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
+      <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
+      {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
+      {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={`Waypoint ${index + 1}`} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
+      {canEdit && <MapLocationPicker onSelect={onAdd} />}
+      {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
+      {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
+      <FitMapContent points={fitPoints} />
+    </MapContainer>
+    <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>
+    {locationError && <div className="row-error course-location-error">{locationError}</div>}
+    {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}
+  </div>;
+}
+
+function plannerDirectLegs(waypoints: Array<{ latitude: number; longitude: number }>, warning: string): CourseRoutingLeg[] {
+  return waypoints.slice(1).map((end, index) => {
+    const start = waypoints[index];
+    const points: RoutePoint[] = [[start.latitude, start.longitude], [end.latitude, end.longitude]];
+    return { index, mode: "direct", encodedPolyline: encodeCoursePolyline(points, 6), elevationsM: [null, null], pointCount: 2, warning };
+  });
+}
+
+function plannerReturnsToStart(waypoints: Array<{ latitude: number; longitude: number }>) {
+  if (waypoints.length < 2) return false;
+  const start = waypoints[0];
+  const finish = waypoints[waypoints.length - 1];
+  return routePointDistance([start.latitude, start.longitude], [finish.latitude, finish.longitude]) <= 0.5;
+}
+
+function encodeCoursePolyline(points: RoutePoint[], precision: number) {
+  const factor = 10 ** precision;
+  let previousLatitude = 0;
+  let previousLongitude = 0;
+  let encoded = "";
+  for (const [latitude, longitude] of points) {
+    const nextLatitude = Math.round(latitude * factor);
+    const nextLongitude = Math.round(longitude * factor);
+    encoded += encodePolylineValue(nextLatitude - previousLatitude);
+    encoded += encodePolylineValue(nextLongitude - previousLongitude);
+    previousLatitude = nextLatitude;
+    previousLongitude = nextLongitude;
+  }
+  return encoded;
+}
+
+function encodePolylineValue(value: number) {
+  let shifted = value < 0 ? ~(value << 1) : value << 1;
+  let encoded = "";
+  while (shifted >= 0x20) {
+    encoded += String.fromCharCode((0x20 | (shifted & 0x1f)) + 63);
+    shifted >>>= 5;
+  }
+  return encoded + String.fromCharCode(shifted + 63);
+}
+
+function courseLegDistance(legs: Array<Pick<CourseLeg, "encodedPolyline">>) {
+  return legs.reduce((total, leg) => {
+    const points = decodeCoursePolyline(leg.encodedPolyline);
+    for (let index = 1; index < points.length; index++) total += routePointDistance(points[index - 1], points[index]);
+    return total;
+  }, 0);
+}
+
+function routePointDistance(start: RoutePoint, end: RoutePoint) {
+  const radians = (value: number) => value * Math.PI / 180;
+  const latitude = radians(end[0] - start[0]);
+  const longitude = radians(end[1] - start[1]);
+  const value = Math.sin(latitude / 2) ** 2 + Math.cos(radians(start[0])) * Math.cos(radians(end[0])) * Math.sin(longitude / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function courseWaypointIcon(number: number) {
+  return divIcon({ className: "course-waypoint-marker-icon", html: `<span class="course-waypoint-marker">${number}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
+}
+
+type CourseImportDraft = CourseImportSelection & { selected: boolean };
+
+function CourseImportPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTileURL?: string }) {
+  const navigate = useNavigate();
+  const [file, setFile] = useState<File>();
+  const [preview, setPreview] = useState<CourseImportPreview>();
+  const [drafts, setDrafts] = useState<Record<string, CourseImportDraft>>({});
+  const [activeKey, setActiveKey] = useState<string>();
+  const previewImport = useMutation({
+    mutationFn: api.previewCourseImport,
+    onSuccess: (result) => {
+      const next: Record<string, CourseImportDraft> = {};
+      for (const candidate of result.candidates) {
+        next[candidate.key] = { key: candidate.key, name: candidate.name, sportType: candidate.sportType ?? "Run", notes: "", selected: candidate.valid && !candidate.duplicateCourse };
+      }
+      setPreview(result);
+      setDrafts(next);
+      setActiveKey(result.candidates.find((candidate) => candidate.valid)?.key ?? result.candidates[0]?.key);
+    }
+  });
+  const commit = useMutation({
+    mutationFn: () => api.commitCourseImport(file!, preview!.fileSHA256, Object.values(drafts).filter((draft) => draft.selected).map(({ selected: _selected, ...selection }) => selection)),
+    onSuccess: (result) => navigate(`/courses/imports/${encodeURIComponent(result.importId)}`)
+  });
+  const candidates = preview?.candidates ?? [];
+  const active = candidates.find((candidate) => candidate.key === activeKey);
+  const activeDraft = active ? drafts[active.key] : undefined;
+  const selectionCount = Object.values(drafts).filter((draft) => draft.selected).length;
+  const selectFile = (next: File | undefined) => {
+    setFile(next);
+    setPreview(undefined);
+    setDrafts({});
+    setActiveKey(undefined);
+    previewImport.reset();
+    commit.reset();
+    if (next) previewImport.mutate(next);
+  };
+  const updateDraft = (key: string, changes: Partial<CourseImportDraft>) => setDrafts((current) => ({ ...current, [key]: { ...current[key], ...changes } }));
+
+  return (
+    <Page title="Upload GPX" eyebrow="Course import" actions={<Link className="secondary-button" to="/courses"><ChevronLeft size={16} />Courses</Link>}>
+      {!canWrite && <div className="error">Course imports are disabled in read-only support mode.</div>}
+      <section className="panel course-upload-panel">
+        <label className="course-file-input"><FileUp size={22} /><span><strong>Choose a GPX file</strong><small>Up to 10 MB. Tracks, track segments, and routes are reviewed before import.</small></span><input type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml" disabled={!canWrite || previewImport.isPending || commit.isPending} onChange={(event) => selectFile(event.target.files?.[0])} /></label>
+        {file && <span className="muted">{file.name} · {formatFileSize(file.size)}</span>}
+        {previewImport.isPending && <LoadingRow />}
+        {previewImport.error && <div className="error">{courseMutationMessage(previewImport.error)}</div>}
+      </section>
+      {preview && <>
+        {(preview.diagnostics ?? []).length > 0 && <CourseImportDiagnostics diagnostics={preview.diagnostics ?? []} title="File warnings" />}
+        <section className="course-import-layout">
+          <section className="panel course-candidate-panel">
+            <div className="panel-heading">Segments <span className="muted">{selectionCount} selected</span></div>
+            <div className="course-candidate-list">
+              {candidates.map((candidate) => {
+                const draft = drafts[candidate.key];
+                const selectable = candidate.valid && !candidate.duplicateCourse;
+                return <div key={candidate.key} className={`course-candidate-row ${activeKey === candidate.key ? "active" : ""} ${!candidate.valid ? "invalid" : ""}`}>
+                  <input type="checkbox" aria-label={`Import ${candidate.name}`} checked={draft?.selected ?? false} disabled={!selectable || commit.isPending} onChange={(event) => updateDraft(candidate.key, { selected: event.target.checked })} />
+                  <button type="button" onClick={() => setActiveKey(candidate.key)}>
+                    <strong>{candidate.name}</strong>
+                    <span>{candidate.valid ? `${candidate.kind} · ${formatDistance(candidate.distanceM ?? 0)} · ${(candidate.pointCount ?? 0).toLocaleString()} source samples · ${(candidate.waypointCount ?? 0).toLocaleString()} editable points` : candidate.error}</span>
+                    {candidate.duplicateCourse && <span className="warning-text">Already saved as {candidate.duplicateCourse.name}</span>}
+                  </button>
+                </div>;
+              })}
+            </div>
+          </section>
+          <section className="course-import-review">
+            {!active && <section className="panel"><EmptyState title="Select a segment to review" /></section>}
+            {active && <>
+              <section className="panel">
+                <div className="panel-heading">Preview</div>
+                {active.encodedPolyline ? <CourseMap legs={[courseImportPreviewLeg(active)]} tileURL={mapTileURL} /> : <EmptyState title="No valid route to preview" message={active.error} />}
+              </section>
+              {active.profile && active.profile.length > 0 && <CourseElevationProfile profile={active.profile} />}
+              {activeDraft && active.valid && <section className="panel course-import-fields"><div className="panel-heading">Imported course details</div><CourseDetailsFields name={activeDraft.name} sportType={activeDraft.sportType} notes={activeDraft.notes} onName={(value) => updateDraft(active.key, { name: value })} onSport={(value) => updateDraft(active.key, { sportType: value })} onNotes={(value) => updateDraft(active.key, { notes: value })} /></section>}
+              {(active.diagnostics ?? []).length > 0 && <CourseImportDiagnostics diagnostics={active.diagnostics ?? []} title="Segment warnings" />}
+            </>}
+          </section>
+        </section>
+        {commit.error && <div className="error">{courseMutationMessage(commit.error)}</div>}
+        <div className="course-import-actions"><Link className="secondary-button" to="/courses">Cancel</Link><button className="primary-button" type="button" disabled={!canWrite || commit.isPending || selectionCount === 0 || Object.values(drafts).some((draft) => draft.selected && !draft.name.trim())} onClick={() => commit.mutate()}>{commit.isPending ? "Importing…" : `Import ${selectionCount} ${selectionCount === 1 ? "course" : "courses"}`}</button></div>
+      </>}
+    </Page>
+  );
+}
+
+function CourseImportResultPage() {
+  const { id } = useParams();
+  const result = useQuery({ queryKey: ["course-import", id], queryFn: () => api.courseImport(id!), enabled: Boolean(id) });
+  if (result.isLoading) return <Page title="Import result"><LoadingRow /></Page>;
+  if (!result.data) return <Page title="Import result"><EmptyState title="Import not found" /></Page>;
+  return <Page title="Import complete" eyebrow={result.data.filename} actions={<Link className="primary-button" to="/courses">View courses</Link>}>
+    <section className="panel"><div className="panel-heading">Created {result.data.created.length} {result.data.created.length === 1 ? "course" : "courses"}</div>
+      {result.data.created.length === 0 ? <EmptyState title="No courses were created" /> : <div className="course-import-created-list">{result.data.created.map((course) => <Link key={course.id} to={`/courses/${encodeURIComponent(course.id)}`}><strong>{course.name}</strong><span>{course.sportType} · {formatDistance(course.distanceM)}</span><ChevronRight size={17} /></Link>)}</div>}
+    </section>
+    {(result.data.diagnostics ?? []).length > 0 && <CourseImportDiagnostics diagnostics={result.data.diagnostics ?? []} title="Import warnings" />}
+  </Page>;
+}
+
+function CourseImportDiagnostics({ diagnostics, title }: { diagnostics: Array<{ code: string; message: string; count?: number }>; title: string }) {
+  return <section className="panel course-import-diagnostics"><div className="panel-heading">{title}</div>{diagnostics.map((item, index) => <div key={`${item.code}-${index}`}><strong>{courseDiagnosticLabel(item.code)}</strong><span>{item.message}{item.count ? ` (${item.count})` : ""}</span></div>)}</section>;
+}
+
+function CourseMap({ legs, tileURL, highlighted, allowLocation = false }: { legs: CourseLeg[]; tileURL?: string; highlighted?: RoutePoint; allowLocation?: boolean }) {
+  const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
+  const allPoints = pointsByLeg.flat();
+  const center = allPoints[0] ?? [53.3498, -6.2603] as RoutePoint;
+  const [position, setPosition] = useState<{ point: RoutePoint; accuracy: number }>();
+  const [locationError, setLocationError] = useState("");
+  const [locating, setLocating] = useState(false);
+  const locate = () => {
+    setLocationError("");
+    setLocating(true);
+    if (!navigator.geolocation) {
+      setLocating(false);
+      setLocationError("Location is not available in this browser.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (value) => { setPosition({ point: [value.coords.latitude, value.coords.longitude], accuracy: value.coords.accuracy }); setLocating(false); },
+      (error) => { setLocationError(error.message || "Could not get your location."); setLocating(false); },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+    );
+  };
+  return <div className="map-frame course-map-frame">
+    <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
+      <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
+      {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={legs[index].id ?? index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
+      {allPoints[0] && <Marker position={allPoints[0]} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
+      {allPoints.length > 1 && <Marker position={allPoints[allPoints.length - 1]} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
+      {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
+      {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
+      <FitMapContent points={allPoints} />
+    </MapContainer>
+    {allowLocation && <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>}
+    {locationError && <div className="row-error course-location-error">{locationError}</div>}
+    {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}
+  </div>;
+}
+
+function CourseElevationProfile({ profile, onHighlight, emptyMessage = "The source did not contain enough usable elevation data." }: { profile: CourseProfilePoint[]; onHighlight?: (point?: CourseProfilePoint) => void; emptyMessage?: string }) {
+  const data = profile.filter((point) => point.elevationM !== undefined).map((point) => ({ ...point, distanceKm: point.distanceM / 1000 }));
+  return <section className="panel course-profile-panel"><div className="panel-heading">Elevation profile</div>
+    {data.length < 2 ? <EmptyState title="No elevation profile" message={emptyMessage} /> : <div className="course-profile-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={data} onMouseMove={(state) => onHighlight?.(courseProfilePointFromMouseState(state, data))} onMouseLeave={() => onHighlight?.(undefined)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="distanceKm" tickFormatter={(value) => `${Number(value).toFixed(1)} km`} minTickGap={24} /><YAxis width={50} tickFormatter={(value) => `${Math.round(Number(value))} m`} domain={["dataMin", "dataMax"]} /><Tooltip contentStyle={chartTooltipContentStyle} labelFormatter={(value) => `${Number(value).toFixed(2)} km`} formatter={(value) => [`${Math.round(Number(value))} m`, "Elevation"]} /><Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.45} dot={false} /></AreaChart></ResponsiveContainer></div>}
+  </section>;
+}
+
+function CourseElevationCoverageNotice({ coverage }: { coverage: number }) {
+  return <div className="course-elevation-coverage-notice"><strong>Incomplete elevation data.</strong> Elevation covers {Math.round(coverage * 100)}% of this route, so ascent and descent may be understated.</div>;
+}
+
+function courseProfilePointFromMouseState(state: unknown, data: CourseProfilePoint[]) {
+  if (!state || typeof state !== "object" || !("activeTooltipIndex" in state)) return undefined;
+  const raw = (state as { activeTooltipIndex?: unknown }).activeTooltipIndex;
+  const index = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : -1;
+  return Number.isInteger(index) && index >= 0 && index < data.length ? data[index] : undefined;
+}
+
+function courseImportPreviewLeg(candidate: CourseImportCandidate): CourseLeg {
+  return { index: 0, mode: candidate.kind === "route" ? "direct" : "preserved", encodedPolyline: candidate.encodedPolyline ?? "", elevationsM: [], pointCount: candidate.pointCount ?? 0 };
+}
+
+function decodeCoursePolyline(encoded: string): RoutePoint[] {
+  return decodePolylineWithPrecision(encoded, 6);
+}
+
+function courseLocationIcon() {
+  return divIcon({ className: "course-location-marker-icon", html: '<span class="course-location-marker"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
+}
+
+function formatCourseElevation(value?: number) {
+  return value === undefined ? "" : `${Math.round(value).toLocaleString()} m`;
+}
+
+function courseDiagnosticLabel(value: string) {
+  return value.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function formatCourseDiagnostic(value: unknown) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map((item) => typeof item === "object" && item && "message" in item ? String((item as { message: unknown }).message) : String(item)).join("; ");
+  return JSON.stringify(value);
+}
+
+function courseMutationMessage(error: unknown) {
+  return error instanceof Error ? error.message : "The course operation failed";
 }
 
 const workoutFilterOptions = [
@@ -7192,6 +7920,15 @@ function FitMapContent({ points }: { points: RoutePoint[] }) {
   return null;
 }
 
+function CenterMapOnPoint({ point }: { point: RoutePoint }) {
+  const map = useMap();
+  const pointKey = routePointsKey([point]);
+  useEffect(() => {
+    map.flyTo(point, Math.max(map.getZoom(), 15), { animate: true, duration: 0.45 });
+  }, [map, pointKey]);
+  return null;
+}
+
 function mediaRoutePoint(media: ActivityMedia): RoutePoint | undefined {
   if (!hasMediaLocation(media)) {
     return undefined;
@@ -7765,6 +8502,10 @@ function chartPayload(item: unknown): Partial<Record<keyof ActivityChartPoint, u
 }
 
 function decodePolyline(encoded: string): RoutePoint[] {
+  return decodePolylineWithPrecision(encoded, 5);
+}
+
+function decodePolylineWithPrecision(encoded: string, precision: number): RoutePoint[] {
   let index = 0;
   let lat = 0;
   let lng = 0;
@@ -7789,7 +8530,8 @@ function decodePolyline(encoded: string): RoutePoint[] {
       shift += 5;
     } while (byte >= 0x20);
     lng += result & 1 ? ~(result >> 1) : result >> 1;
-    coordinates.push([lat / 1e5, lng / 1e5]);
+    const factor = 10 ** precision;
+    coordinates.push([lat / factor, lng / factor]);
   }
   return coordinates;
 }

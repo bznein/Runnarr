@@ -21,6 +21,8 @@ type Config struct {
 	AdminPasswordHash  string
 	SecretKey          string
 	MapTileURL         string
+	RoutingEnabled     bool
+	RoutingURL         string
 	StaticDir          string
 	MediaDir           string
 	GarminBridgePython string
@@ -50,6 +52,8 @@ func LoadConfig() (Config, error) {
 		AdminPasswordHash:  env("RUNNARR_ADMIN_PASSWORD_HASH", ""),
 		SecretKey:          env("RUNNARR_SECRET_KEY", ""),
 		MapTileURL:         env("MAP_TILE_URL", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"),
+		RoutingEnabled:     envBool("RUNNARR_ROUTING_ENABLED", false),
+		RoutingURL:         strings.TrimRight(env("RUNNARR_ROUTING_URL", "http://valhalla:8002"), "/"),
 		StaticDir:          env("RUNNARR_STATIC_DIR", "web/dist"),
 		MediaDir:           env("RUNNARR_MEDIA_DIR", "data/media"),
 		GarminBridgePython: env("RUNNARR_GARMIN_BRIDGE_PYTHON", "python3"),
@@ -79,6 +83,12 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.SecretKey == "" {
 		return cfg, errors.New("RUNNARR_SECRET_KEY is required")
+	}
+	if cfg.RoutingEnabled {
+		routingURL, err := url.Parse(cfg.RoutingURL)
+		if err != nil || (routingURL.Scheme != "http" && routingURL.Scheme != "https") || routingURL.Host == "" || routingURL.User != nil || routingURL.RawQuery != "" || routingURL.Fragment != "" {
+			return cfg, errors.New("RUNNARR_ROUTING_URL must be an http(s) origin when routing is enabled")
+		}
 	}
 	if cfg.PublicMode {
 		baseURL, err := url.Parse(cfg.BaseURL)

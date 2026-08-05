@@ -14,18 +14,45 @@ if [[ -f "${DEPLOY_CONFIG}" ]]; then
   # shellcheck disable=SC1090
   source "${DEPLOY_CONFIG}"
 fi
+PREVIEW_ROUTING_CONFIG="${RUNNARR_PREVIEW_ROUTING_CONFIG:-/etc/runnarr/preview-routing.env}"
+if [[ -f "${PREVIEW_ROUTING_CONFIG}" ]]; then
+  # Root installs this non-secret file for the deployment account. It controls
+  # only the shared preview routing service and never production routing.
+  # shellcheck disable=SC1090
+  source "${PREVIEW_ROUTING_CONFIG}"
+fi
 
 DEPLOY_ROOT="${RUNNARR_DEPLOY_ROOT:-/srv/runnarr}"
 ASSET_ROOT="${RUNNARR_DEPLOY_ASSETS:-/opt/runnarr-deploy}"
 DEPLOY_DOMAIN="${RUNNARR_DEPLOY_BASE_DOMAIN:-}"
 NONPROD_NETWORK="${RUNNARR_NONPROD_INGRESS_NETWORK:-runnarr-nonprod-ingress}"
 NONPROD_GATEWAY="${RUNNARR_NONPROD_GATEWAY_CONTAINER:-runnarr-nonprod-gateway}"
+PREVIEW_ROUTING_ENABLED="${RUNNARR_PREVIEW_ROUTING_ENABLED:-false}"
+PREVIEW_ROUTING_CONTAINER="${RUNNARR_PREVIEW_ROUTING_CONTAINER:-runnarr-nonprod-valhalla}"
+PREVIEW_ROUTING_URL="http://valhalla:8002"
+PREVIEW_ROUTING_SMOKE_FROM_LAT="${RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LAT:-53.3438}"
+PREVIEW_ROUTING_SMOKE_FROM_LON="${RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LON:--6.2546}"
+PREVIEW_ROUTING_SMOKE_TO_LAT="${RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LAT:-53.3382}"
+PREVIEW_ROUTING_SMOKE_TO_LON="${RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LON:--6.2591}"
 MAX_PREVIEWS="${RUNNARR_MAX_PREVIEWS:-10}"
 MIN_AVAILABLE_MEMORY_BYTES="${RUNNARR_MIN_AVAILABLE_MEMORY_BYTES:-12884901888}"
 MIN_FREE_DISK_BYTES="${RUNNARR_MIN_FREE_DISK_BYTES:-10737418240}"
 BACKUP_KEEP="${RUNNARR_BACKUP_KEEP:-3}"
 DEPLOY_SCOPE="${RUNNARR_DEPLOY_SCOPE:-all}"
 LOCK_FILE="${DEPLOY_ROOT}/deploy.lock"
+
+[[ "${PREVIEW_ROUTING_ENABLED}" == "true" || "${PREVIEW_ROUTING_ENABLED}" == "false" ]] ||
+  die "RUNNARR_PREVIEW_ROUTING_ENABLED must be true or false"
+[[ "${PREVIEW_ROUTING_CONTAINER}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] ||
+  die "RUNNARR_PREVIEW_ROUTING_CONTAINER is invalid"
+for coordinate in \
+  "${PREVIEW_ROUTING_SMOKE_FROM_LAT}" \
+  "${PREVIEW_ROUTING_SMOKE_FROM_LON}" \
+  "${PREVIEW_ROUTING_SMOKE_TO_LAT}" \
+  "${PREVIEW_ROUTING_SMOKE_TO_LON}"; do
+  [[ "${coordinate}" =~ ^-?[0-9]{1,3}([.][0-9]+)?$ ]] ||
+    die "preview routing smoke coordinates must be decimal numbers"
+done
 
 BASE_COMPOSE="${ASSET_ROOT}/docker-compose.yml"
 DEPLOY_COMPOSE="${ASSET_ROOT}/docker-compose.deploy.yml"
@@ -280,6 +307,96 @@ disconnect_gateway() {
   docker network disconnect "${network}" "${NONPROD_GATEWAY}" >/dev/null 2>&1 || true
 }
 
+preview_routing_enabled() {
+  [[ "${PREVIEW_ROUTING_ENABLED}" == "true" ]]
+}
+
+connect_preview_routing() {
+  local environment="$1"
+  preview_routing_enabled || return 0
+
+  local state directory project network
+  if ! state="$(
+    docker container inspect "${PREVIEW_ROUTING_CONTAINER}" \
+      --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}'
+  )"; then
+    log "shared preview Valhalla container ${PREVIEW_ROUTING_CONTAINER} is missing"
+    return 1
+  fi
+  if [[ "${state}" != "running healthy" ]]; then
+    log "shared preview Valhalla container is not ready (${state})"
+    docker logs --tail=200 "${PREVIEW_ROUTING_CONTAINER}" >&2 || true
+    return 1
+  fi
+
+  directory="$(environment_directory "${environment}")"
+  project="$(json_field "${directory}/runtime.json" '.project')"
+  network="${project}_runnarr"
+  if docker container inspect "${PREVIEW_ROUTING_CONTAINER}" \
+    --format '{{json .NetworkSettings.Networks}}' |
+    jq -e --arg network "${network}" 'has($network)' >/dev/null; then
+    docker network disconnect "${network}" "${PREVIEW_ROUTING_CONTAINER}"
+  fi
+  docker network connect --alias valhalla "${network}" "${PREVIEW_ROUTING_CONTAINER}"
+}
+
+verify_preview_routing() {
+  local environment="$1"
+  preview_routing_enabled || return 0
+
+  local app_container
+  app_container="$(compose "${environment}" ps -q app)"
+  [[ -n "${app_container}" ]] || return 1
+  docker exec "${app_container}" python3 -c '
+import json
+import sys
+import urllib.request
+
+payload = {
+    "locations": [
+        {"lat": float(sys.argv[2]), "lon": float(sys.argv[3])},
+        {"lat": float(sys.argv[4]), "lon": float(sys.argv[5])},
+    ],
+    "costing": "pedestrian",
+    "units": "kilometers",
+}
+request = urllib.request.Request(
+    sys.argv[1] + "/route",
+    data=json.dumps(payload).encode(),
+    headers={"Content-Type": "application/json"},
+)
+response = json.load(urllib.request.urlopen(request, timeout=20))
+legs = response["trip"]["legs"]
+assert legs and legs[0]["shape"]
+height_request = urllib.request.Request(
+    sys.argv[1] + "/height",
+    data=json.dumps({
+        "encoded_polyline": legs[0]["shape"],
+        "shape_format": "polyline6",
+        "height_precision": 1,
+    }).encode(),
+    headers={"Content-Type": "application/json"},
+)
+height_response = json.load(urllib.request.urlopen(height_request, timeout=20))
+heights = height_response["height"]
+assert heights and all(value is not None for value in heights)
+' \
+    "${PREVIEW_ROUTING_URL}" \
+    "${PREVIEW_ROUTING_SMOKE_FROM_LAT}" \
+    "${PREVIEW_ROUTING_SMOKE_FROM_LON}" \
+    "${PREVIEW_ROUTING_SMOKE_TO_LAT}" \
+    "${PREVIEW_ROUTING_SMOKE_TO_LON}"
+}
+
+disconnect_preview_routing() {
+  local environment="$1"
+  local directory project network
+  directory="$(environment_directory "${environment}")"
+  project="$(json_field "${directory}/runtime.json" '.project')"
+  network="${project}_runnarr"
+  docker network disconnect "${network}" "${PREVIEW_ROUTING_CONTAINER}" >/dev/null 2>&1 || true
+}
+
 accept_deployment() {
   local environment="$1"
   local expected_id="$2"
@@ -347,6 +464,8 @@ create_preview_base_environment() {
     printf 'RUNNARR_OIDC_GOOGLE_CLIENT_ID=\n'
     printf 'RUNNARR_OIDC_GOOGLE_CLIENT_SECRET=\n'
     printf 'RUNNARR_OIDC_ALLOWED_EMAILS=\n'
+    printf 'RUNNARR_ROUTING_ENABLED=%s\n' "${PREVIEW_ROUTING_ENABLED}"
+    printf 'RUNNARR_ROUTING_URL=%s\n' "${PREVIEW_ROUTING_URL}"
     printf 'RUNNARR_APP_CPU_LIMIT=0.5\n'
     printf 'RUNNARR_APP_MEMORY_LIMIT=512m\n'
     printf 'RUNNARR_DB_CPU_LIMIT=0.5\n'
@@ -376,6 +495,7 @@ preview_up() {
 
   if [[ -f "${directory}/runtime.json" && -f "${directory}/base.env" && -f "${directory}/image.env" ]]; then
     disconnect_gateway "previews/${pr}"
+    disconnect_preview_routing "previews/${pr}"
     compose "previews/${pr}" down --volumes --remove-orphans
   fi
   mkdir -p "${directory}"
@@ -386,8 +506,11 @@ preview_up() {
   if ! compose "previews/${pr}" up --detach --no-build --remove-orphans ||
     ! (wait_for_health "previews/${pr}" "${commit}") ||
     ! seed_environment "previews/${pr}" "preview-admin" ||
+    ! connect_preview_routing "previews/${pr}" ||
+    ! verify_preview_routing "previews/${pr}" ||
     ! connect_gateway "previews/${pr}"; then
     disconnect_gateway "previews/${pr}"
+    disconnect_preview_routing "previews/${pr}"
     compose "previews/${pr}" down --volumes --remove-orphans || true
     die "preview ${pr} failed to deploy"
   fi
@@ -408,6 +531,7 @@ preview_down() {
   require_file "${directory}/base.env"
   require_file "${directory}/image.env"
   disconnect_gateway "previews/${pr}"
+  disconnect_preview_routing "previews/${pr}"
   compose "previews/${pr}" down --volumes --remove-orphans
   local trash
   trash="${DEPLOY_ROOT}/trash/preview-${pr}-$(date -u +%Y%m%dT%H%M%SZ)"

@@ -131,4 +131,66 @@ describe("shared backend API contract", () => {
     expect(init.headers.get("X-CSRF-Token")).toBe("test-csrf");
     expect(JSON.parse(init.body)).toMatchObject({ categories: { activity_matching: "in_app" } });
   });
+
+  it("encodes course library filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      courses: [], limit: 50, offset: 0, hasMore: false
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.courses({ q: "river loop", sport: "Run", favorite: true, sort: "updated", order: "desc", limit: 50 });
+
+    const requestURL = String(fetchMock.mock.calls[0][0]);
+    expect(requestURL).toContain("/api/courses?");
+    expect(requestURL).toContain("q=river+loop");
+    expect(requestURL).toContain("sport=Run");
+    expect(requestURL).toContain("favorite=true");
+    expect(requestURL).toContain("sort=updated");
+    expect(requestURL).toContain("order=desc");
+  });
+
+  it("re-uploads the reviewed GPX and selections when committing a course import", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      importId: "import-1", filename: "route.gpx", fileSHA256: "abc", created: []
+    }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    setCsrfToken("course-csrf");
+    const file = new File(["<gpx />"], "route.gpx", { type: "application/gpx+xml" });
+
+    await api.commitCourseImport(file, "abc", [{ key: "track:1", name: "River", sportType: "Run", notes: "Quiet roads" }]);
+
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/course-imports/commit");
+    expect(init.method).toBe("POST");
+    expect(init.headers.get("X-CSRF-Token")).toBe("course-csrf");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("file")).toBe(file);
+    expect(JSON.parse(String((init.body as FormData).get("input")))).toEqual({
+      fileSHA256: "abc",
+      selections: [{ key: "track:1", name: "River", sportType: "Run", notes: "Quiet roads" }]
+    });
+  });
+
+  it("routes course waypoints through the backend without exposing a routing origin", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      routingEnabled: true,
+      legs: []
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.routeCourseLegs({
+      sportType: "Cycling",
+      waypoints: [{ index: 0, latitude: 53.3, longitude: -6.2 }, { index: 1, latitude: 53.4, longitude: -6.1 }],
+      directLegIndexes: [0]
+    });
+
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/course-routing/legs");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      sportType: "Cycling",
+      waypoints: [{ index: 0, latitude: 53.3, longitude: -6.2 }, { index: 1, latitude: 53.4, longitude: -6.1 }],
+      directLegIndexes: [0]
+    });
+  });
 });

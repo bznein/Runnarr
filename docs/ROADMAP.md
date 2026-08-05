@@ -69,9 +69,12 @@ is a separate integration concern and must not expand the reusable core.
 - Added a per-user inbox with event timelines, category delivery preferences,
   actionable links, retention controls, and opt-in per-device browser push.
 
-### 8. Course support — next
+### 8. Course support — implementation in review
 
 - [Issue #102](https://github.com/bznein/Runnarr/issues/102)
+- Add private saved courses from GPS activities and reviewed GPX imports.
+- Add a dense course library, route/elevation inspection, GPX export, and a
+  waypoint planner backed by optional self-hosted Valhalla routing.
 
 ### 9. Garmin sync and writeback
 

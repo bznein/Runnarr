@@ -95,7 +95,143 @@ export type ClimbDetectionSettingsUpdate = {
 export type AppConfig = {
   mapTileURL: string;
   baseURL: string;
+  courseRoutingEnabled: boolean;
   climbDetection: ClimbDetectionConfig;
+};
+
+export type CourseSport = "Run" | "Walk" | "Hike" | "Cycling";
+
+export type CourseLegMode = "preserved" | "routed" | "direct";
+
+export type CourseWaypoint = {
+  id?: string;
+  index: number;
+  latitude: number;
+  longitude: number;
+};
+
+export type CourseLeg = {
+  id?: string;
+  index: number;
+  mode: CourseLegMode;
+  encodedPolyline: string;
+  elevationsM: Array<number | null>;
+  pointCount: number;
+};
+
+export type CourseProfilePoint = {
+  distanceM: number;
+  elevationM?: number;
+  latitude: number;
+  longitude: number;
+};
+
+export type CourseSummary = {
+  id: string;
+  name: string;
+  sportType: CourseSport;
+  notes?: string;
+  favorite: boolean;
+  revision: number;
+  distanceM: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
+  elevationCoverage: number;
+  pointCount: number;
+  legCount: number;
+  directLegCount: number;
+  diagnostics?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Course = CourseSummary & {
+  waypoints: CourseWaypoint[];
+  legs: CourseLeg[];
+  profile: CourseProfilePoint[];
+  bounds?: { south: number; west: number; north: number; east: number };
+};
+
+export type CourseListPage = {
+  courses: CourseSummary[];
+  limit: number;
+  offset: number;
+  nextOffset?: number;
+  hasMore: boolean;
+};
+
+export type CourseImportDiagnostic = {
+  code: string;
+  message: string;
+  count?: number;
+};
+
+export type CourseImportCandidate = {
+  key: string;
+  kind: string;
+  name: string;
+  sportType?: CourseSport;
+  requiresSport: boolean;
+  valid: boolean;
+  error?: string;
+  encodedPolyline?: string;
+  distanceM?: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
+  elevationCoverage?: number;
+  pointCount?: number;
+  waypointCount?: number;
+  profile?: CourseProfilePoint[];
+  duplicateCourse?: CourseSummary;
+  diagnostics?: CourseImportDiagnostic[];
+};
+
+export type CourseImportPreview = {
+  filename: string;
+  fileSHA256: string;
+  candidates: CourseImportCandidate[];
+  diagnostics?: CourseImportDiagnostic[];
+};
+
+export type CourseImportSelection = {
+  key: string;
+  name: string;
+  sportType: CourseSport;
+  notes: string;
+};
+
+export type CourseImportResult = {
+  importId: string;
+  filename: string;
+  fileSHA256: string;
+  diagnostics?: CourseImportDiagnostic[];
+  created: CourseSummary[];
+};
+
+export type CourseRoutingLeg = CourseLeg & {
+  warning?: string;
+};
+
+export type CourseRoutingResponse = {
+  routingEnabled: boolean;
+  legs: CourseRoutingLeg[];
+  distanceM: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
+  elevationCoverage: number;
+  profile: CourseProfilePoint[];
+};
+
+export type CoursePlanInput = {
+  revision?: number;
+  name: string;
+  sportType: CourseSport;
+  notes: string;
+  legs: Array<{
+    mode: CourseLegMode;
+    encodedPolyline: string;
+    elevationsM?: Array<number | null>;
+  }>;
 };
 
 export type TrainingSheetConfig = {

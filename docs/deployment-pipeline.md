@@ -24,6 +24,10 @@ not authorize a production cutover by itself.
   volumes, state, credentials, and networks.
 - Each non-production app owns its unique ingress alias on its isolated
   network. The shared gateway joins that network without owning the alias.
+- Automated previews can share one trusted, host-managed Valhalla container.
+  The deployer attaches it independently to each preview network under the
+  `valhalla` alias, verifies an actual route, and detaches it before teardown;
+  preview application containers never share a common routing network.
 - The Cloudflare Tunnel reaches the non-production gateway and the host SSH
   listener used by the restricted deployment account. It cannot reach
   PostgreSQL, production HTTP, the Docker socket, or other host stacks.
@@ -125,6 +129,35 @@ Do not run a broad Docker prune. The installer and cleanup jobs touch only
 Runnarr-managed preview projects. Review existing old Runnarr E2E images and
 build cache manually before enabling ten concurrent previews.
 
+### Optional shared preview routing
+
+The ordinary `routing` Compose profile is intended for one local stack. Do not
+enable it separately in every automated preview because each Compose project
+would build and retain another regional graph. Instead, run the reviewed
+preview-routing helper once:
+
+```sh
+sudo deploy/configure-preview-routing.sh \
+  https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf
+```
+
+The helper installs only the non-production overlay, restricted deployer, and
+standalone routing Compose asset. It records the previous installed assets
+under `/srv/runnarr/backups`, writes non-secret configuration to
+`/etc/runnarr/preview-routing.env`, and starts `runnarr-nonprod-valhalla`
+without restarting any existing Runnarr container. Wait for the graph build to
+finish before rerunning previews. The image is pinned by digest, has no host
+port, and receives explicit CPU, memory, and PID limits.
+
+The helper defaults its routing smoke leg to central Dublin. When using a
+different regional extract, provide four covered coordinates after the PBF URL
+so preview acceptance exercises the selected graph.
+
+When preview routing is active, newly deployed previews receive only the
+internal `http://valhalla:8002` endpoint. The shared container is connected to
+each isolated preview network and must pass a real Dublin pedestrian route
+before that preview can be accepted. Staging and production remain unchanged.
+
 ## Cloudflare configuration
 
 Create exact DNS for staging:
@@ -222,13 +255,19 @@ Every PR revision gets a fresh database and the deterministic E2E/testbed seed.
 Provider credentials are absent. Closing the PR removes its stack, volumes,
 network state, and DNS. Hourly reconciliation repairs missed cleanup.
 
+When shared preview routing is configured, the generated preview environment
+also enables Runnarr routing. Deployment fails closed if Valhalla is missing,
+unhealthy, cannot join the isolated network, or cannot calculate the routing
+smoke leg.
+
 The initial limit is ten previews. Each app and PostgreSQL container is limited
 to 0.5 CPU and 512 MiB. New previews are deferred below 12 GiB available memory
 or 10 GiB free disk. Deployment networks use explicit non-overlapping subnets
 so hosts with exhausted Docker default pools can still create them: production
 retains `10.89.0.0/24`, ingress uses `10.90.0.0/24`, staging uses
-`10.91.0.0/24`, and preview subnets are deterministically allocated from
-the `10.100.0.0` through `10.199.255.0` range.
+`10.91.0.0/24`, shared preview routing uses `10.92.0.0/24`, and preview
+subnets are deterministically allocated from the `10.100.0.0` through
+`10.199.255.0` range.
 
 ### Staging
 

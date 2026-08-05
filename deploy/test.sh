@@ -27,6 +27,7 @@ bash -n \
   "${ROOT}/deploy/lib.sh" \
   "${ROOT}/deploy/runnarr-deploy" \
   "${ROOT}/deploy/configure-ghcr-login.sh" \
+  "${ROOT}/deploy/configure-preview-routing.sh" \
   "${ROOT}/deploy/configure-staging.sh" \
   "${ROOT}/deploy/configure-tunnel-ssh.sh" \
   "${ROOT}/deploy/install-deploy-keys.sh" \
@@ -34,6 +35,22 @@ bash -n \
   "${ROOT}/deploy/verify-staging-oidc.sh"
 
 DIGEST="ghcr.io/bznein/runnarr@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+# Mirror the documented installed-asset check. The non-production override
+# requires an ingress alias even though `docker compose config` starts nothing.
+RUNNARR_INGRESS_ALIAS=runnarr-config-check \
+  docker compose \
+  --file "${ROOT}/docker-compose.yml" \
+  --file "${ROOT}/docker-compose.nonprod.yml" \
+  config --format json > "${TEMPORARY}/nonprod-config-check.json"
+jq -e \
+  '.services.db.image == "postgis/postgis:16-3.5-alpine"
+   and (.services.app.networks.runnarr.aliases | index("runnarr-config-check")) != null' \
+  "${TEMPORARY}/nonprod-config-check.json" >/dev/null
+grep -Fq 'RUNNARR_INGRESS_ALIAS=runnarr-config-check' \
+  "${ROOT}/docs/postgis-upgrade.md" ||
+  fail "the documented non-production config check omits its synthetic ingress alias"
+
 cat > "${TEMPORARY}/base.env" <<'EOF'
 POSTGRES_USER=runnarr
 POSTGRES_PASSWORD=test-password
@@ -45,6 +62,8 @@ RUNNARR_SECRET_KEY=0123456789abcdef0123456789abcdef
 RUNNARR_PUBLIC_MODE=false
 RUNNARR_LOCAL_AUTH_ENABLED=true
 RUNNARR_NONPROD_INGRESS_NETWORK=runnarr-nonprod-ingress
+RUNNARR_ROUTING_ENABLED=true
+RUNNARR_ROUTING_URL=http://valhalla:8002
 RUNNARR_APP_CPU_LIMIT=0.5
 RUNNARR_APP_MEMORY_LIMIT=512m
 RUNNARR_DB_CPU_LIMIT=0.5
@@ -70,24 +89,76 @@ docker compose \
 
 jq -e \
   --arg digest "${DIGEST}" \
+  --arg database_image "postgis/postgis:16-3.5-alpine" \
   '.services.app.image == $digest
+   and .services.db.image == $database_image
    and (.services.app.ports == null)
    and (.services.db.ports == null)
    and (.services.app.mem_limit | tonumber) == 536870912
    and (.services.db.mem_limit | tonumber) == 536870912
    and (.services.app.networks.runnarr.aliases | index("runnarr-pr-179")) != null
+   and .services.app.environment.RUNNARR_ROUTING_ENABLED == "true"
+   and .services.app.environment.RUNNARR_ROUTING_URL == "http://valhalla:8002"
+   and ((.services | has("valhalla")) | not)
    and ((.services.app.networks | has("nonprod-ingress")) | not)
    and ((.services.db.networks | has("nonprod-ingress")) | not)
    and .networks.runnarr.ipam.config[0].subnet == "10.100.179.0/24"' \
   "${TEMPORARY}/preview.json" >/dev/null
 
-! grep -Fq 'docker network connect --alias' "${ROOT}/deploy/runnarr-deploy" ||
-  fail "the ingress alias must belong to the app, not the gateway"
+grep -Fq 'docker network connect "${network}" "${NONPROD_GATEWAY}"' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "the ingress gateway connection unexpectedly owns an alias"
+grep -Fq 'docker network connect --alias valhalla "${network}" "${PREVIEW_ROUTING_CONTAINER}"' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "the shared Valhalla alias is not attached to preview networks"
+grep -Fq 'disconnect_preview_routing "previews/${pr}"' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview teardown does not detach shared Valhalla"
+grep -Fq 'sys.argv[1] + "/height"' "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview routing acceptance does not query elevation"
+grep -Fq 'assert heights and all(value is not None for value in heights)' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview routing acceptance allows missing elevation values"
 grep -Fq -- '--env-file "${staging_directory}/image.env"' \
   "${ROOT}/deploy/runnarr-deploy" ||
   fail "the rollback compatibility check does not load staging image settings"
 grep -Fq 'docker logs --tail=200 "${name}"' "${ROOT}/deploy/runnarr-deploy" ||
   fail "rollback compatibility failures do not preserve diagnostics"
+
+cat > "${TEMPORARY}/routing.env" <<EOF
+RUNNARR_PREVIEW_ROUTING_ENABLED=true
+RUNNARR_PREVIEW_ROUTING_CONTAINER=runnarr-nonprod-valhalla
+RUNNARR_PREVIEW_ROUTING_SUBNET=10.92.0.0/24
+RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LAT=53.3438
+RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LON=-6.2546
+RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LAT=53.3382
+RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LON=-6.2591
+RUNNARR_VALHALLA_IMAGE=ghcr.io/valhalla/valhalla-scripted:3.6.3@sha256:e688a89f7a86880aabcc8b2eec9bcefdcb639d603ee90a928a6d3c7d92d58486
+VALHALLA_TILE_URL='https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf'
+VALHALLA_BUILD_ELEVATION=True
+VALHALLA_BUILD_ADMINS=True
+VALHALLA_BUILD_TIME_ZONES=True
+VALHALLA_SERVER_THREADS=2
+RUNNARR_VALHALLA_CPU_LIMIT=2.0
+RUNNARR_VALHALLA_MEMORY_LIMIT=6g
+RUNNARR_VALHALLA_PIDS_LIMIT=512
+EOF
+docker compose \
+  --project-name runnarr-preview-routing \
+  --env-file "${TEMPORARY}/routing.env" \
+  --file "${ROOT}/deploy/docker-compose.routing.yml" \
+  config --format json > "${TEMPORARY}/routing.json"
+jq -e \
+  '.services.valhalla.image == "ghcr.io/valhalla/valhalla-scripted:3.6.3@sha256:e688a89f7a86880aabcc8b2eec9bcefdcb639d603ee90a928a6d3c7d92d58486"
+   and .services.valhalla.container_name == "runnarr-nonprod-valhalla"
+   and .services.valhalla.environment.build_elevation == "True"
+   and (.services.valhalla.ports == null)
+   and (.services.valhalla.mem_limit | tonumber) == 6442450944
+   and .services.valhalla.labels["com.runnarr.environment"] == "preview-routing"
+   and .volumes["valhalla-data"].name == "runnarr-nonprod-valhalla-data"
+   and .networks.default.name == "runnarr-preview-routing"
+   and .networks.default.ipam.config[0].subnet == "10.92.0.0/24"' \
+  "${TEMPORARY}/routing.json" >/dev/null
 
 cat > "${TEMPORARY}/production.env" <<'EOF'
 POSTGRES_USER=runnarr

@@ -245,6 +245,50 @@ on conflict (id) do update set
     archived_at = null,
     updated_at = now();
 
+-- A deterministic spatial fixture keeps the course library and detail views
+-- inspectable before the browser journey creates user-scoped courses itself.
+insert into courses(
+    id, user_id, name, sport_type, notes, favorite, revision, geometry_hash,
+    distance_m, elevation_gain_m, elevation_loss_m, elevation_coverage,
+    point_count, leg_count, direct_leg_count, diagnostics, created_at, updated_at
+)
+select '00000000-0000-4000-8000-000000000180'::uuid, id,
+    'E2E Riverside Loop', 'Run', 'Synthetic course for library and map inspection.',
+    true, 1, 'e2e-riverside-loop-v1', 4210, 38, 35, 1, 5, 1, 0,
+    '{"fixture":"e2e"}'::jsonb, now() - interval '2 days', now() - interval '1 day'
+from users
+where username = :'e2e_username'
+on conflict (id) do update set
+    user_id = excluded.user_id,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    notes = excluded.notes,
+    favorite = excluded.favorite,
+    geometry_hash = excluded.geometry_hash,
+    distance_m = excluded.distance_m,
+    elevation_gain_m = excluded.elevation_gain_m,
+    elevation_loss_m = excluded.elevation_loss_m,
+    elevation_coverage = excluded.elevation_coverage,
+    point_count = excluded.point_count,
+    leg_count = excluded.leg_count,
+    direct_leg_count = excluded.direct_leg_count,
+    diagnostics = excluded.diagnostics,
+    updated_at = excluded.updated_at;
+
+insert into course_legs(id, course_id, leg_index, mode, geometry, elevations)
+values (
+    '00000000-0000-4000-8000-000000000181'::uuid,
+    '00000000-0000-4000-8000-000000000180'::uuid,
+    0,
+    'preserved',
+    st_geomfromtext('LINESTRING(-6.2603 53.3498,-6.2450 53.3560,-6.2350 53.3450,-6.2500 53.3380,-6.2603 53.3498)', 4326),
+    array[22,37,31,25,22]::double precision[]
+)
+on conflict (id) do update set
+    mode = excluded.mode,
+    geometry = excluded.geometry,
+    elevations = excluded.elevations;
+
 -- Keep a structured-interval fixture for the Activity Detail tab journey.
 insert into activity_workouts(
     activity_id, provider, provider_workout_id, name, sport_type, steps, raw

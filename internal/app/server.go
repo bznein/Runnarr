@@ -37,6 +37,7 @@ type Server struct {
 	imports          *ImportService
 	garmin           *GarminService
 	media            *MediaService
+	courseRouting    *CourseRoutingService
 	logger           *slog.Logger
 	syncCancelsMu    sync.Mutex
 	syncCancels      map[string]context.CancelFunc
@@ -85,6 +86,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		imports:          NewImportService(store),
 		garmin:           garmin,
 		media:            NewMediaService(cfg, store),
+		courseRouting:    NewCourseRoutingService(cfg, logger),
 		logger:           logger,
 		syncCancels:      make(map[string]context.CancelFunc),
 		writebackRetries: make(map[string]struct{}),
@@ -159,6 +161,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activities/{id}/navigation", s.handleActivityNavigation)
 			r.Get("/activities/{id}/series", s.handleActivitySeries)
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
+			r.Post("/activities/{id}/course", s.handleSaveActivityAsCourse)
 			r.Post("/activities/{id}/climbs-preview", s.handleActivityClimbsPreview)
 			r.Get("/activities/{id}", s.handleGetActivity)
 			r.Get("/activities/{id}/planned-match-candidates", s.handlePlannedMatchCandidates)
@@ -175,6 +178,19 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activity-media/{mediaId}/original", s.handleServeOriginalMedia)
 			r.Get("/activity-media/{mediaId}/thumbnail", s.handleServeThumbnailMedia)
 			r.Get("/activity-types", s.handleActivityTypes)
+			r.Get("/courses", s.handleListCourses)
+			r.Post("/courses", s.handleCreateCourse)
+			r.Post("/course-routing/legs", s.handleRouteCourseLegs)
+			r.Get("/courses/{id}", s.handleGetCourse)
+			r.Patch("/courses/{id}/details", s.handleUpdateCourseDetails)
+			r.Put("/courses/{id}/plan", s.handleUpdateCoursePlan)
+			r.Put("/courses/{id}/favorite", s.handleSetCourseFavorite)
+			r.Post("/courses/{id}/duplicate", s.handleDuplicateCourse)
+			r.Delete("/courses/{id}", s.handleDeleteCourse)
+			r.Get("/courses/{id}/gpx", s.handleExportCourseGPX)
+			r.Post("/course-imports/preview", s.handlePreviewCourseImport)
+			r.Post("/course-imports/commit", s.handleCommitCourseImport)
+			r.Get("/course-imports/{id}", s.handleGetCourseImport)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/stats/calendar", s.handleCalendar)
 			r.Get("/stats/calendar/day", s.handleCalendarDay)
@@ -218,9 +234,10 @@ type climbDetectionUpdateRequest struct {
 }
 
 type climbDetectionPayload struct {
-	MapTileURL     string               `json:"mapTileURL"`
-	BaseURL        string               `json:"baseURL"`
-	ClimbDetection ClimbDetectionConfig `json:"climbDetection"`
+	MapTileURL           string               `json:"mapTileURL"`
+	BaseURL              string               `json:"baseURL"`
+	CourseRoutingEnabled bool                 `json:"courseRoutingEnabled"`
+	ClimbDetection       ClimbDetectionConfig `json:"climbDetection"`
 }
 
 type climbPreviewRequest struct {
@@ -449,9 +466,10 @@ func (s *Server) climbDetectionPayload(ctx context.Context) (climbDetectionPaylo
 		return climbDetectionPayload{}, err
 	}
 	return climbDetectionPayload{
-		MapTileURL:     s.cfg.MapTileURL,
-		BaseURL:        s.cfg.BaseURL,
-		ClimbDetection: climbDetection,
+		MapTileURL:           s.cfg.MapTileURL,
+		BaseURL:              s.cfg.BaseURL,
+		CourseRoutingEnabled: s.cfg.RoutingEnabled,
+		ClimbDetection:       climbDetection,
 	}, nil
 }
 
@@ -1755,7 +1773,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://accounts.google.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self' data:")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
@@ -1774,6 +1792,10 @@ func (s *Server) limitRequestBody(next http.Handler) http.Handler {
 			switch {
 			case r.URL.Path == "/api/imports":
 				limit = 80<<20 + 1<<20
+			case r.URL.Path == "/api/course-imports/preview" || r.URL.Path == "/api/course-imports/commit":
+				limit = maxCourseImportBytes + 1<<20
+			case r.URL.Path == "/api/courses" || strings.HasSuffix(r.URL.Path, "/plan"):
+				limit = maxCoursePlanRequestBytes
 			case strings.HasSuffix(r.URL.Path, "/media"):
 				limit = maxMediaUploadBytes + 1<<20
 			}

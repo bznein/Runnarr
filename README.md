@@ -4,8 +4,11 @@ Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Ga
 
 The v1 scope covers the existing private activity, health, calendar, gear, tools,
 planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
-Courses, printable pace bands, basic/expert mode, Garmin write-back, and
-encrypted support mode remain post-v1 work. Maintainers can optionally
+Course support provides private per-account storage, a searchable/favorite
+library, GPX review/import/export, course inspection, activity route snapshots,
+and waypoint planning with optional self-hosted Valhalla routing. Printable
+pace bands, basic/expert mode, Garmin write-back, and encrypted support mode
+remain post-v1 work. Maintainers can optionally
 provision isolated PR previews, persistent staging, and manually approved
 production promotion using the [deployment pipeline](docs/deployment-pipeline.md);
 the normal self-hosted Compose workflow remains unchanged.
@@ -44,6 +47,22 @@ rest, can be renamed, tested, or removed from Settings, and can reach an
 installed phone PWA while the app is closed. iPhone and iPad push requires the
 site to be added to the Home Screen before permission is requested.
 
+## Courses
+
+The full experience includes a private course library on desktop and under
+More on mobile. A course can be created from a GPS activity or from reviewed
+GPX tracks, segments, and routes. Imports show invalid segments, duplicates,
+discarded GPX data, route geometry, and available elevation before committing.
+Course detail supports local metadata, favorites, duplication, permanent
+deletion, GPX export, and a one-shot current-location overlay. Location is
+requested only after pressing the control and is not stored by Runnarr.
+
+The waypoint planner can keep individual legs direct or route them through an
+optional backend-connected Valhalla service. The normal stack leaves this
+heavier regional service off. See the [course-routing guide](docs/course-routing.md)
+for graph sizing, Compose startup, privacy boundaries, and external-service
+configuration.
+
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 
 For an HTTPS deployment behind Nginx Proxy Manager, see
@@ -81,8 +100,11 @@ scripts/dev.sh
 and run backend+frontend. `RUNNARR_ADMIN_PASSWORD` is preserved unless missing.
 If `RUNNARR_HTTP_ADDR` is unset or `:8080`, it will be replaced with a random high port.
 `RUNNARR_FRONTEND_PORT` (default `5173`) sets the preferred Vite port.
-Point `DATABASE_URL` in `.env` at your local PostgreSQL before running if you want a
-non-default database URL.
+Point `DATABASE_URL` in `.env` at a PostgreSQL 16 database with PostGIS 3.5+
+before running if you want a non-default database URL. The bundled Compose
+database uses `postgis/postgis:16-3.5-alpine`. Existing deployments should read
+the [PostGIS database upgrade notes](docs/postgis-upgrade.md) before taking the
+course-support migration.
 When using `docker compose up -d db` for local DB, keep `RUNNARR_DB_HOST_PORT` in `.env` aligned to the host-mapped postgres port (default `5432`).
 
 See [docs/development.md](docs/development.md) for full non-dockerized setup notes.

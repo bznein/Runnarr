@@ -15,6 +15,15 @@ import type {
   TrainingSheetConfig,
   AppConfig,
   ClimbDetectionSettingsUpdate,
+  Course,
+  CourseImportPreview,
+  CourseImportResult,
+  CourseImportSelection,
+  CourseListPage,
+  CoursePlanInput,
+  CourseRoutingResponse,
+  CourseSport,
+  CourseSummary,
   DailyHealthMetric,
   HealthChartPoint,
   DeleteActivityMediaResult,
@@ -61,6 +70,10 @@ export function setCsrfToken(value?: string) {
 export function activityGPXURL(id: string, includeSensors: boolean) {
   const query = includeSensors ? "?includeSensors=true" : "";
   return `/api/activities/${encodeURIComponent(id)}/gpx${query}`;
+}
+
+export function courseGPXURL(id: string) {
+  return `/api/courses/${encodeURIComponent(id)}/gpx`;
 }
 
 type ActivityPageOptions = {
@@ -260,6 +273,45 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  courses: (options: { q?: string; sport?: CourseSport | ""; favorite?: boolean; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (options.q?.trim()) params.set("q", options.q.trim());
+    if (options.sport) params.set("sport", options.sport);
+    if (options.favorite !== undefined) params.set("favorite", String(options.favorite));
+    if (options.sort) params.set("sort", options.sort);
+    if (options.order) params.set("order", options.order);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    return request<CourseListPage>(`/api/courses${params.size ? `?${params}` : ""}`);
+  },
+  course: (id: string) => request<Course>(`/api/courses/${encodeURIComponent(id)}`),
+  createCourse: (body: CoursePlanInput) => request<Course>("/api/courses", { method: "POST", body: JSON.stringify(body) }),
+  updateCoursePlan: (id: string, body: CoursePlanInput & { revision: number }) =>
+    request<Course>(`/api/courses/${encodeURIComponent(id)}/plan`, { method: "PUT", body: JSON.stringify(body) }),
+  routeCourseLegs: (body: { sportType: CourseSport; waypoints: Array<{ index: number; latitude: number; longitude: number }>; directLegIndexes: number[] }) =>
+    request<CourseRoutingResponse>("/api/course-routing/legs", { method: "POST", body: JSON.stringify(body) }),
+  updateCourseDetails: (id: string, body: { revision: number; name: string; sportType: CourseSport; notes: string }) =>
+    request<Course>(`/api/courses/${encodeURIComponent(id)}/details`, { method: "PATCH", body: JSON.stringify(body) }),
+  setCourseFavorite: (id: string, favorite: boolean) =>
+    request<CourseSummary>(`/api/courses/${encodeURIComponent(id)}/favorite`, { method: "PUT", body: JSON.stringify({ favorite }) }),
+  duplicateCourse: (id: string, body: { revision: number; name: string; notes: string }) =>
+    request<Course>(`/api/courses/${encodeURIComponent(id)}/duplicate`, { method: "POST", body: JSON.stringify(body) }),
+  deleteCourse: (id: string, revision: number) =>
+    request<Record<string, never>>(`/api/courses/${encodeURIComponent(id)}?revision=${revision}`, { method: "DELETE" }),
+  previewCourseImport: (file: File) => {
+    const body = new FormData();
+    body.set("file", file);
+    return request<CourseImportPreview>("/api/course-imports/preview", { method: "POST", body });
+  },
+  commitCourseImport: (file: File, fileSHA256: string, selections: CourseImportSelection[]) => {
+    const body = new FormData();
+    body.set("file", file);
+    body.set("input", JSON.stringify({ fileSHA256, selections }));
+    return request<CourseImportResult>("/api/course-imports/commit", { method: "POST", body });
+  },
+  courseImport: (id: string) => request<CourseImportResult>(`/api/course-imports/${encodeURIComponent(id)}`),
+  saveActivityAsCourse: (id: string, body: { name: string; sportType: CourseSport; notes: string }) =>
+    request<Course>(`/api/activities/${encodeURIComponent(id)}/course`, { method: "POST", body: JSON.stringify(body) }),
   activityNavigation: (id: string, filters?: ActivityTypeFilters) => {
     const query = activityFilterQuery(filters);
     return request<ActivityNavigation>(`/api/activities/${encodeURIComponent(id)}/navigation${query ? `?${query}` : ""}`);

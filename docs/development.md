@@ -6,9 +6,9 @@ Runnarr can be developed and tested without running the Docker app image.
 
 - Go 1.22+
 - Node.js 22+
-- PostgreSQL 16+ (running locally)
+- PostgreSQL 16 with PostGIS 3.5+ (running locally)
 
-You still need a PostgreSQL database for the app, but you can run the server and UI directly:
+You still need a PostGIS-enabled PostgreSQL database for the app, but you can run the server and UI directly:
 
 1. Configure environment variables in `.env` (copy from `.env.example` first).
    `scripts/dev.sh` now performs this bootstrap automatically when `.env` does not yet exist.
@@ -120,7 +120,8 @@ Process logs are written to `tmp/runnarr-backend.log` and `tmp/runnarr-frontend.
 
 ## Quick DB alternative with Docker (optional)
 
-If you want the quickest local database start, run only Postgres in Docker:
+If you want the quickest local database start, run only the bundled
+PostGIS-enabled PostgreSQL service in Docker:
 
 ```bash
 docker compose up -d db

@@ -11,6 +11,20 @@
 
 ### Features
 
+- Added the PostGIS-backed, account-private course foundation with bounded
+  geometry APIs, GPX preview/import/export, duplicate protection, and activity
+  route snapshots.
+- Added the responsive Courses library with search, sport and favorite filters,
+  map and elevation-profile inspection, GPX review/import and export, activity
+  route snapshots, metadata editing, duplication, permanent deletion, and an
+  explicit one-shot current-location overlay.
+- Added a waypoint course planner with sport-aware self-hosted Valhalla
+  routing, draggable ordered waypoints, per-leg direct overrides and isolated
+  fallbacks, optimistic revision protection, an optional regional routing
+  Compose profile, and a single host-managed Valhalla graph that can be safely
+  attached and route-smoke-tested across isolated pull-request previews. The
+  planner previews elevation, ascent, descent, and coverage before saving and
+  can add a final routed leg back to the starting point with one action.
 - Matched completed activities now link directly to their source training sheet in both full and simple experiences.
 - Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
@@ -25,6 +39,16 @@
 
 ### Fixes
 
+- Course-map current-location controls now center the map on the detected
+  position instead of only adding an off-screen marker.
+- Course-planner metrics now lead with distance, while elevation coverage is
+  shown only as an incomplete-data notice instead of occupying a primary card
+  when coverage is complete.
+- New Valhalla-routed course legs now fetch regional elevation profiles and
+  calculate inspectable ascent and descent while preserving routes when the
+  elevation service is unavailable.
+- GPX and activity course imports now keep source geometry intact while
+  limiting curvature-selected editable control points to a manageable set.
 - Automatic training-sheet matches now prompt for RPE and feedback, and later reflection saves update only those sheet cells without re-running completed summary and interval writeback; writeback statuses are also shown with readable labels.
 - Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
 - Planned and completed activity views now link to their corresponding Runnarr workout.

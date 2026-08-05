@@ -110,6 +110,9 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
         const shiftedMinute = Number(minute) + fixtureMinuteOffset;
         return `${fixtureDate}T06:${String(shiftedMinute).padStart(2, "0")}:00Z`;
       })
+      .replaceAll("53.349800", mobile ? "53.359800" : "53.349800")
+      .replaceAll("53.350800", mobile ? "53.360800" : "53.350800")
+      .replaceAll("53.351600", mobile ? "53.361600" : "53.351600")
       .replace("<name>Example Morning Run</name>", `<name>${name}</name>`)
       .replace("</gpx>", `<!-- ${projectSlug(projectName)} -->\n</gpx>`);
 
@@ -503,6 +506,113 @@ test.describe("local product journey", () => {
     await swimmingIntervalsTab.click();
     await expect(page.getByText("Laps", { exact: true })).toBeVisible();
     await expect(page.getByText("No structured workout steps were provided; showing recorded laps.", { exact: true })).toBeVisible();
+  });
+
+  test("uses the course library, saves an activity route, and reviews a GPX import", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    await login(page, mobile);
+
+    await navigateTo(page, "Courses", mobile);
+    await expect(page.getByRole("heading", { name: "Courses", exact: true })).toBeVisible();
+    const seededCourse = page.getByRole("link", { name: "E2E Riverside Loop", exact: true });
+    await expect(seededCourse).toBeVisible();
+    await seededCourse.click();
+    await expect(page.getByRole("heading", { name: "E2E Riverside Loop", exact: true })).toBeVisible();
+    await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
+    await expect(page.locator(".course-elevation-coverage-notice")).toHaveCount(0);
+    await expect(page.locator(".course-map-frame .leaflet-container")).toBeVisible();
+    await expect(page.getByRole("link", { name: "GPX", exact: true })).toHaveAttribute("href", "/api/courses/00000000-0000-4000-8000-000000000180/gpx");
+
+    const activityCourseName = `E2E ${testInfo.project.name} Activity Course`;
+    await ensureActivityImported(page, testInfo.project.name, mobile);
+    await visibleActivityLink(page, activityName(testInfo.project.name), mobile).click();
+    await page.getByRole("button", { name: "Activity actions" }).click();
+    await page.getByRole("menuitem", { name: "Save as course" }).click();
+    const saveDialog = page.getByRole("dialog", { name: "Save as course" });
+    await saveDialog.getByLabel("Name").fill(activityCourseName);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/course") && response.request().method() === "POST" && response.status() === 201),
+      saveDialog.getByRole("button", { name: "Save course" }).click()
+    ]);
+    await expect(page.getByRole("heading", { name: activityCourseName, exact: true })).toBeVisible();
+
+    await navigateTo(page, "Courses", mobile);
+    await expect(page.getByRole("link", { name: activityCourseName, exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Upload GPX", exact: true }).click();
+    const routeName = `E2E ${testInfo.project.name} GPX Course`;
+    const latitude = mobile ? 53.39 : 53.38;
+    const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+      <gpx version="1.1" creator="Runnarr E2E">
+        <trk><name>${routeName}</name><type>Run</type><trkseg>
+          <trkpt lat="${latitude.toFixed(4)}" lon="-6.3100"><ele>20</ele></trkpt>
+          <trkpt lat="${(latitude + 0.005).toFixed(4)}" lon="-6.3000"><ele>36</ele></trkpt>
+          <trkpt lat="${(latitude + 0.009).toFixed(4)}" lon="-6.2920"><ele>27</ele></trkpt>
+        </trkseg></trk>
+      </gpx>`;
+    await page.locator('input[type="file"][accept*=".gpx"]').setInputFiles({
+      name: `${projectSlug(testInfo.project.name)}-course.gpx`,
+      mimeType: "application/gpx+xml",
+      buffer: Buffer.from(gpx)
+    });
+    await expect(page.getByText(routeName, { exact: true })).toBeVisible();
+    await expect(page.locator(".course-import-review .leaflet-container")).toBeVisible();
+    await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
+    const details = page.locator(".course-import-fields");
+    await details.getByLabel("Notes").fill("Imported through the reviewed GPX flow.");
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/course-imports/commit") && response.request().method() === "POST" && response.status() === 201),
+      page.getByRole("button", { name: "Import 1 course", exact: true }).click()
+    ]);
+    await expect(page.getByRole("heading", { name: "Import complete", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: new RegExp(routeName) }).click();
+    await expect(page.getByRole("heading", { name: routeName, exact: true })).toBeVisible();
+    await expect(page.getByText("Imported through the reviewed GPX flow.", { exact: true })).toBeVisible();
+
+    await navigateTo(page, "Courses", mobile);
+    await page.getByRole("link", { name: "New course", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+    await expect(page.getByText("Routing is not enabled.", { exact: true })).toBeVisible();
+    const plannerMap = page.locator(".course-planner-map .leaflet-container");
+    await plannerMap.click({ position: { x: 90, y: 110 } });
+    await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
+    if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
+    const waypointRows = page.locator(".course-waypoint-list li");
+    await expect(waypointRows).toHaveCount(mobile ? 3 : 2);
+    const startCoordinates = await waypointRows.first().locator("small").innerText();
+    const backToStart = page.getByRole("button", { name: "Back to start", exact: true });
+    await expect(backToStart).toBeEnabled();
+    await backToStart.click();
+    await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
+    await expect(waypointRows.last().locator("small")).toHaveText(startCoordinates);
+    await expect(backToStart).toBeDisabled();
+    await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
+    const plannerMetrics = page.locator(".course-planner-elevation-metrics .metric");
+    await expect(plannerMetrics).toHaveCount(3);
+    await expect(plannerMetrics.first()).toContainText("Distance");
+    await expect(page.getByText("Elevation covers 0% of this route", { exact: false })).toBeVisible();
+    await page.context().grantPermissions(["geolocation"], { origin: new URL(page.url()).origin });
+    await page.context().setGeolocation({ latitude: 53.2707, longitude: -9.0568, accuracy: 12 });
+    await page.getByRole("button", { name: "Current location", exact: true }).click();
+    const locationMarker = page.locator(".course-planner-map .course-location-marker-icon");
+    await expect(locationMarker).toBeVisible();
+    await expect.poll(async () => {
+      const mapBounds = await plannerMap.boundingBox();
+      const markerBounds = await locationMarker.boundingBox();
+      if (!mapBounds || !markerBounds) return Number.POSITIVE_INFINITY;
+      const horizontalOffset = Math.abs(markerBounds.x + markerBounds.width / 2 - (mapBounds.x + mapBounds.width / 2));
+      const verticalOffset = Math.abs(markerBounds.y + markerBounds.height / 2 - (mapBounds.y + mapBounds.height / 2));
+      return Math.max(horizontalOffset, verticalOffset);
+    }).toBeLessThan(8);
+    const plannedName = `E2E ${testInfo.project.name} Planned Course`;
+    await page.locator(".course-planner-sidebar").getByLabel("Name").fill(plannedName);
+    page.once("dialog", (dialog) => void dialog.accept());
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/courses") && response.request().method() === "POST" && response.status() === 201),
+      page.getByRole("button", { name: "Save course", exact: true }).click()
+    ]);
+    await expect(page.getByRole("heading", { name: plannedName, exact: true })).toBeVisible();
+    await expect(page.getByText(/direct leg/).first()).toBeVisible();
+    if (mobile) await expectNoHorizontalOverflow(page);
   });
 
   test("excludes a matched planned run from all candidate windows until unmatch", async ({ page }, testInfo) => {
