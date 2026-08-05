@@ -41,7 +41,8 @@ production Compose path unchanged. Verify the installed asset without starting
 services:
 
 ```sh
-sudo docker compose \
+sudo env RUNNARR_INGRESS_ALIAS=runnarr-config-check \
+  docker compose \
   -f /opt/runnarr-deploy/docker-compose.yml \
   -f /opt/runnarr-deploy/docker-compose.nonprod.yml \
   config --format json |
