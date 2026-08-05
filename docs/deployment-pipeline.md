@@ -21,7 +21,8 @@ not authorize a production cutover by itself.
 - The candidate image is built and scanned before GHCR credentials are used.
   Deployment jobs do not check out or execute PR scripts.
 - Preview, staging, and production use different Compose projects, databases,
-  volumes, state, credentials, and networks.
+  volumes, state, credentials, and networks. Production's managed Compose
+  project includes one persistent, resource-limited Valhalla graph.
 - Each non-production app owns its unique ingress alias on its isolated
   network. The shared gateway joins that network without owning the alias.
 - Automated previews can share one trusted, host-managed Valhalla container.
@@ -99,7 +100,10 @@ Use the examples under `deploy/examples/`. The production `base.env` should be
 a reviewed copy of the existing deployment `.env`; retain production OIDC,
 database, provider, encryption, proxy, and resource settings. Do not copy those
 values into preview or staging. Ensure bcrypt hashes containing `$` are
-single-quoted in Compose environment files.
+single-quoted in Compose environment files. Set `VALHALLA_TILE_URL` to an
+HTTPS Geofabrik `.osm.pbf` extract that covers production users; the managed
+production Compose path enables the bundled routing profile and points the app
+at it on every promotion.
 
 For initial staging setup, `sudo deploy/configure-staging.sh HASH_FILE`
 validates a bare or formatted cost-12 bcrypt hash, generates independent database and
@@ -156,7 +160,9 @@ so preview acceptance exercises the selected graph.
 When preview routing is active, newly deployed previews receive only the
 internal `http://valhalla:8002` endpoint. The shared container is connected to
 each isolated preview network and must pass a real Dublin pedestrian route
-before that preview can be accepted. Staging and production remain unchanged.
+before that preview can be accepted. Staging remains unchanged.
+Production uses its own bundled Valhalla graph; preview routing remains a
+separate shared non-production service.
 
 ## Cloudflare configuration
 
@@ -350,8 +356,11 @@ The host then:
    window;
 4. creates and validates encrypted PostgreSQL and `/app/data` snapshots;
 5. starts the accepted digest without building;
-6. verifies the internal and external health commit;
-7. records deployment and backup state.
+6. starts or reuses the production Valhalla graph and waits for its health;
+7. verifies the internal and external health commit;
+8. records deployment and backup state. The promotion updates only
+   `image.env`; the production routing overlay and named graph volume are
+   preserved across image changes.
 
 For the first managed promotion, the host preserves the existing local image
 configuration before cutover. Older Runnarr images that expose only

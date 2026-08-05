@@ -58,6 +58,7 @@ BASE_COMPOSE="${ASSET_ROOT}/docker-compose.yml"
 DEPLOY_COMPOSE="${ASSET_ROOT}/docker-compose.deploy.yml"
 NONPROD_COMPOSE="${ASSET_ROOT}/docker-compose.nonprod.yml"
 PUBLIC_COMPOSE="${ASSET_ROOT}/docker-compose.public.yml"
+PRODUCTION_ROUTING_COMPOSE="${ASSET_ROOT}/docker-compose.production-routing.yml"
 E2E_SEED="${ASSET_ROOT}/seed.sql"
 TESTBED_SEED="${ASSET_ROOT}/testbed-seed.sql"
 
@@ -79,6 +80,7 @@ log() {
 require_assets() {
   require_file "${BASE_COMPOSE}"
   require_file "${DEPLOY_COMPOSE}"
+  require_file "${PRODUCTION_ROUTING_COMPOSE}"
 }
 
 scope_allows() {
@@ -102,7 +104,11 @@ compose() {
     --file "${DEPLOY_COMPOSE}"
   )
   if [[ "${environment}" == "production" ]]; then
-    files+=(--file "${PUBLIC_COMPOSE}")
+    files+=(
+      --file "${PUBLIC_COMPOSE}"
+      --file "${PRODUCTION_ROUTING_COMPOSE}"
+      --profile routing
+    )
   else
     files+=(--file "${NONPROD_COMPOSE}")
   fi

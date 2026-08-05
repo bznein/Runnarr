@@ -41,6 +41,15 @@ Changing `VALHALLA_TILE_URL` may trigger a graph rebuild. Back up or remove the
 dedicated volume only when you intentionally want to replace its graph; course
 records themselves remain in PostgreSQL.
 
+## Managed production
+
+The deployment pipeline uses the same bundled Valhalla service for production.
+Set `VALHALLA_TILE_URL` (and any desired `VALHALLA_BUILD_*` or resource values)
+in the root-owned production `base.env`. Production promotions always activate
+the routing profile, force the app to use `http://valhalla:8002`, and retain the
+`runnarr-production-valhalla-data` graph volume while replacing only the app
+image.
+
 ## Automated pull-request previews
 
 Do not start the `routing` profile inside every automated preview. That would
