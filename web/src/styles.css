@@ -3546,14 +3546,208 @@ textarea {
   font-size: 13px;
 }
 
+.course-routing-notice {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+  border-radius: 7px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-warning-soft) 45%, var(--color-surface));
+  font-size: 13px;
+}
+
+.course-planner-layout {
+  display: grid;
+  grid-template-columns: minmax(290px, 0.7fr) minmax(0, 1.7fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.course-planner-sidebar {
+  display: grid;
+  gap: 14px;
+}
+
+.course-planner-sidebar .panel-heading,
+.course-planner-map-heading .panel-heading,
+.course-leg-heading .panel-heading {
+  margin-bottom: 0;
+}
+
+.course-planner-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.course-planner-summary span {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--color-surface-muted);
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.course-planner-summary strong {
+  color: var(--color-heading);
+  font-size: 13px;
+}
+
+.course-waypoint-heading,
+.course-planner-map-heading,
+.course-leg-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.course-waypoint-heading button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.course-waypoint-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.course-waypoint-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 7px;
+}
+
+.course-waypoint-list li > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+
+.course-waypoint-list small {
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-waypoint-number,
+.course-leg-index {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--color-white);
+  background: var(--color-marker-dark);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.course-waypoint-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.course-waypoint-actions .icon-button {
+  width: 28px;
+  min-height: 28px;
+}
+
+.course-planner-map-panel {
+  display: grid;
+  gap: 12px;
+  min-height: 620px;
+}
+
+.course-planner-map-panel .course-map-frame,
+.course-planner-map-panel .route-map {
+  min-height: 540px;
+}
+
+.course-planner-map .leaflet-container {
+  cursor: crosshair;
+}
+
+.course-waypoint-marker {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--color-white);
+  border-radius: 50%;
+  color: var(--color-white);
+  background: var(--color-marker-dark);
+  box-shadow: var(--shadow-marker-strong);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.course-leg-panel,
+.course-leg-list {
+  display: grid;
+  gap: 10px;
+}
+
+.course-leg-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 7px;
+}
+
+.course-leg-row.direct {
+  border-color: color-mix(in srgb, var(--color-warning) 35%, var(--color-border));
+  background: color-mix(in srgb, var(--color-warning-soft) 22%, var(--color-surface));
+}
+
+.course-leg-row > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.course-leg-row small {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.course-leg-row small.warning-text {
+  color: var(--color-warning);
+}
+
 @media (max-width: 900px) {
   .course-detail-grid,
-  .course-import-layout {
+  .course-import-layout,
+  .course-planner-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .course-candidate-panel {
     position: static;
+  }
+
+  .course-planner-map-panel {
+    min-height: 520px;
+  }
+
+  .course-planner-map-panel .course-map-frame,
+  .course-planner-map-panel .route-map {
+    min-height: 440px;
   }
 }
 
@@ -3577,6 +3771,17 @@ textarea {
   .course-diagnostic-row,
   .course-import-diagnostics > div:not(.panel-heading) {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .course-waypoint-list li,
+  .course-leg-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .course-waypoint-actions,
+  .course-leg-row > button {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 

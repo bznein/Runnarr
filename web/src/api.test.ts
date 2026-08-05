@@ -170,4 +170,27 @@ describe("shared backend API contract", () => {
       selections: [{ key: "track:1", name: "River", sportType: "Run", notes: "Quiet roads" }]
     });
   });
+
+  it("routes course waypoints through the backend without exposing a routing origin", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      routingEnabled: true,
+      legs: []
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.routeCourseLegs({
+      sportType: "Cycling",
+      waypoints: [{ index: 0, latitude: 53.3, longitude: -6.2 }, { index: 1, latitude: 53.4, longitude: -6.1 }],
+      directLegIndexes: [0]
+    });
+
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/course-routing/legs");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      sportType: "Cycling",
+      waypoints: [{ index: 0, latitude: 53.3, longitude: -6.2 }, { index: 1, latitude: 53.4, longitude: -6.1 }],
+      directLegIndexes: [0]
+    });
+  });
 });

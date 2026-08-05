@@ -4,11 +4,11 @@ Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Ga
 
 The v1 scope covers the existing private activity, health, calendar, gear, tools,
 planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
-The first course-support increment provides private per-account course storage,
-a searchable/favorite library, GPX review/import/export, course inspection, and
-activity route snapshots. Interactive route planning remains post-v1 work,
-alongside printable pace bands, basic/expert mode, Garmin write-back, and
-encrypted support mode. Maintainers can optionally
+Course support provides private per-account storage, a searchable/favorite
+library, GPX review/import/export, course inspection, activity route snapshots,
+and waypoint planning with optional self-hosted Valhalla routing. Printable
+pace bands, basic/expert mode, Garmin write-back, and encrypted support mode
+remain post-v1 work. Maintainers can optionally
 provision isolated PR previews, persistent staging, and manually approved
 production promotion using the [deployment pipeline](docs/deployment-pipeline.md);
 the normal self-hosted Compose workflow remains unchanged.
@@ -56,6 +56,12 @@ discarded GPX data, route geometry, and available elevation before committing.
 Course detail supports local metadata, favorites, duplication, permanent
 deletion, GPX export, and a one-shot current-location overlay. Location is
 requested only after pressing the control and is not stored by Runnarr.
+
+The waypoint planner can keep individual legs direct or route them through an
+optional backend-connected Valhalla service. The normal stack leaves this
+heavier regional service off. See the [course-routing guide](docs/course-routing.md)
+for graph sizing, Compose startup, privacy boundaries, and external-service
+configuration.
 
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 

@@ -47,6 +47,8 @@ services:
       RUNNARR_ADMIN_PASSWORD_HASH_FILE: ${RUNNARR_ADMIN_PASSWORD_HASH_FILE:-}
       RUNNARR_SECRET_KEY_FILE: ${RUNNARR_SECRET_KEY_FILE:-}
       MAP_TILE_URL: ${MAP_TILE_URL:-https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png}
+      RUNNARR_ROUTING_ENABLED: ${RUNNARR_ROUTING_ENABLED:-false}
+      RUNNARR_ROUTING_URL: ${RUNNARR_ROUTING_URL:-http://valhalla:8002}
       RUNNARR_MEDIA_DIR: ${RUNNARR_MEDIA_DIR:-/app/data/media}
       RUNNARR_GARMIN_BRIDGE_PYTHON: ${RUNNARR_GARMIN_BRIDGE_PYTHON:-python3}
       RUNNARR_GARMIN_BRIDGE_SCRIPT: ${RUNNARR_GARMIN_BRIDGE_SCRIPT:-/app/garmin_bridge.py}
@@ -82,9 +84,24 @@ services:
     networks:
       - runnarr
 
+  valhalla:
+    profiles: ["routing"]
+    image: ghcr.io/valhalla/valhalla-scripted:3.6.3
+    environment:
+      tile_urls: ${VALHALLA_TILE_URL:-https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf}
+      build_elevation: ${VALHALLA_BUILD_ELEVATION:-False}
+      build_admins: ${VALHALLA_BUILD_ADMINS:-True}
+      build_time_zones: ${VALHALLA_BUILD_TIME_ZONES:-True}
+      server_threads: ${VALHALLA_SERVER_THREADS:-2}
+    volumes:
+      - valhalla-data:/custom_files
+    networks:
+      - runnarr
+
 volumes:
   postgres-data:
   app-data:
+  valhalla-data:
 
 networks:
   runnarr:

@@ -47,6 +47,7 @@ import type {
   CourseImportSelection,
   CourseLeg,
   CourseProfilePoint,
+  CourseRoutingLeg,
   CourseSport,
   CourseSummary,
   DailyHealthMetric,
@@ -494,8 +495,10 @@ function AuthenticatedApp({
           <Route path="/workouts/new" element={<WorkoutEditorPage />} />
           <Route path="/workouts/:id" element={<WorkoutEditorPage />} />
           <Route path="/courses" element={<CoursesPage canWrite={session?.canWrite !== false} />} />
+          <Route path="/courses/new" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
           <Route path="/courses/import" element={<CourseImportPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/courses/imports/:id" element={<CourseImportResultPage />} />
+          <Route path="/courses/:id/plan" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
           <Route path="/courses/:id" element={<CourseDetailPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/notifications" element={<NotificationsPage canWrite={session?.canWrite !== false} />} />
           <Route path="/health" element={<HealthPage />} />
@@ -5384,7 +5387,7 @@ function CoursesPage({ canWrite }: { canWrite: boolean }) {
     <Page
       title="Courses"
       eyebrow="Reusable routes"
-      actions={canWrite ? <Link className="primary-button" to="/courses/import"><FileUp size={16} />Upload GPX</Link> : undefined}
+      actions={canWrite ? <><Link className="secondary-button" to="/courses/import"><FileUp size={16} />Upload GPX</Link><Link className="primary-button" to="/courses/new"><RouteIcon size={16} />New course</Link></> : undefined}
     >
       <section className="panel course-library-panel">
         <div className="course-library-filters">
@@ -5490,6 +5493,7 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
       actions={<>
         <button className={`icon-button course-favorite-button ${item.favorite ? "active" : ""}`} type="button" title={item.favorite ? "Remove from favorites" : "Add to favorites"} aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"} aria-pressed={item.favorite} disabled={!canWrite || favorite.isPending} onClick={() => favorite.mutate(!item.favorite)}><Star size={18} fill={item.favorite ? "currentColor" : "none"} /></button>
         {canWrite && <button className="secondary-button small-button" type="button" onClick={() => { update.reset(); setEditOpen(true); }}><Pencil size={15} />Details</button>}
+        {canWrite && <Link className="secondary-button small-button" to={`/courses/${encodeURIComponent(item.id)}/plan`}><RouteIcon size={15} />Edit route</Link>}
         {canWrite && <button className="secondary-button small-button" type="button" onClick={() => { duplicate.reset(); setDuplicateOpen(true); }}><Copy size={15} />Duplicate</button>}
         <a className="secondary-button small-button" href={courseGPXURL(item.id)}><Download size={15} />GPX</a>
         {canWrite && <button className="danger-button small-button" type="button" disabled={remove.isPending} onClick={() => { if (window.confirm(`Permanently delete “${item.name}”? This cannot be undone.`)) remove.mutate(); }}><Trash2 size={15} />Delete</button>}
@@ -5562,6 +5566,229 @@ function CourseDetailsFields({ name, sportType, notes, onName, onSport, onNotes 
     <label className="field"><span>Sport</span><select value={sportType} onChange={(event) => onSport(event.target.value as CourseSport)}>{courseSports.map((item) => <option key={item}>{item}</option>)}</select></label>
     <label className="field"><span>Notes</span><textarea maxLength={5000} rows={5} value={notes} onChange={(event) => onNotes(event.target.value)} /></label>
   </>;
+}
+
+function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite: boolean; mapTileURL?: string; routingEnabled: boolean }) {
+  const { id } = useParams();
+  const editing = Boolean(id);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const initializedCourseRef = useRef<string>();
+  const [name, setName] = useState("");
+  const [sportType, setSportType] = useState<CourseSport>("Run");
+  const [notes, setNotes] = useState("");
+  const [waypoints, setWaypoints] = useState<Array<{ index: number; latitude: number; longitude: number }>>([]);
+  const [seedLegs, setSeedLegs] = useState<CourseLeg[]>([]);
+  const [geometryDirty, setGeometryDirty] = useState(!editing);
+  const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
+  const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
+
+  useEffect(() => {
+    if (!id || !course.data || initializedCourseRef.current === id) return;
+    initializedCourseRef.current = id;
+    setName(course.data.name);
+    setSportType(course.data.sportType);
+    setNotes(course.data.notes ?? "");
+    setWaypoints(course.data.waypoints.map((waypoint, index) => ({ index, latitude: waypoint.latitude, longitude: waypoint.longitude })));
+    setSeedLegs(course.data.legs);
+    setDirectLegIndexes(course.data.legs.filter((leg) => leg.mode === "direct").map((leg) => leg.index));
+    setGeometryDirty(false);
+  }, [course.data, id]);
+
+  const waypointKey = waypoints.map((point) => `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`).join(";");
+  const directKey = directLegIndexes.slice().sort((a, b) => a - b).join(",");
+  const routed = useQuery({
+    queryKey: ["course-routing", sportType, waypointKey, directKey],
+    queryFn: () => api.routeCourseLegs({ sportType, waypoints, directLegIndexes }),
+    enabled: canWrite && geometryDirty && waypoints.length >= 2,
+    retry: false,
+    staleTime: 0
+  });
+  const fallbackLegs = plannerDirectLegs(waypoints, routed.error ? "Routing request failed; this leg is direct." : "");
+  const plannerLegs: CourseRoutingLeg[] = !geometryDirty
+    ? seedLegs.map((leg) => ({ ...leg }))
+    : routed.data?.legs.length === waypoints.length - 1
+      ? routed.data.legs
+      : fallbackLegs;
+  const directLegs = plannerLegs.filter((leg) => leg.mode === "direct");
+  const routeDistanceM = courseLegDistance(plannerLegs);
+  const canSave = canWrite && name.trim().length > 0 && waypoints.length >= 2 && plannerLegs.length === waypoints.length - 1 && !routed.isFetching;
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        name: name.trim(),
+        sportType,
+        notes,
+        legs: plannerLegs.map((leg) => ({ mode: leg.mode, encodedPolyline: leg.encodedPolyline, elevationsM: leg.elevationsM }))
+      };
+      return editing ? api.updateCoursePlan(id!, { ...body, revision: course.data!.revision }) : api.createCourse(body);
+    },
+    onSuccess: async (saved) => {
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ["courses"] }), queryClient.invalidateQueries({ queryKey: ["course", saved.id] })]);
+      navigate(`/courses/${encodeURIComponent(saved.id)}`);
+    }
+  });
+
+  const markGeometryDirty = () => {
+    setGeometryDirty(true);
+    save.reset();
+  };
+  const reindexWaypoints = (items: typeof waypoints) => items.map((point, index) => ({ ...point, index }));
+  const addWaypoint = (point: RoutePoint) => {
+    if (!canWrite || waypoints.length >= 100) return;
+    setWaypoints((current) => reindexWaypoints([...current, { index: current.length, latitude: point[0], longitude: point[1] }]));
+    markGeometryDirty();
+  };
+  const moveWaypoint = (index: number, point: RoutePoint) => {
+    setWaypoints((current) => current.map((item) => item.index === index ? { ...item, latitude: point[0], longitude: point[1] } : item));
+    markGeometryDirty();
+  };
+  const removeWaypoint = (index: number) => {
+    setWaypoints((current) => reindexWaypoints(current.filter((item) => item.index !== index)));
+    setDirectLegIndexes([]);
+    markGeometryDirty();
+  };
+  const reorderWaypoint = (index: number, direction: -1 | 1) => {
+    setWaypoints((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return reindexWaypoints(next);
+    });
+    setDirectLegIndexes([]);
+    markGeometryDirty();
+  };
+  const setDirect = (index: number, direct: boolean) => {
+    setDirectLegIndexes((current) => direct ? Array.from(new Set([...current, index])).sort((a, b) => a - b) : current.filter((item) => item !== index));
+    markGeometryDirty();
+  };
+  const submit = () => {
+    if (!canSave) return;
+    if (directLegs.length > 0 && !window.confirm(`${directLegs.length} ${directLegs.length === 1 ? "leg is" : "legs are"} direct rather than routed. Save this course anyway?`)) return;
+    save.mutate();
+  };
+
+  if (editing && course.isLoading) return <Page title="Course planner"><LoadingRow /></Page>;
+  if (editing && !course.data) return <Page title="Course planner"><EmptyState title="Course not found" /></Page>;
+
+  return <Page title={editing ? "Edit course route" : "Plan a course"} eyebrow={editing ? course.data?.name : "Waypoint planner"} actions={<><Link className="secondary-button" to={editing ? `/courses/${encodeURIComponent(id!)}` : "/courses"}>Cancel</Link><button className="primary-button" type="button" disabled={!canSave || save.isPending} onClick={submit}>{save.isPending ? "Saving…" : editing ? "Save changes" : "Save course"}</button></>}>
+    {!canWrite && <div className="error">The planner is disabled in read-only support mode.</div>}
+    {!routingEnabled && <div className="course-routing-notice"><strong>Routing is not enabled.</strong> Waypoints are connected with direct dashed legs. Configure the optional Valhalla service to follow paths and roads.</div>}
+    {save.error && <div className="error">{save.error instanceof ApiError && save.error.status === 409 ? "This course changed after you opened it. Reload the latest version before saving." : courseMutationMessage(save.error)}</div>}
+    <section className="course-planner-layout">
+      <aside className="panel course-planner-sidebar">
+        <div className="panel-heading">Course details</div>
+        <CourseDetailsFields name={name} sportType={sportType} notes={notes} onName={setName} onSport={(value) => { setSportType(value); markGeometryDirty(); }} onNotes={setNotes} />
+        <div className="course-planner-summary">
+          <span><strong>{waypoints.length}</strong> waypoints</span>
+          <span><strong>{plannerLegs.length}</strong> legs</span>
+          <span><strong>{formatDistance(routeDistanceM)}</strong> distance</span>
+        </div>
+        <div className="course-waypoint-heading"><strong>Waypoints</strong>{waypoints.length > 0 && <button className="danger-text-button" type="button" disabled={!canWrite} onClick={() => { setWaypoints([]); setDirectLegIndexes([]); markGeometryDirty(); }}>Clear</button>}</div>
+        {waypoints.length === 0 && <p className="muted">Click the map to add a start and finish.</p>}
+        <ol className="course-waypoint-list">
+          {waypoints.map((waypoint, index) => <li key={`${waypoint.index}-${waypoint.latitude}-${waypoint.longitude}`}>
+            <span className="course-waypoint-number">{index + 1}</span>
+            <span><strong>{index === 0 ? "Start" : index === waypoints.length - 1 ? "Finish" : `Waypoint ${index + 1}`}</strong><small>{waypoint.latitude.toFixed(5)}, {waypoint.longitude.toFixed(5)}</small></span>
+            <span className="course-waypoint-actions"><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} earlier`} disabled={!canWrite || index === 0} onClick={() => reorderWaypoint(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} later`} disabled={!canWrite || index === waypoints.length - 1} onClick={() => reorderWaypoint(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger" type="button" aria-label={`Remove waypoint ${index + 1}`} disabled={!canWrite} onClick={() => removeWaypoint(index)}><X size={14} /></button></span>
+          </li>)}
+        </ol>
+      </aside>
+      <section className="panel course-planner-map-panel">
+        <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">Click to add; drag numbered waypoints to adjust.</span></div>{routed.isFetching && <span className="muted">Routing…</span>}</div>
+        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} onAdd={addWaypoint} onMove={moveWaypoint} />
+      </section>
+    </section>
+    {plannerLegs.length > 0 && <section className="panel course-leg-panel"><div className="course-leg-heading"><div><div className="panel-heading">Legs</div><span className="muted">Routing failures are isolated; direct legs stay editable and visible.</span></div>{routed.error && <button className="secondary-button small-button" type="button" onClick={() => void routed.refetch()}><RefreshCw size={14} />Retry routing</button>}</div><div className="course-leg-list">{plannerLegs.map((leg, index) => {
+      const manuallyDirect = directLegIndexes.includes(index);
+      return <div className={`course-leg-row ${leg.mode === "direct" ? "direct" : ""}`} key={index}><span className="course-leg-index">{index + 1}</span><span><strong>{leg.mode === "direct" ? "Direct" : "Routed"}</strong><small>{formatDistance(courseLegDistance([leg]))} · {leg.pointCount.toLocaleString()} points</small>{leg.warning && <small className="warning-text">{leg.warning}</small>}</span><button className="secondary-button small-button" type="button" disabled={!canWrite || routed.isFetching} onClick={() => { if (leg.mode === "direct" && !manuallyDirect) { void routed.refetch(); } else { setDirect(index, !manuallyDirect); } }}>{leg.mode === "direct" ? manuallyDirect ? "Try routing" : "Retry routing" : "Use direct"}</button></div>;
+    })}</div></section>}
+  </Page>;
+}
+
+function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
+  const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
+  const waypointPoints = waypoints.map((point) => [point.latitude, point.longitude] as RoutePoint);
+  const allPoints = pointsByLeg.flat();
+  const fitPoints = allPoints.length > 0 ? allPoints : waypointPoints;
+  const center = fitPoints[0] ?? [53.3498, -6.2603] as RoutePoint;
+  const [position, setPosition] = useState<{ point: RoutePoint; accuracy: number }>();
+  const [locationError, setLocationError] = useState("");
+  const [locating, setLocating] = useState(false);
+  const locate = () => {
+    setLocationError("");
+    setLocating(true);
+    if (!navigator.geolocation) { setLocating(false); setLocationError("Location is not available in this browser."); return; }
+    navigator.geolocation.getCurrentPosition((value) => { setPosition({ point: [value.coords.latitude, value.coords.longitude], accuracy: value.coords.accuracy }); setLocating(false); }, (error) => { setLocationError(error.message || "Could not get your location."); setLocating(false); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+  };
+  return <div className="map-frame course-map-frame course-planner-map">
+    <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
+      <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
+      {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
+      {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={`Waypoint ${index + 1}`} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
+      {canEdit && <MapLocationPicker onSelect={onAdd} />}
+      {position && <><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
+      <FitMapContent points={fitPoints} />
+    </MapContainer>
+    <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>
+    {locationError && <div className="row-error course-location-error">{locationError}</div>}
+    {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}
+  </div>;
+}
+
+function plannerDirectLegs(waypoints: Array<{ latitude: number; longitude: number }>, warning: string): CourseRoutingLeg[] {
+  return waypoints.slice(1).map((end, index) => {
+    const start = waypoints[index];
+    const points: RoutePoint[] = [[start.latitude, start.longitude], [end.latitude, end.longitude]];
+    return { index, mode: "direct", encodedPolyline: encodeCoursePolyline(points, 6), elevationsM: [null, null], pointCount: 2, warning };
+  });
+}
+
+function encodeCoursePolyline(points: RoutePoint[], precision: number) {
+  const factor = 10 ** precision;
+  let previousLatitude = 0;
+  let previousLongitude = 0;
+  let encoded = "";
+  for (const [latitude, longitude] of points) {
+    const nextLatitude = Math.round(latitude * factor);
+    const nextLongitude = Math.round(longitude * factor);
+    encoded += encodePolylineValue(nextLatitude - previousLatitude);
+    encoded += encodePolylineValue(nextLongitude - previousLongitude);
+    previousLatitude = nextLatitude;
+    previousLongitude = nextLongitude;
+  }
+  return encoded;
+}
+
+function encodePolylineValue(value: number) {
+  let shifted = value < 0 ? ~(value << 1) : value << 1;
+  let encoded = "";
+  while (shifted >= 0x20) {
+    encoded += String.fromCharCode((0x20 | (shifted & 0x1f)) + 63);
+    shifted >>>= 5;
+  }
+  return encoded + String.fromCharCode(shifted + 63);
+}
+
+function courseLegDistance(legs: Array<Pick<CourseLeg, "encodedPolyline">>) {
+  return legs.reduce((total, leg) => {
+    const points = decodeCoursePolyline(leg.encodedPolyline);
+    for (let index = 1; index < points.length; index++) total += routePointDistance(points[index - 1], points[index]);
+    return total;
+  }, 0);
+}
+
+function routePointDistance(start: RoutePoint, end: RoutePoint) {
+  const radians = (value: number) => value * Math.PI / 180;
+  const latitude = radians(end[0] - start[0]);
+  const longitude = radians(end[1] - start[1]);
+  const value = Math.sin(latitude / 2) ** 2 + Math.cos(radians(start[0])) * Math.cos(radians(end[0])) * Math.sin(longitude / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+}
+
+function courseWaypointIcon(number: number) {
+  return divIcon({ className: "course-waypoint-marker-icon", html: `<span class="course-waypoint-marker">${number}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
 }
 
 type CourseImportDraft = CourseImportSelection & { selected: boolean };

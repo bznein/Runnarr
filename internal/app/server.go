@@ -37,6 +37,7 @@ type Server struct {
 	imports          *ImportService
 	garmin           *GarminService
 	media            *MediaService
+	courseRouting    *CourseRoutingService
 	logger           *slog.Logger
 	syncCancelsMu    sync.Mutex
 	syncCancels      map[string]context.CancelFunc
@@ -85,6 +86,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		imports:          NewImportService(store),
 		garmin:           garmin,
 		media:            NewMediaService(cfg, store),
+		courseRouting:    NewCourseRoutingService(cfg, logger),
 		logger:           logger,
 		syncCancels:      make(map[string]context.CancelFunc),
 		writebackRetries: make(map[string]struct{}),
@@ -178,6 +180,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activity-types", s.handleActivityTypes)
 			r.Get("/courses", s.handleListCourses)
 			r.Post("/courses", s.handleCreateCourse)
+			r.Post("/course-routing/legs", s.handleRouteCourseLegs)
 			r.Get("/courses/{id}", s.handleGetCourse)
 			r.Patch("/courses/{id}/details", s.handleUpdateCourseDetails)
 			r.Put("/courses/{id}/plan", s.handleUpdateCoursePlan)
@@ -231,9 +234,10 @@ type climbDetectionUpdateRequest struct {
 }
 
 type climbDetectionPayload struct {
-	MapTileURL     string               `json:"mapTileURL"`
-	BaseURL        string               `json:"baseURL"`
-	ClimbDetection ClimbDetectionConfig `json:"climbDetection"`
+	MapTileURL           string               `json:"mapTileURL"`
+	BaseURL              string               `json:"baseURL"`
+	CourseRoutingEnabled bool                 `json:"courseRoutingEnabled"`
+	ClimbDetection       ClimbDetectionConfig `json:"climbDetection"`
 }
 
 type climbPreviewRequest struct {
@@ -462,9 +466,10 @@ func (s *Server) climbDetectionPayload(ctx context.Context) (climbDetectionPaylo
 		return climbDetectionPayload{}, err
 	}
 	return climbDetectionPayload{
-		MapTileURL:     s.cfg.MapTileURL,
-		BaseURL:        s.cfg.BaseURL,
-		ClimbDetection: climbDetection,
+		MapTileURL:           s.cfg.MapTileURL,
+		BaseURL:              s.cfg.BaseURL,
+		CourseRoutingEnabled: s.cfg.RoutingEnabled,
+		ClimbDetection:       climbDetection,
 	}, nil
 }
 

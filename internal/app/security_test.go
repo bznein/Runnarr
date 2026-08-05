@@ -51,6 +51,28 @@ func TestLoadConfigRejectsInsecurePublicMode(t *testing.T) {
 	}
 }
 
+func TestLoadConfigValidatesEnabledRoutingOrigin(t *testing.T) {
+	for _, key := range []string{"RUNNARR_PUBLIC_MODE", "RUNNARR_ROUTING_ENABLED", "RUNNARR_ROUTING_URL", "DATABASE_URL", "RUNNARR_ADMIN_PASSWORD", "RUNNARR_ADMIN_PASSWORD_HASH", "RUNNARR_SECRET_KEY"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("DATABASE_URL", "postgres://localhost/runnarr")
+	t.Setenv("RUNNARR_ADMIN_PASSWORD", "local-password")
+	t.Setenv("RUNNARR_SECRET_KEY", "local-secret")
+	t.Setenv("RUNNARR_ROUTING_ENABLED", "true")
+	t.Setenv("RUNNARR_ROUTING_URL", "file:///tmp/route")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("non-http routing URL should be rejected")
+	}
+	t.Setenv("RUNNARR_ROUTING_URL", "http://valhalla:8002")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RoutingEnabled || cfg.RoutingURL != "http://valhalla:8002" {
+		t.Fatalf("routing config = %#v", cfg)
+	}
+}
+
 func TestSessionCookieMode(t *testing.T) {
 	local := &Server{cfg: Config{BaseURL: "http://localhost:8080"}}
 	cookie := local.sessionCookie("id", time.Hour)

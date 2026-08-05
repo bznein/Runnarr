@@ -95,6 +95,7 @@ export type ClimbDetectionSettingsUpdate = {
 export type AppConfig = {
   mapTileURL: string;
   baseURL: string;
+  courseRoutingEnabled: boolean;
   climbDetection: ClimbDetectionConfig;
 };
 
@@ -204,6 +205,27 @@ export type CourseImportResult = {
   fileSHA256: string;
   diagnostics?: CourseImportDiagnostic[];
   created: CourseSummary[];
+};
+
+export type CourseRoutingLeg = CourseLeg & {
+  warning?: string;
+};
+
+export type CourseRoutingResponse = {
+  routingEnabled: boolean;
+  legs: CourseRoutingLeg[];
+};
+
+export type CoursePlanInput = {
+  revision?: number;
+  name: string;
+  sportType: CourseSport;
+  notes: string;
+  legs: Array<{
+    mode: CourseLegMode;
+    encodedPolyline: string;
+    elevationsM?: Array<number | null>;
+  }>;
 };
 
 export type TrainingSheetConfig = {

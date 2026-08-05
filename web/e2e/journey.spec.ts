@@ -566,6 +566,25 @@ test.describe("local product journey", () => {
     await page.getByRole("link", { name: new RegExp(routeName) }).click();
     await expect(page.getByRole("heading", { name: routeName, exact: true })).toBeVisible();
     await expect(page.getByText("Imported through the reviewed GPX flow.", { exact: true })).toBeVisible();
+
+    await navigateTo(page, "Courses", mobile);
+    await page.getByRole("link", { name: "New course", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+    await expect(page.getByText("Routing is not enabled.", { exact: true })).toBeVisible();
+    const plannerMap = page.locator(".course-planner-map .leaflet-container");
+    await plannerMap.click({ position: { x: 90, y: 110 } });
+    await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
+    if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
+    await expect(page.locator(".course-waypoint-list li")).toHaveCount(mobile ? 3 : 2);
+    const plannedName = `E2E ${testInfo.project.name} Planned Course`;
+    await page.locator(".course-planner-sidebar").getByLabel("Name").fill(plannedName);
+    page.once("dialog", (dialog) => void dialog.accept());
+    await Promise.all([
+      page.waitForResponse((response) => response.url().endsWith("/api/courses") && response.request().method() === "POST" && response.status() === 201),
+      page.getByRole("button", { name: "Save course", exact: true }).click()
+    ]);
+    await expect(page.getByRole("heading", { name: plannedName, exact: true })).toBeVisible();
+    await expect(page.getByText(/direct leg/).first()).toBeVisible();
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 

@@ -20,6 +20,8 @@ import type {
   CourseImportResult,
   CourseImportSelection,
   CourseListPage,
+  CoursePlanInput,
+  CourseRoutingResponse,
   CourseSport,
   CourseSummary,
   DailyHealthMetric,
@@ -283,6 +285,11 @@ export const api = {
     return request<CourseListPage>(`/api/courses${params.size ? `?${params}` : ""}`);
   },
   course: (id: string) => request<Course>(`/api/courses/${encodeURIComponent(id)}`),
+  createCourse: (body: CoursePlanInput) => request<Course>("/api/courses", { method: "POST", body: JSON.stringify(body) }),
+  updateCoursePlan: (id: string, body: CoursePlanInput & { revision: number }) =>
+    request<Course>(`/api/courses/${encodeURIComponent(id)}/plan`, { method: "PUT", body: JSON.stringify(body) }),
+  routeCourseLegs: (body: { sportType: CourseSport; waypoints: Array<{ index: number; latitude: number; longitude: number }>; directLegIndexes: number[] }) =>
+    request<CourseRoutingResponse>("/api/course-routing/legs", { method: "POST", body: JSON.stringify(body) }),
   updateCourseDetails: (id: string, body: { revision: number; name: string; sportType: CourseSport; notes: string }) =>
     request<Course>(`/api/courses/${encodeURIComponent(id)}/details`, { method: "PATCH", body: JSON.stringify(body) }),
   setCourseFavorite: (id: string, favorite: boolean) =>
