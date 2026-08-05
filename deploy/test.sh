@@ -70,7 +70,9 @@ docker compose \
 
 jq -e \
   --arg digest "${DIGEST}" \
+  --arg database_image "postgis/postgis:16-3.5-alpine" \
   '.services.app.image == $digest
+   and .services.db.image == $database_image
    and (.services.app.ports == null)
    and (.services.db.ports == null)
    and (.services.app.mem_limit | tonumber) == 536870912
