@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"slices"
 	"time"
@@ -48,6 +49,10 @@ type valhallaRouteResponse struct {
 			Shape string `json:"shape"`
 		} `json:"legs"`
 	} `json:"trip"`
+}
+
+type valhallaHeightResponse struct {
+	Height []*float64 `json:"height"`
 }
 
 func NewCourseRoutingService(cfg Config, logger *slog.Logger) *CourseRoutingService {
@@ -178,6 +183,16 @@ func (service *CourseRoutingService) routeLeg(ctx context.Context, index int, sp
 	if err != nil {
 		return CourseRoutingLeg{}, err
 	}
+	warning := ""
+	knownElevations, elevationErr := service.addElevations(ctx, points)
+	if elevationErr != nil {
+		warning = "Elevation data is unavailable for this leg."
+		if service.logger != nil {
+			service.logger.Warn("course routing elevation unavailable", "leg_index", index, "sport", sport, "error", elevationErr)
+		}
+	} else if knownElevations < len(points) {
+		warning = "Elevation data is incomplete for this leg."
+	}
 	leg := CourseLeg{
 		Index:           index,
 		Mode:            CourseLegRouted,
@@ -186,7 +201,53 @@ func (service *CourseRoutingService) routeLeg(ctx context.Context, index int, sp
 		EncodedPolyline: encodeCoursePolyline(points, 6),
 		ElevationsM:     courseElevations(points),
 	}
-	return CourseRoutingLeg{CourseLeg: leg}, nil
+	return CourseRoutingLeg{CourseLeg: leg, Warning: warning}, nil
+}
+
+func (service *CourseRoutingService) addElevations(ctx context.Context, points []CoursePoint) (int, error) {
+	body, err := json.Marshal(map[string]any{
+		"encoded_polyline": encodeCoursePolyline(points, 6),
+		"shape_format":     "polyline6",
+		"height_precision": 1,
+	})
+	if err != nil {
+		return 0, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, service.baseURL+"/height", bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", "Runnarr course planner")
+	response, err := service.client.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return 0, fmt.Errorf("elevation service returned status %d", response.StatusCode)
+	}
+	var payload valhallaHeightResponse
+	decoder := json.NewDecoder(io.LimitReader(response.Body, maxCourseRoutingResponse+1))
+	if err := decoder.Decode(&payload); err != nil {
+		return 0, fmt.Errorf("decode elevation response: %w", err)
+	}
+	if len(payload.Height) != len(points) {
+		return 0, errors.New("elevation response did not align with routed geometry")
+	}
+	known := 0
+	for index, elevation := range payload.Height {
+		if elevation == nil || math.IsNaN(*elevation) || math.IsInf(*elevation, 0) {
+			continue
+		}
+		points[index].ElevationM = cloneFloat(elevation)
+		known++
+	}
+	if known == 0 {
+		return 0, errors.New("elevation response contained no usable heights")
+	}
+	return known, nil
 }
 
 func directCourseRoutingLeg(index int, start, end CourseWaypoint, warning string) CourseRoutingLeg {

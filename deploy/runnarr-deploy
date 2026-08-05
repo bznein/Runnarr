@@ -366,7 +366,20 @@ request = urllib.request.Request(
     headers={"Content-Type": "application/json"},
 )
 response = json.load(urllib.request.urlopen(request, timeout=20))
-assert response["trip"]["legs"]
+legs = response["trip"]["legs"]
+assert legs and legs[0]["shape"]
+height_request = urllib.request.Request(
+    sys.argv[1] + "/height",
+    data=json.dumps({
+        "encoded_polyline": legs[0]["shape"],
+        "shape_format": "polyline6",
+        "height_precision": 1,
+    }).encode(),
+    headers={"Content-Type": "application/json"},
+)
+height_response = json.load(urllib.request.urlopen(height_request, timeout=20))
+heights = height_response["height"]
+assert heights and all(value is not None for value in heights)
 ' \
     "${PREVIEW_ROUTING_URL}" \
     "${PREVIEW_ROUTING_SMOKE_FROM_LAT}" \

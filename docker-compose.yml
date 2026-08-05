@@ -89,7 +89,7 @@ services:
     image: ghcr.io/valhalla/valhalla-scripted:3.6.3
     environment:
       tile_urls: ${VALHALLA_TILE_URL:-https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf}
-      build_elevation: ${VALHALLA_BUILD_ELEVATION:-False}
+      build_elevation: ${VALHALLA_BUILD_ELEVATION:-True}
       build_admins: ${VALHALLA_BUILD_ADMINS:-True}
       build_time_zones: ${VALHALLA_BUILD_TIME_ZONES:-True}
       server_threads: ${VALHALLA_SERVER_THREADS:-2}

@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     environment:
       tile_urls: ${VALHALLA_TILE_URL:?a regional Valhalla PBF URL is required}
-      build_elevation: ${VALHALLA_BUILD_ELEVATION:-False}
+      build_elevation: ${VALHALLA_BUILD_ELEVATION:-True}
       build_admins: ${VALHALLA_BUILD_ADMINS:-True}
       build_time_zones: ${VALHALLA_BUILD_TIME_ZONES:-True}
       server_threads: ${VALHALLA_SERVER_THREADS:-2}

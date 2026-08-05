@@ -37,6 +37,9 @@
 
 ### Fixes
 
+- New Valhalla-routed course legs now fetch regional elevation profiles and
+  calculate inspectable ascent and descent while preserving routes when the
+  elevation service is unavailable.
 - GPX and activity course imports now keep source geometry intact while
   limiting curvature-selected editable control points to a manageable set.
 - Automatic training-sheet matches now prompt for RPE and feedback, and later reflection saves update only those sheet cells without re-running completed summary and interval writeback; writeback statuses are also shown with readable labels.

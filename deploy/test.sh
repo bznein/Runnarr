@@ -114,6 +114,11 @@ grep -Fq 'docker network connect --alias valhalla "${network}" "${PREVIEW_ROUTIN
 grep -Fq 'disconnect_preview_routing "previews/${pr}"' \
   "${ROOT}/deploy/runnarr-deploy" ||
   fail "preview teardown does not detach shared Valhalla"
+grep -Fq 'sys.argv[1] + "/height"' "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview routing acceptance does not query elevation"
+grep -Fq 'assert heights and all(value is not None for value in heights)' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview routing acceptance allows missing elevation values"
 grep -Fq -- '--env-file "${staging_directory}/image.env"' \
   "${ROOT}/deploy/runnarr-deploy" ||
   fail "the rollback compatibility check does not load staging image settings"
@@ -130,7 +135,7 @@ RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LAT=53.3382
 RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LON=-6.2591
 RUNNARR_VALHALLA_IMAGE=ghcr.io/valhalla/valhalla-scripted:3.6.3@sha256:e688a89f7a86880aabcc8b2eec9bcefdcb639d603ee90a928a6d3c7d92d58486
 VALHALLA_TILE_URL='https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf'
-VALHALLA_BUILD_ELEVATION=False
+VALHALLA_BUILD_ELEVATION=True
 VALHALLA_BUILD_ADMINS=True
 VALHALLA_BUILD_TIME_ZONES=True
 VALHALLA_SERVER_THREADS=2
@@ -146,6 +151,7 @@ docker compose \
 jq -e \
   '.services.valhalla.image == "ghcr.io/valhalla/valhalla-scripted:3.6.3@sha256:e688a89f7a86880aabcc8b2eec9bcefdcb639d603ee90a928a6d3c7d92d58486"
    and .services.valhalla.container_name == "runnarr-nonprod-valhalla"
+   and .services.valhalla.environment.build_elevation == "True"
    and (.services.valhalla.ports == null)
    and (.services.valhalla.mem_limit | tonumber) == 6442450944
    and .services.valhalla.labels["com.runnarr.environment"] == "preview-routing"
