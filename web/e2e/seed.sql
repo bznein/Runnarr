@@ -1,5 +1,17 @@
 \set ON_ERROR_STOP on
 
+-- Candidate images can reach a host before its deployment helper is refreshed.
+-- Keep the seed compatible with older helpers while allowing E2E callers to
+-- inject a deterministic fixture clock.
+\if :{?e2e_date}
+\else
+select to_char(current_timestamp at time zone 'Europe/Dublin', 'YYYY-MM-DD') as e2e_date \gset
+\endif
+\if :{?e2e_now}
+\else
+select :'e2e_date' || 'T12:00:00Z' as e2e_now \gset
+\endif
+
 update user_settings
 set training_sheet_sheet_url = 'https://docs.google.com/spreadsheets/d/e2e-workbook/edit',
     training_sheet_enabled = false,

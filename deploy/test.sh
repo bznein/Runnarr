@@ -61,6 +61,14 @@ done < <(
     tr -d ":'" |
     sort -u
 )
+for seed_file in \
+  "${ROOT}/web/e2e/seed.sql" \
+  "${ROOT}/web/e2e/testbed-seed.sql"; do
+  grep -Fq '\if :{?e2e_date}' "${seed_file}" ||
+    fail "${seed_file} is not compatible with pre-fixture-clock deployment helpers"
+  grep -Fq '\if :{?e2e_now}' "${seed_file}" ||
+    fail "${seed_file} does not default its fixture timestamp"
+done
 
 bash -n \
   "${ROOT}/deploy/lib.sh" \
