@@ -573,16 +573,30 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
     await expect(page.getByText("Routing is not enabled.", { exact: true })).toBeVisible();
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
+    const waypointRows = page.locator(".course-waypoint-list li");
+    await expect(waypointRows).toHaveCount(1);
+    await expect(waypointRows.first().locator("small")).toHaveText("53.34980, -6.26030");
+    await expect(page.getByRole("button", { name: "Start saved", exact: true })).toBeDisabled();
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
+      page.getByRole("button", { name: "Forget saved start", exact: true }).click()
+    ]);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
+      page.getByRole("button", { name: "Save current start", exact: true }).click()
+    ]);
+    await page.reload();
+    await expect(waypointRows).toHaveCount(1);
+    await expect(waypointRows.first().locator("small")).toHaveText("53.34980, -6.26030");
     await plannerMap.click({ position: { x: 90, y: 110 } });
     await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
     if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
-    const waypointRows = page.locator(".course-waypoint-list li");
-    await expect(waypointRows).toHaveCount(mobile ? 3 : 2);
+    await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
     const startCoordinates = await waypointRows.first().locator("small").innerText();
     const backToStart = page.getByRole("button", { name: "Back to start", exact: true });
     await expect(backToStart).toBeEnabled();
     await backToStart.click();
-    await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
+    await expect(waypointRows).toHaveCount(mobile ? 5 : 4);
     await expect(waypointRows.last().locator("small")).toHaveText(startCoordinates);
     await expect(backToStart).toBeDisabled();
     await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
