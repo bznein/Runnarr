@@ -216,12 +216,21 @@ wait_for_external_status_only_health() {
 seed_environment() {
   local environment="$1"
   local username="$2"
+  local fixture_date fixture_timestamp
+  fixture_date="$(TZ=Europe/Dublin date +%F)"
+  fixture_timestamp="${fixture_date}T12:00:00Z"
   require_file "${E2E_SEED}"
   require_file "${TESTBED_SEED}"
   compose "${environment}" exec --no-TTY db \
-    psql -U runnarr -d runnarr -v "e2e_username=${username}" < "${E2E_SEED}"
+    psql -U runnarr -d runnarr \
+      -v "e2e_username=${username}" \
+      -v "e2e_date=${fixture_date}" \
+      -v "e2e_now=${fixture_timestamp}" < "${E2E_SEED}"
   compose "${environment}" exec --no-TTY db \
-    psql -U runnarr -d runnarr -v "e2e_username=${username}" < "${TESTBED_SEED}"
+    psql -U runnarr -d runnarr \
+      -v "e2e_username=${username}" \
+      -v "e2e_date=${fixture_date}" \
+      -v "e2e_now=${fixture_timestamp}" < "${TESTBED_SEED}"
 }
 
 write_runtime() {
