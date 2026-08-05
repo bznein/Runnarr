@@ -65,6 +65,7 @@ install -m 0644 \
   "${ROOT}/docker-compose.deploy.yml" \
   "${ROOT}/docker-compose.nonprod.yml" \
   "${ROOT}/docker-compose.public.yml" \
+  "${ROOT}/deploy/docker-compose.production-routing.yml" \
   "${ASSET_ROOT}/"
 install -m 0644 "${ROOT}/web/e2e/seed.sql" "${ASSET_ROOT}/seed.sql"
 install -m 0644 "${ROOT}/web/e2e/testbed-seed.sql" "${ASSET_ROOT}/testbed-seed.sql"

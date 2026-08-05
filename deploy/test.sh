@@ -176,6 +176,7 @@ RUNNARR_OIDC_GOOGLE_CLIENT_SECRET=secret
 RUNNARR_OIDC_ALLOWED_EMAILS=person@example.com=admin
 RUNNARR_PROXY_NETWORK=proxy
 RUNNARR_NETWORK_SUBNET=10.89.0.0/24
+VALHALLA_TILE_URL=https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf
 EOF
 cat > "${TEMPORARY}/production-image.env" <<EOF
 RUNNARR_IMAGE=${DIGEST}
@@ -184,11 +185,13 @@ EOF
 
 docker compose \
   --project-name runnarr \
+  --profile routing \
   --env-file "${TEMPORARY}/production.env" \
   --env-file "${TEMPORARY}/production-image.env" \
   --file "${ROOT}/docker-compose.yml" \
   --file "${ROOT}/docker-compose.deploy.yml" \
   --file "${ROOT}/docker-compose.public.yml" \
+  --file "${ROOT}/deploy/docker-compose.production-routing.yml" \
   config --format json > "${TEMPORARY}/production.json"
 
 jq -e \
@@ -198,6 +201,11 @@ jq -e \
    and (.services.db.ports == null)
    and (.services.app.networks | has("proxy"))
    and ((.services.db.networks | has("proxy")) | not)
+   and .services.app.environment.RUNNARR_ROUTING_ENABLED == "true"
+   and .services.app.environment.RUNNARR_ROUTING_URL == "http://valhalla:8002"
+   and .services.valhalla.image == "ghcr.io/valhalla/valhalla-scripted:3.6.3@sha256:e688a89f7a86880aabcc8b2eec9bcefdcb639d603ee90a928a6d3c7d92d58486"
+   and .services.valhalla.labels["com.runnarr.environment"] == "production"
+   and .volumes["valhalla-data"].name == "runnarr-production-valhalla-data"
    and .networks.runnarr.ipam.config[0].subnet == "10.89.0.0/24"' \
   "${TEMPORARY}/production.json" >/dev/null
 
