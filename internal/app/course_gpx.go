@@ -212,6 +212,7 @@ func buildCourseGPXCandidate(keyPrefix, kind, name, rawSport string, source []co
 	candidate.ElevationLossM = cloneFloat(course.ElevationLossM)
 	candidate.ElevationCoverage = course.ElevationCoverage
 	candidate.PointCount = course.PointCount
+	candidate.WaypointCount = len(course.Waypoints)
 	candidate.Profile = course.Profile
 	candidate.Diagnostics = diagnostics
 	candidate.course = course

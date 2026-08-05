@@ -32,6 +32,8 @@
 
 ### Fixes
 
+- GPX and activity course imports now keep source geometry intact while
+  limiting curvature-selected editable control points to a manageable set.
 - Automatic training-sheet matches now prompt for RPE and feedback, and later reflection saves update only those sheet cells without re-running completed summary and interval writeback; writeback statuses are also shown with readable labels.
 - Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
 - Planned and completed activity views now link to their corresponding Runnarr workout.

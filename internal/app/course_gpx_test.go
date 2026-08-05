@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"encoding/xml"
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -57,6 +59,36 @@ func TestPreviewCourseGPXKeepsOtherCandidatesWhenOneCoordinateIsBad(t *testing.T
 	}
 	if !preview.Candidates[1].Valid {
 		t.Fatalf("valid candidate = %#v", preview.Candidates[1])
+	}
+}
+
+func TestPreviewCourseGPXSeparatesSourceSamplesFromEditableWaypoints(t *testing.T) {
+	const sampleCount = 8104
+	var data strings.Builder
+	data.WriteString(`<gpx><trk><name>Dense route</name><type>Run</type><trkseg>`)
+	for index := 0; index < sampleCount; index++ {
+		latitude := 53.0 + float64(index)*0.000001
+		longitude := -6.0 + math.Sin(float64(index)/80)*0.002
+		fmt.Fprintf(&data, `<trkpt lat="%.7f" lon="%.7f"><ele>%.1f</ele></trkpt>`, latitude, longitude, 50+10*math.Sin(float64(index)/120))
+	}
+	data.WriteString(`</trkseg></trk></gpx>`)
+
+	preview, err := previewCourseGPX("dense.gpx", []byte(data.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Candidates) != 1 {
+		t.Fatalf("candidates = %d", len(preview.Candidates))
+	}
+	candidate := preview.Candidates[0]
+	if candidate.PointCount != sampleCount {
+		t.Fatalf("source samples = %d, want %d", candidate.PointCount, sampleCount)
+	}
+	if candidate.WaypointCount < 2 || candidate.WaypointCount > maxPreservedCourseAnchors {
+		t.Fatalf("editable waypoints = %d", candidate.WaypointCount)
+	}
+	if got := len(flattenCoursePoints(candidate.course.Legs)); got != sampleCount {
+		t.Fatalf("preserved points = %d, want %d", got, sampleCount)
 	}
 }
 

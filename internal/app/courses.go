@@ -24,6 +24,7 @@ const (
 	maxCourseImportSegments   = 100
 	maxCourseMapPreview       = 5000
 	maxCourseProfilePoints    = 1200
+	maxPreservedCourseAnchors = 25
 	courseElevationRadiusM    = 150.0
 	courseElevationMaxGapM    = 500.0
 	courseElevationMinCover   = 0.90
@@ -189,6 +190,7 @@ type CourseImportCandidate struct {
 	ElevationLossM    *float64                 `json:"elevationLossM,omitempty"`
 	ElevationCoverage float64                  `json:"elevationCoverage,omitempty"`
 	PointCount        int                      `json:"pointCount,omitempty"`
+	WaypointCount     int                      `json:"waypointCount,omitempty"`
 	Profile           []CourseProfilePoint     `json:"profile,omitempty"`
 	DuplicateCourse   *CourseSummary           `json:"duplicateCourse,omitempty"`
 	Diagnostics       []CourseImportDiagnostic `json:"diagnostics,omitempty"`
@@ -582,7 +584,7 @@ func preservedCourseFromPoints(name string, sport CourseSport, notes string, poi
 	if err != nil {
 		return Course{}, err
 	}
-	indices := adaptiveCourseAnchorIndices(points, 100)
+	indices := adaptiveCourseAnchorIndices(points, maxPreservedCourseAnchors)
 	legs := make([]CourseLegInput, 0, len(indices)-1)
 	for index := 1; index < len(indices); index++ {
 		segment := append([]CoursePoint(nil), points[indices[index-1]:indices[index]+1]...)
