@@ -40,6 +40,49 @@ Changing `VALHALLA_TILE_URL` may trigger a graph rebuild. Back up or remove the
 dedicated volume only when you intentionally want to replace its graph; course
 records themselves remain in PostgreSQL.
 
+## Automated pull-request previews
+
+Do not start the `routing` profile inside every automated preview. That would
+duplicate the regional graph, disk use, and Valhalla process for every open
+pull request. The deployment host instead runs one immutable, resource-limited
+`runnarr-nonprod-valhalla` container and attaches that trusted container to each
+preview's isolated network with the alias `valhalla`.
+
+From the reviewed revision that contains the course planner, enable the shared
+service with the smallest regional extract needed for preview testing:
+
+```sh
+sudo deploy/configure-preview-routing.sh \
+  https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf
+```
+
+The helper holds the deployment lock, backs up the installed non-production
+assets, starts the shared service, and activates routing only for subsequent
+preview deployments. It does not restart existing preview or production
+containers. Watch the first graph build and wait for a healthy result:
+
+The default smoke leg is in central Dublin. For another regional extract, pass
+four covered coordinates after the PBF URL (`FROM_LAT FROM_LON TO_LAT TO_LON`)
+so deployment acceptance tests that graph rather than Ireland.
+
+```sh
+docker compose \
+  --project-name runnarr-preview-routing \
+  --env-file /etc/runnarr/preview-routing.env \
+  --file /opt/runnarr-deploy/docker-compose.routing.yml \
+  logs --follow valhalla
+
+docker inspect runnarr-nonprod-valhalla \
+  --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}'
+```
+
+Rerun each candidate deployment after Valhalla is healthy. The deployer writes
+`RUNNARR_ROUTING_ENABLED=true` and `RUNNARR_ROUTING_URL=http://valhalla:8002`,
+attaches the shared service, and sends a real pedestrian route through the
+preview app container before accepting the deployment. Preview teardown
+detaches Valhalla before removing the isolated network. Production is not
+connected to this service.
+
 ## Existing Valhalla service
 
 To use an existing deployment, set `RUNNARR_ROUTING_URL` to its HTTP(S) origin,

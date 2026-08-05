@@ -20,8 +20,9 @@
   explicit one-shot current-location overlay.
 - Added a waypoint course planner with sport-aware self-hosted Valhalla
   routing, draggable ordered waypoints, per-leg direct overrides and isolated
-  fallbacks, optimistic revision protection, and an optional regional routing
-  Compose profile.
+  fallbacks, optimistic revision protection, an optional regional routing
+  Compose profile, and a single host-managed Valhalla graph that can be safely
+  attached and route-smoke-tested across isolated pull-request previews.
 - Matched completed activities now link directly to their source training sheet in both full and simple experiences.
 - Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.

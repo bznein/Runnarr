@@ -1,0 +1,31 @@
+services:
+  valhalla:
+    image: ${RUNNARR_VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.6.3@sha256:e688a89f7a86880aabcc8b2eec9bcefdcb639d603ee90a928a6d3c7d92d58486}
+    container_name: ${RUNNARR_PREVIEW_ROUTING_CONTAINER:-runnarr-nonprod-valhalla}
+    restart: unless-stopped
+    environment:
+      tile_urls: ${VALHALLA_TILE_URL:?a regional Valhalla PBF URL is required}
+      build_elevation: ${VALHALLA_BUILD_ELEVATION:-False}
+      build_admins: ${VALHALLA_BUILD_ADMINS:-True}
+      build_time_zones: ${VALHALLA_BUILD_TIME_ZONES:-True}
+      server_threads: ${VALHALLA_SERVER_THREADS:-2}
+    volumes:
+      - valhalla-data:/custom_files
+    cpus: ${RUNNARR_VALHALLA_CPU_LIMIT:-2.0}
+    mem_limit: ${RUNNARR_VALHALLA_MEMORY_LIMIT:-6g}
+    pids_limit: ${RUNNARR_VALHALLA_PIDS_LIMIT:-512}
+    labels:
+      com.runnarr.managed: "true"
+      com.runnarr.environment: preview-routing
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/status >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+volumes:
+  valhalla-data:
+    name: runnarr-nonprod-valhalla-data

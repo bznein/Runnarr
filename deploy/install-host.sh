@@ -75,6 +75,8 @@ install -m 0755 "${ROOT}/deploy/configure-tunnel-ssh.sh" "${ASSET_ROOT}/deploy/c
 install -m 0755 "${ROOT}/deploy/install-deploy-keys.sh" "${ASSET_ROOT}/deploy/install-deploy-keys.sh"
 install -m 0644 "${ROOT}/deploy/lib.sh" "${ASSET_ROOT}/deploy/lib.sh"
 install -m 0644 "${ROOT}/deploy/docker-compose.ingress.yml" "${ASSET_ROOT}/docker-compose.ingress.yml"
+install -m 0644 "${ROOT}/deploy/docker-compose.routing.yml" "${ASSET_ROOT}/docker-compose.routing.yml"
+install -m 0755 "${ROOT}/deploy/configure-preview-routing.sh" "${ASSET_ROOT}/deploy/configure-preview-routing.sh"
 
 sed \
   -e "s/__RUNNARR_BASE_DOMAIN__/${BASE_DOMAIN}/g" \
@@ -130,6 +132,8 @@ Still required before starting the ingress or enabling Actions:
   6. Configure the deploy account's read-only GHCR login.
   7. Configure Cloudflare Access and exact DNS records, including
      runnarr-deploy.${BASE_DOMAIN} for passwordless deployment SSH.
+  8. Optionally run deploy/configure-preview-routing.sh to enable one shared
+     Valhalla graph for isolated pull-request previews.
 
 Start ingress only after those steps:
   docker compose --env-file ${CONFIG_ROOT}/ingress/.env \\
