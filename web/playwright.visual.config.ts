@@ -51,6 +51,7 @@ export default defineConfig({
   workers: 1,
   reporter: [
     ["list"],
+    ["json", { outputFile: path.join(artifactRoot, "playwright-report.json") }],
     ["html", { outputFolder: path.join(artifactRoot, "playwright-report"), open: "never" }]
   ],
   use: {

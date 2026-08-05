@@ -96,12 +96,31 @@ visual:desktop:activity-inspection
 visual:mobile:mobile-navigation
 ```
 
-Adding a profile label records the selected journey against both the PR's
-`main` merge base and its head. New commits rerun the same profiles. The two
-revisions use separate Docker Compose projects, the same synthetic seed and
-fixture clock, and no provider credentials. A bot comment links separately
-named before/after artifacts containing video, Playwright failure diagnostics,
-and Compose logs. Artifacts expire after seven days.
+A collaborator with write access can add a profile label to record the
+selected journey against both the PR's `main` merge base and its head. An
+untrusted push, reopen, or ready-for-review event removes all visual labels;
+the collaborator must inspect the new head and reapply the affected profiles.
+This prevents outside contributors from authorizing paid recording or media
+work and makes the approval specific to one commit.
+
+The two revisions use separate Docker Compose projects, the same synthetic
+seed and fixture clock, and no provider credentials. Recordings are at most 60
+seconds and 25 MiB each. A default-branch-controlled publisher accepts at most
+two profiles (four videos), converts the WebM recordings to H.264 MP4 with
+small poster images, and embeds direct seven-day links in one bot comment.
+Separately named before/after GitHub artifacts retain the original video,
+Playwright failure diagnostics, and Compose logs as a ZIP fallback. R2 or
+transcoding failure leaves those ZIPs available, adds a warning to the comment,
+and fails the visual publishing workflow visibly.
+
+The recorder checks the triggering actor before checking out or executing PR
+code. The R2 credentials are available only to the later trusted publisher,
+which independently rechecks the original actor, current PR head, latest run,
+default-branch profile catalog, artifact names and sizes, and sanitized file
+types. The guard and publisher are `pull_request_target`/`workflow_run`
+workflows, so a pull request that first introduces or changes them cannot use
+the new trusted path until those definitions have merged to the default
+branch.
 
 Generate the same comparison locally from a clean, committed branch with:
 

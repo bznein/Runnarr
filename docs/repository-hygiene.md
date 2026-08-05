@@ -35,7 +35,12 @@ roadmap and project status describe ordering and progress.
 Pull requests may additionally use operational `visual:<viewport>:<scenario>`
 labels from `.github/visual-review-profiles.json`. These labels select bounded
 before/after Playwright recordings and are not issue classification labels.
-Use no more than two on one pull request.
+Use no more than two on one pull request. Only collaborators with repository
+write access may approve these runs. If an actor without write access pushes a
+new head, reopens the PR, or marks it ready for review, automation removes all
+visual labels. A write-level collaborator must inspect that exact head and
+reapply the affected profiles; approval never carries across an untrusted
+revision.
 
 ## Milestones and project order
 

@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  resolve:
-    name: Resolve visual profiles
+  authorize:
+    name: Authorize visual review
     if: >-
       ${{
         !github.event.pull_request.draft &&
@@ -31,7 +31,40 @@ jobs:
           startsWith(github.event.label.name, 'visual:')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      trusted: ${{ steps.actor.outputs.trusted }}
+    steps:
+      - name: Require a write-level actor
+        id: actor
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            core.setOutput("trusted", "false");
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: context.actor
+              });
+              const trusted = new Set(["admin", "maintain", "write"]);
+              if (trusted.has(data.permission) || trusted.has(data.role_name)) {
+                core.setOutput("trusted", "true");
+                return;
+              }
+              core.info(`Actor ${context.actor} has ${data.permission}/${data.role_name}; write access is required.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info(`Actor ${context.actor} is not a repository collaborator.`);
+            }
+
+  resolve:
+    name: Resolve visual profiles
+    needs:
+      - authorize
+    if: needs.authorize.outputs.trusted == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       enabled: ${{ steps.profiles.outputs.enabled }}
@@ -42,7 +75,7 @@ jobs:
       fixture_timestamp: ${{ steps.fixture.outputs.fixture_timestamp }}
     steps:
       - name: Checkout PR driver
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -88,7 +121,7 @@ jobs:
     needs:
       - resolve
     if: needs.resolve.outputs.enabled == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -98,21 +131,21 @@ jobs:
           - after
     steps:
       - name: Checkout PR driver
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.resolve.outputs.head_sha }}
           path: driver
           persist-credentials: false
 
       - name: Checkout ${{ matrix.revision }} app
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ matrix.revision == 'before' && needs.resolve.outputs.merge_base || needs.resolve.outputs.head_sha }}
           path: app
           persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
 
@@ -144,7 +177,7 @@ jobs:
 
       - name: Upload ${{ matrix.revision }} recording artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: runnarr-visual-${{ matrix.revision }}-pr-${{ github.event.pull_request.number }}-${{ matrix.revision == 'before' && needs.resolve.outputs.merge_base || needs.resolve.outputs.head_sha }}
           path: ${{ github.workspace }}/visual-artifacts/${{ matrix.revision }}

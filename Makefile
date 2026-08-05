@@ -31,7 +31,7 @@ visual-review:
 	bash scripts/visual-review.sh
 
 visual-review-check:
-	node --test scripts/visual-review-profiles.test.mjs
+	node --test scripts/visual-review-*.test.mjs
 	bash scripts/visual-review-catalog-check.sh
 
 testbed:

@@ -66,7 +66,7 @@ jobs:
 
       - name: Validate visual review profiles
         run: |
-          node --test ../scripts/visual-review-profiles.test.mjs
+          node --test ../scripts/visual-review-*.test.mjs
           bash ../scripts/visual-review-catalog-check.sh
 
       - name: Build
