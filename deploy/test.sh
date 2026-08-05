@@ -34,6 +34,22 @@ bash -n \
   "${ROOT}/deploy/verify-staging-oidc.sh"
 
 DIGEST="ghcr.io/bznein/runnarr@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+# Mirror the documented installed-asset check. The non-production override
+# requires an ingress alias even though `docker compose config` starts nothing.
+RUNNARR_INGRESS_ALIAS=runnarr-config-check \
+  docker compose \
+  --file "${ROOT}/docker-compose.yml" \
+  --file "${ROOT}/docker-compose.nonprod.yml" \
+  config --format json > "${TEMPORARY}/nonprod-config-check.json"
+jq -e \
+  '.services.db.image == "postgis/postgis:16-3.5-alpine"
+   and (.services.app.networks.runnarr.aliases | index("runnarr-config-check")) != null' \
+  "${TEMPORARY}/nonprod-config-check.json" >/dev/null
+grep -Fq 'RUNNARR_INGRESS_ALIAS=runnarr-config-check' \
+  "${ROOT}/docs/postgis-upgrade.md" ||
+  fail "the documented non-production config check omits its synthetic ingress alias"
+
 cat > "${TEMPORARY}/base.env" <<'EOF'
 POSTGRES_USER=runnarr
 POSTGRES_PASSWORD=test-password
