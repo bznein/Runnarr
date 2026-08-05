@@ -35,6 +35,9 @@ func TestPreviewCourseGPXSeparatesTrackSegmentsAndRoutes(t *testing.T) {
 	if preview.Candidates[0].Kind != "track" || preview.Candidates[0].SportType != CourseSportRun || preview.Candidates[0].course.Legs[0].Mode != CourseLegPreserved {
 		t.Fatalf("track candidate = %#v", preview.Candidates[0])
 	}
+	if len(preview.Candidates[0].Profile) != 2 || preview.Candidates[0].Profile[0].ElevationM == nil {
+		t.Fatalf("track preview profile = %#v", preview.Candidates[0].Profile)
+	}
 	if preview.Candidates[2].Kind != "route" || !preview.Candidates[2].RequiresSport || preview.Candidates[2].course.Legs[0].Mode != CourseLegDirect {
 		t.Fatalf("route candidate = %#v", preview.Candidates[2])
 	}

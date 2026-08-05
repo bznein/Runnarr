@@ -4,8 +4,11 @@ Runnarr is a self-hosted, Dockerized activity hub. It imports activities from Ga
 
 The v1 scope covers the existing private activity, health, calendar, gear, tools,
 planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
-Courses, printable pace bands, basic/expert mode, Garmin write-back, and
-encrypted support mode remain post-v1 work. Maintainers can optionally
+The first course-support increment provides private per-account course storage,
+a searchable/favorite library, GPX review/import/export, course inspection, and
+activity route snapshots. Interactive route planning remains post-v1 work,
+alongside printable pace bands, basic/expert mode, Garmin write-back, and
+encrypted support mode. Maintainers can optionally
 provision isolated PR previews, persistent staging, and manually approved
 production promotion using the [deployment pipeline](docs/deployment-pipeline.md);
 the normal self-hosted Compose workflow remains unchanged.
@@ -43,6 +46,16 @@ sent as browser push. Push is opt-in per device; subscriptions are encrypted at
 rest, can be renamed, tested, or removed from Settings, and can reach an
 installed phone PWA while the app is closed. iPhone and iPad push requires the
 site to be added to the Home Screen before permission is requested.
+
+## Courses
+
+The full experience includes a private course library on desktop and under
+More on mobile. A course can be created from a GPS activity or from reviewed
+GPX tracks, segments, and routes. Imports show invalid segments, duplicates,
+discarded GPX data, route geometry, and available elevation before committing.
+Course detail supports local metadata, favorites, duplication, permanent
+deletion, GPX export, and a one-shot current-location overlay. Location is
+requested only after pressing the control and is not stored by Runnarr.
 
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 

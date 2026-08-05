@@ -189,6 +189,7 @@ type CourseImportCandidate struct {
 	ElevationLossM    *float64                 `json:"elevationLossM,omitempty"`
 	ElevationCoverage float64                  `json:"elevationCoverage,omitempty"`
 	PointCount        int                      `json:"pointCount,omitempty"`
+	Profile           []CourseProfilePoint     `json:"profile,omitempty"`
 	DuplicateCourse   *CourseSummary           `json:"duplicateCourse,omitempty"`
 	Diagnostics       []CourseImportDiagnostic `json:"diagnostics,omitempty"`
 	course            Course

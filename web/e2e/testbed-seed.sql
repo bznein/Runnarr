@@ -1,5 +1,11 @@
 \set ON_ERROR_STOP on
 
+update courses
+set name = 'Testbed Riverside Loop',
+    notes = 'Synthetic course. Safe to favorite, duplicate, export, or delete.'
+where id = '00000000-0000-4000-8000-000000000180'::uuid
+  and user_id = (select id from users where username = :'e2e_username');
+
 -- Give the deterministic browser-test fixtures product-neutral names when
 -- they are displayed in the general-purpose testbed.
 update activities
