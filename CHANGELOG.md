@@ -25,6 +25,7 @@
 
 ### Fixes
 
+- Automatic training-sheet matches now prompt for RPE and feedback, and later reflection saves update only those sheet cells without re-running completed summary and interval writeback; writeback statuses are also shown with readable labels.
 - Garmin workout cleanup now treats provider 404 responses as already deleted, clearing stale calendar and template tracking without reporting an ownership conflict.
 - Planned and completed activity views now link to their corresponding Runnarr workout.
 - Removed the misleading managed-workout link to Garmin Connect because the app does not support exact-workout deep links and the website requires a separate browser login.

@@ -137,14 +137,22 @@ func activityMatchThreadKey(activityID, plannedID string) string {
 	return "activity-match:" + activityID + ":" + plannedID
 }
 
-func (s *Store) publishActivityAutoMatchNotification(ctx context.Context, activityID string, planned PlannedActivity) {
-	_, _ = s.PublishNotification(ctx, NotificationInput{
+func activityAutoMatchNotificationInput(activityID string, planned PlannedActivity) NotificationInput {
+	body := "Add your RPE while the run is still fresh."
+	if feedbackCellForPlanned(planned) != "" {
+		body = "Add your RPE and feedback while the run is still fresh."
+	}
+	return NotificationInput{
 		ThreadKey: activityMatchThreadKey(activityID, planned.ID), EventKey: "auto_matched",
-		Category: notificationCategoryActivityMatching, Kind: "activity_auto_matched", Severity: "success",
+		Category: notificationCategoryActivityMatching, Kind: "activity_auto_matched", Severity: "info",
 		Title:      "Activity matched: " + planned.Name,
-		Body:       "A completed Garmin activity was matched to this planned workout.",
-		ActionPath: "/activities/" + activityID,
-	})
+		Body:       body,
+		ActionPath: "/activities/" + activityID + "#check-in",
+	}
+}
+
+func (s *Store) publishActivityAutoMatchNotification(ctx context.Context, activityID string, planned PlannedActivity) {
+	_, _ = s.PublishNotification(ctx, activityAutoMatchNotificationInput(activityID, planned))
 }
 
 func (s *Store) notificationThreadHasWritebackFailure(ctx context.Context, threadKey string) bool {

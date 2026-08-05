@@ -301,13 +301,28 @@ func (s *Server) handleTrainingSheetWriteback(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusConflict, "a training sheet job is already running")
 		return
 	}
-	jobID, err := s.store.CreateTrainingSheetWritebackJob(r.Context(), planned.ID, activityID)
+	writeback, err := s.store.GetTrainingSheetWriteback(r.Context(), planned.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load write-back state")
+		return
+	}
+	scope := trainingSheetWritebackRetryScope(writeback)
+	jobID, err := s.store.CreateTrainingSheetWritebackJob(r.Context(), planned.ID, activityID, scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create write-back job")
 		return
 	}
-	go s.runTrainingSheetWritebackJob(jobID, planned.ID, activityID)
-	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running"})
+	go s.runTrainingSheetWritebackJob(jobID, planned.ID, activityID, scope)
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running", "writebackScope": scope})
+}
+
+func trainingSheetWritebackRetryScope(writeback *TrainingSheetWritebackStatus) trainingSheetWritebackScope {
+	if writeback != nil && trainingSheetStatusNeedsAttention(writeback.FeedbackStatus) &&
+		!trainingSheetStatusNeedsAttention(writeback.SummaryStatus) &&
+		!trainingSheetStatusNeedsAttention(writeback.IntervalsStatus) {
+		return trainingSheetWritebackScopeReflection
+	}
+	return trainingSheetWritebackScopeFull
 }
 
 func (s *Server) handleUnmatchPlannedActivity(w http.ResponseWriter, r *http.Request) {
@@ -512,7 +527,7 @@ func (s *Server) finishTrainingSheetSyncJob(ctx context.Context, jobID string, c
 	return payload, nil
 }
 
-func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID string) {
+func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID string, scope trainingSheetWritebackScope) {
 	lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	userID, err := s.store.SyncJobUserID(lookupCtx, jobID)
 	lookupCancel()
@@ -522,7 +537,7 @@ func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID strin
 	}
 	ctx, cleanup := s.cancellableSyncJobContext(context.Background(), userID, jobID, 30*time.Minute)
 	defer cleanup()
-	payload, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).Write(ctx, plannedID, activityID)
+	payload, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).Write(ctx, plannedID, activityID, scope)
 	if payload != nil {
 		_ = s.store.UpdateSyncJobProgress(ctx, jobID, payload)
 	}
@@ -535,9 +550,17 @@ func (s *Server) runTrainingSheetWritebackJob(jobID, plannedID, activityID strin
 }
 
 func (s *Server) queueTrainingSheetWriteback(ctx context.Context, plannedID, activityID string) string {
-	jobID, err := s.store.CreateTrainingSheetWritebackJob(ctx, plannedID, activityID)
+	return s.queueTrainingSheetWritebackWithScope(ctx, plannedID, activityID, trainingSheetWritebackScopeFull)
+}
+
+func (s *Server) queueTrainingSheetReflectionWriteback(ctx context.Context, plannedID, activityID string) string {
+	return s.queueTrainingSheetWritebackWithScope(ctx, plannedID, activityID, trainingSheetWritebackScopeReflection)
+}
+
+func (s *Server) queueTrainingSheetWritebackWithScope(ctx context.Context, plannedID, activityID string, scope trainingSheetWritebackScope) string {
+	jobID, err := s.store.CreateTrainingSheetWritebackJob(ctx, plannedID, activityID, scope)
 	if err == nil {
-		go s.runTrainingSheetWritebackJob(jobID, plannedID, activityID)
+		go s.runTrainingSheetWritebackJob(jobID, plannedID, activityID, scope)
 		return jobID
 	}
 	if !errors.Is(err, ErrSyncJobAlreadyRunning) {
@@ -561,12 +584,12 @@ func (s *Server) queueTrainingSheetWriteback(ctx context.Context, plannedID, act
 	}
 	s.writebackRetryMu.Unlock()
 	if !alreadyQueued {
-		go s.retryTrainingSheetWriteback(userID, key, plannedID, activityID)
+		go s.retryTrainingSheetWriteback(userID, key, plannedID, activityID, scope)
 	}
 	return ""
 }
 
-func (s *Server) retryTrainingSheetWriteback(userID, retryKey, plannedID, activityID string) {
+func (s *Server) retryTrainingSheetWriteback(userID, retryKey, plannedID, activityID string, scope trainingSheetWritebackScope) {
 	defer func() {
 		s.writebackRetryMu.Lock()
 		delete(s.writebackRetries, retryKey)
@@ -578,9 +601,9 @@ func (s *Server) retryTrainingSheetWriteback(userID, retryKey, plannedID, activi
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		jobID, err := s.store.CreateTrainingSheetWritebackJob(ctx, plannedID, activityID)
+		jobID, err := s.store.CreateTrainingSheetWritebackJob(ctx, plannedID, activityID, scope)
 		if err == nil {
-			go s.runTrainingSheetWritebackJob(jobID, plannedID, activityID)
+			go s.runTrainingSheetWritebackJob(jobID, plannedID, activityID, scope)
 			return
 		}
 		if !errors.Is(err, ErrSyncJobAlreadyRunning) {

@@ -156,6 +156,7 @@ test.describe("local product journey", () => {
       sheetId: "e2e-sheet",
       sheetTitle: "E2E Plan",
       planCell: "A1",
+      feedbackCell: "C19",
       plannedDate,
       name: "2mins E2E Planned Run",
       sportType: "Run",
@@ -273,7 +274,15 @@ test.describe("local product journey", () => {
     await expect(simpleTrainingSheetLink).toHaveAttribute("rel", "noreferrer");
     await expect(matchedPanel.getByText("E2E writeback failed", { exact: false })).toBeVisible();
     await matchedPanel.getByRole("button", { name: "Retry writeback", exact: true }).click();
-    await expect(matchedPanel.getByText("completed", { exact: true }).first()).toBeVisible();
+    await expect(matchedPanel.getByText("Complete", { exact: true }).first()).toBeVisible();
+    await expect(matchedPanel.getByText("Awaiting reflection", { exact: true })).toBeVisible();
+
+    const simpleDetailPath = new URL(page.url()).pathname;
+    await page.goto(`${simpleDetailPath.replace(/^\/simple/, "")}#check-in`);
+    await expect(page.getByRole("dialog", { name: "RPE & feedback" })).toBeVisible();
+    await page.getByRole("button", { name: "Close RPE and feedback" }).click();
+    await page.goto(simpleDetailPath);
+
     page.once("dialog", (dialog) => void dialog.accept());
     await matchedPanel.getByRole("button", { name: "Unmatch", exact: true }).click();
     await expect(inlineMatch.getByRole("heading", { name: "Match planned run" })).toBeVisible();

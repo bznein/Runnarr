@@ -15,6 +15,13 @@ type TrainingSheetWritebackService struct {
 	auth  *GoogleSheetsAuthService
 }
 
+type trainingSheetWritebackScope string
+
+const (
+	trainingSheetWritebackScopeFull       trainingSheetWritebackScope = "full"
+	trainingSheetWritebackScopeReflection trainingSheetWritebackScope = "reflection"
+)
+
 func NewTrainingSheetWritebackService(store *Store, auth *GoogleSheetsAuthService) *TrainingSheetWritebackService {
 	return &TrainingSheetWritebackService{store: store, auth: auth}
 }
@@ -63,13 +70,14 @@ func (s *Store) GetTrainingSheetWritebackOverrides(ctx context.Context, plannedI
 	return overrides, nil
 }
 
-func (s *Store) CreateTrainingSheetWritebackJob(ctx context.Context, plannedID, activityID string) (string, error) {
+func (s *Store) CreateTrainingSheetWritebackJob(ctx context.Context, plannedID, activityID string, scope trainingSheetWritebackScope) (string, error) {
 	if err := s.EnsureTrainingSheetWriteback(ctx, plannedID, activityID); err != nil {
 		return "", err
 	}
 	return s.CreateSyncJobWithPayload(ctx, trainingSheetProvider, "writeback", map[string]any{
 		"plannedActivityId": plannedID,
 		"activityId":        activityID,
+		"writebackScope":    scope,
 	})
 }
 
@@ -140,7 +148,7 @@ func (s *Store) markTrainingSheetWritebackAttempt(ctx context.Context, plannedID
 	return err
 }
 
-func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, activityID string) (map[string]any, error) {
+func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, activityID string, scope trainingSheetWritebackScope) (map[string]any, error) {
 	planned, err := s.store.GetPlannedActivity(ctx, plannedID)
 	if err != nil {
 		return nil, err
@@ -167,7 +175,11 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 		return nil, err
 	}
 
-	result := map[string]any{"plannedActivityId": plannedID, "activityId": activityID, "intervalsStatus": "not_applicable"}
+	result := map[string]any{"plannedActivityId": plannedID, "activityId": activityID, "writebackScope": scope}
+	if scope == trainingSheetWritebackScopeReflection {
+		return s.writeReflection(ctx, planned, previewPlan.Updates, result)
+	}
+	result["intervalsStatus"] = "not_applicable"
 	if ctx.Err() != nil {
 		return s.canceledWritebackResult(ctx, planned, result)
 	}
@@ -264,6 +276,64 @@ func (s *TrainingSheetWritebackService) Write(ctx context.Context, plannedID, ac
 		return result, fmt.Errorf("%s", strings.Join(failures, "; "))
 	}
 	return result, nil
+}
+
+func (s *TrainingSheetWritebackService) writeReflection(ctx context.Context, planned PlannedActivity, previewUpdates []trainingSheetPreviewUpdate, result map[string]any) (map[string]any, error) {
+	updates := reflectionWritebackUpdates(previewUpdates)
+	if ctx.Err() != nil {
+		return s.canceledReflectionWritebackResult(ctx, planned.ID, result)
+	}
+	if len(updates) == 0 {
+		_ = s.store.updateTrainingSheetWritebackSection(ctx, planned.ID, "feedback", "not_provided", "")
+		result["feedbackStatus"] = "not_provided"
+		return result, nil
+	}
+
+	googleStatus, err := s.auth.Status(ctx)
+	if ctx.Err() != nil {
+		return s.canceledReflectionWritebackResult(ctx, planned.ID, result)
+	}
+	if err == nil && !googleStatus.WriteReady {
+		err = fmt.Errorf("Google Sheets write access requires reconnecting the Google account")
+	}
+	if err != nil {
+		_ = s.store.updateTrainingSheetWritebackSection(ctx, planned.ID, "feedback", "failed", err.Error())
+		result["feedbackStatus"] = "failed"
+		return result, err
+	}
+
+	if err := s.store.updateTrainingSheetWritebackSection(ctx, planned.ID, "feedback", "running", ""); err != nil {
+		return nil, err
+	}
+	if err := retryGoogle(ctx, func() error { return s.auth.WriteRanges(ctx, planned.WorkbookID, updates) }); err != nil {
+		if ctx.Err() != nil {
+			return s.canceledReflectionWritebackResult(ctx, planned.ID, result)
+		}
+		_ = s.store.updateTrainingSheetWritebackSection(ctx, planned.ID, "feedback", "failed", err.Error())
+		result["feedbackStatus"] = "failed"
+		return result, err
+	}
+	_ = s.store.updateTrainingSheetWritebackSection(ctx, planned.ID, "feedback", "completed", "")
+	result["feedbackStatus"] = "completed"
+	return result, nil
+}
+
+func (s *TrainingSheetWritebackService) canceledReflectionWritebackResult(ctx context.Context, plannedID string, result map[string]any) (map[string]any, error) {
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_ = s.store.updateTrainingSheetWritebackSection(persistCtx, plannedID, "feedback", "canceled", "Canceled by user")
+	result["feedbackStatus"] = "canceled"
+	return result, context.Canceled
+}
+
+func reflectionWritebackUpdates(previewUpdates []trainingSheetPreviewUpdate) []googleValueRangeUpdate {
+	updates := make([]googleValueRangeUpdate, 0, 2)
+	for _, item := range previewUpdates {
+		if item.Section == "feedback" || item.Section == "summary" && item.Label == "RPE" {
+			updates = append(updates, item.Update)
+		}
+	}
+	return updates
 }
 
 func (s *TrainingSheetWritebackService) canceledWritebackResult(ctx context.Context, planned PlannedActivity, result map[string]any) (map[string]any, error) {

@@ -8,7 +8,7 @@ import type { NotificationCategory, NotificationMode, NotificationSeverity, Push
 const categoryLabels: Record<NotificationCategory, { title: string; description: string }> = {
   workout_changes: { title: "Workout changes", description: "Generated, updated, removed, or parse warnings." },
   garmin_calendar: { title: "Garmin calendar", description: "Scheduling, removal, conflicts, and recovery." },
-  activity_matching: { title: "Activity matching", description: "Completed activities automatically matched to the plan." },
+  activity_matching: { title: "Activity matching", description: "Automatic matches and reminders to add RPE and feedback." },
   sheet_writeback: { title: "Sheet writeback", description: "Writeback failures, partial results, and recovery." }
 };
 
