@@ -41,6 +41,9 @@
 
 - Course-map current-location controls now center the map on the detected
   position instead of only adding an off-screen marker.
+- Course-planner metrics now lead with distance, while elevation coverage is
+  shown only as an incomplete-data notice instead of occupying a primary card
+  when coverage is complete.
 - New Valhalla-routed course legs now fetch regional elevation profiles and
   calculate inspectable ascent and descent while preserving routes when the
   elevation service is unavailable.

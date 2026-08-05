@@ -519,6 +519,7 @@ test.describe("local product journey", () => {
     await seededCourse.click();
     await expect(page.getByRole("heading", { name: "E2E Riverside Loop", exact: true })).toBeVisible();
     await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
+    await expect(page.locator(".course-elevation-coverage-notice")).toHaveCount(0);
     await expect(page.locator(".course-map-frame .leaflet-container")).toBeVisible();
     await expect(page.getByRole("link", { name: "GPX", exact: true })).toHaveAttribute("href", "/api/courses/00000000-0000-4000-8000-000000000180/gpx");
 
@@ -585,7 +586,10 @@ test.describe("local product journey", () => {
     await expect(waypointRows.last().locator("small")).toHaveText(startCoordinates);
     await expect(backToStart).toBeDisabled();
     await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
-    await expect(page.getByText("Elevation coverage", { exact: true })).toBeVisible();
+    const plannerMetrics = page.locator(".course-planner-elevation-metrics .metric");
+    await expect(plannerMetrics).toHaveCount(3);
+    await expect(plannerMetrics.first()).toContainText("Distance");
+    await expect(page.getByText("Elevation covers 0% of this route", { exact: false })).toBeVisible();
     await page.context().grantPermissions(["geolocation"], { origin: new URL(page.url()).origin });
     await page.context().setGeolocation({ latitude: 53.2707, longitude: -9.0568, accuracy: 12 });
     await page.getByRole("button", { name: "Current location", exact: true }).click();

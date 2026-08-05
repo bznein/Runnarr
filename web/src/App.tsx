@@ -5506,8 +5506,8 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
         <Metric label="Distance" value={formatDistance(item.distanceM)} icon={<RouteIcon size={18} />} />
         <Metric label="Ascent" value={formatCourseElevation(item.elevationGainM)} icon={<Mountain size={18} />} />
         <Metric label="Descent" value={formatCourseElevation(item.elevationLossM)} icon={<ArrowDown size={18} />} />
-        <Metric label="Elevation coverage" value={`${Math.round(item.elevationCoverage * 100)}%`} />
       </section>
+      {item.elevationCoverage < 0.9995 && <CourseElevationCoverageNotice coverage={item.elevationCoverage} />}
       <section className="course-detail-grid">
         <section className="panel course-map-panel">
           <div className="panel-heading">Route</div>
@@ -5700,7 +5700,6 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
         <div className="course-planner-summary">
           <span><strong>{waypoints.length}</strong> waypoints</span>
           <span><strong>{plannerLegs.length}</strong> legs</span>
-          <span><strong>{formatDistance(routeDistanceM)}</strong> distance</span>
         </div>
         <div className="course-waypoint-heading"><strong>Waypoints</strong>{waypoints.length > 0 && <span className="course-waypoint-heading-actions">{waypoints.length >= 2 && <button className="course-back-to-start-button" type="button" title={returnsToStart ? "The course already finishes at its start." : "Add a final leg back to the starting point."} disabled={!canWrite || returnsToStart || waypoints.length >= 100} onClick={addReturnToStart}><RotateCcw size={13} />Back to start</button>}<button className="danger-text-button" type="button" disabled={!canWrite} onClick={() => { setWaypoints([]); setDirectLegIndexes([]); markGeometryDirty(); }}>Clear</button></span>}</div>
         {waypoints.length === 0 && <p className="muted">Click the map to add a start and finish.</p>}
@@ -5719,10 +5718,11 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     </section>
     {plannerLegs.length > 0 && <section className="course-planner-elevation-preview">
       <section className="metric-grid course-planner-elevation-metrics">
+        <Metric label="Distance" value={formatDistance(routeDistanceM)} icon={<RouteIcon size={18} />} />
         <Metric label="Ascent" value={formatCourseElevation(elevationGainM)} icon={<Mountain size={18} />} />
         <Metric label="Descent" value={formatCourseElevation(elevationLossM)} icon={<ArrowDown size={18} />} />
-        <Metric label="Elevation coverage" value={elevationCoverage === undefined ? "" : `${Math.round(elevationCoverage * 100)}%`} />
       </section>
+      {elevationCoverage !== undefined && elevationCoverage < 0.9995 && <CourseElevationCoverageNotice coverage={elevationCoverage} />}
       <CourseElevationProfile profile={elevationProfile} onHighlight={setHighlighted} emptyMessage={routed.isFetching ? "Elevation is being calculated with the route." : "The planned route does not contain enough usable elevation data."} />
     </section>}
     {plannerLegs.length > 0 && <section className="panel course-leg-panel"><div className="course-leg-heading"><div><div className="panel-heading">Legs</div><span className="muted">Routing failures are isolated; direct legs stay editable and visible.</span></div>{routed.error && <button className="secondary-button small-button" type="button" onClick={() => void routed.refetch()}><RefreshCw size={14} />Retry routing</button>}</div><div className="course-leg-list">{plannerLegs.map((leg, index) => {
@@ -5971,6 +5971,10 @@ function CourseElevationProfile({ profile, onHighlight, emptyMessage = "The sour
   return <section className="panel course-profile-panel"><div className="panel-heading">Elevation profile</div>
     {data.length < 2 ? <EmptyState title="No elevation profile" message={emptyMessage} /> : <div className="course-profile-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={data} onMouseMove={(state) => onHighlight?.(courseProfilePointFromMouseState(state, data))} onMouseLeave={() => onHighlight?.(undefined)}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="distanceKm" tickFormatter={(value) => `${Number(value).toFixed(1)} km`} minTickGap={24} /><YAxis width={50} tickFormatter={(value) => `${Math.round(Number(value))} m`} domain={["dataMin", "dataMax"]} /><Tooltip contentStyle={chartTooltipContentStyle} labelFormatter={(value) => `${Number(value).toFixed(2)} km`} formatter={(value) => [`${Math.round(Number(value))} m`, "Elevation"]} /><Area type="monotone" dataKey="elevationM" stroke="#b7791f" fill="#f6c432" fillOpacity={0.45} dot={false} /></AreaChart></ResponsiveContainer></div>}
   </section>;
+}
+
+function CourseElevationCoverageNotice({ coverage }: { coverage: number }) {
+  return <div className="course-elevation-coverage-notice"><strong>Incomplete elevation data.</strong> Elevation covers {Math.round(coverage * 100)}% of this route, so ascent and descent may be understated.</div>;
 }
 
 function courseProfilePointFromMouseState(state: unknown, data: CourseProfilePoint[]) {

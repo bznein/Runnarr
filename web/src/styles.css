@@ -3352,6 +3352,10 @@ textarea {
   gap: 16px;
 }
 
+.course-metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .course-map-panel,
 .course-profile-panel {
   min-height: 390px;
@@ -3575,7 +3579,7 @@ textarea {
 
 .course-planner-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -3709,6 +3713,15 @@ textarea {
 
 .course-planner-elevation-metrics {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.course-elevation-coverage-notice {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 32%, var(--color-border));
+  border-radius: 7px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-primary-soft) 55%, var(--color-surface));
+  font-size: 13px;
 }
 
 .course-waypoint-marker {
