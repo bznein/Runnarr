@@ -49,7 +49,6 @@ import type {
   CourseProfilePoint,
   CourseRoutingLeg,
   CourseSport,
-  CourseStartLocation,
   CourseSummary,
   DailyHealthMetric,
   HealthChartPoint,
@@ -256,7 +255,6 @@ function mergeUserPreference(current: UserPreference | undefined, updates: Parti
     activityTableColumns: current?.activityTableColumns ?? defaultActivityTableColumns,
     gearSortBy: current?.gearSortBy || defaultGearSortBy,
     defaultExperience: current?.defaultExperience ?? "full",
-    courseStartLocation: current?.courseStartLocation ?? null,
     ...updates
   };
 }
@@ -364,7 +362,6 @@ export function App() {
       themePreference={themePreference}
       onThemePreferenceChange={onThemePreferenceChange}
       onDefaultExperienceChange={(value) => savePreferences.mutateAsync({ defaultExperience: value })}
-      onCourseStartLocationChange={(value) => savePreferences.mutateAsync({ courseStartLocation: value })}
       themePreferenceError={savePreferences.error}
       pwa={pwa}
     />
@@ -378,7 +375,6 @@ function AuthenticatedApp({
   themePreference,
   onThemePreferenceChange,
   onDefaultExperienceChange,
-  onCourseStartLocationChange,
   themePreferenceError,
   pwa
 }: {
@@ -388,7 +384,6 @@ function AuthenticatedApp({
   themePreference: ThemePreference;
   onThemePreferenceChange: (preference: ThemePreference) => void;
   onDefaultExperienceChange: (value: "full" | "simple") => Promise<UserPreference>;
-  onCourseStartLocationChange: (value: CourseStartLocation | null) => Promise<UserPreference>;
   themePreferenceError?: Error | null;
   pwa: { canInstall: boolean; install: () => Promise<void> };
 }) {
@@ -500,10 +495,10 @@ function AuthenticatedApp({
           <Route path="/workouts/new" element={<WorkoutEditorPage />} />
           <Route path="/workouts/:id" element={<WorkoutEditorPage />} />
           <Route path="/courses" element={<CoursesPage canWrite={session?.canWrite !== false} />} />
-          <Route path="/courses/new" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} courseStartLocation={preferences?.courseStartLocation} courseStartLocationLoading={preferencesLoading} onCourseStartLocationChange={onCourseStartLocationChange} />} />
+          <Route path="/courses/new" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
           <Route path="/courses/import" element={<CourseImportPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/courses/imports/:id" element={<CourseImportResultPage />} />
-          <Route path="/courses/:id/plan" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} courseStartLocation={preferences?.courseStartLocation} courseStartLocationLoading={preferencesLoading} onCourseStartLocationChange={onCourseStartLocationChange} />} />
+          <Route path="/courses/:id/plan" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
           <Route path="/courses/:id" element={<CourseDetailPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/notifications" element={<NotificationsPage canWrite={session?.canWrite !== false} />} />
           <Route path="/health" element={<HealthPage />} />
@@ -5573,21 +5568,7 @@ function CourseDetailsFields({ name, sportType, notes, onName, onSport, onNotes 
   </>;
 }
 
-function CoursePlannerPage({
-  canWrite,
-  mapTileURL,
-  routingEnabled,
-  courseStartLocation,
-  courseStartLocationLoading,
-  onCourseStartLocationChange
-}: {
-  canWrite: boolean;
-  mapTileURL?: string;
-  routingEnabled: boolean;
-  courseStartLocation?: CourseStartLocation | null;
-  courseStartLocationLoading: boolean;
-  onCourseStartLocationChange: (value: CourseStartLocation | null) => Promise<UserPreference>;
-}) {
+function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite: boolean; mapTileURL?: string; routingEnabled: boolean }) {
   const { id } = useParams();
   const editing = Boolean(id);
   const navigate = useNavigate();
@@ -5603,14 +5584,23 @@ function CoursePlannerPage({
   const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
   const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
+  const previousCourse = useQuery({
+    queryKey: ["courses", "planner-start"],
+    queryFn: async () => {
+      const page = await api.courses({ sort: "updated", order: "desc", limit: 1 });
+      return page.courses[0] ? api.course(page.courses[0].id) : null;
+    },
+    enabled: !editing
+  });
 
   useEffect(() => {
-    if (editing || courseStartLocationLoading || initializedCourseStartRef.current) return;
+    if (editing || previousCourse.isLoading || initializedCourseStartRef.current) return;
     initializedCourseStartRef.current = true;
-    if (waypoints.length === 0 && courseStartLocation) {
-      setWaypoints([{ index: 0, latitude: courseStartLocation.latitude, longitude: courseStartLocation.longitude }]);
+    const start = previousCourse.data?.waypoints[0];
+    if (waypoints.length === 0 && start) {
+      setWaypoints([{ index: 0, latitude: start.latitude, longitude: start.longitude }]);
     }
-  }, [courseStartLocation, courseStartLocationLoading, editing, waypoints.length]);
+  }, [editing, previousCourse.data, previousCourse.isLoading, waypoints.length]);
 
   useEffect(() => {
     if (!id || !course.data || initializedCourseRef.current === id) return;
@@ -5647,11 +5637,6 @@ function CoursePlannerPage({
   const elevationProfile = !geometryDirty ? course.data?.profile ?? [] : routed.data?.profile ?? [];
   const returnsToStart = plannerReturnsToStart(waypoints);
   const canSave = canWrite && name.trim().length > 0 && waypoints.length >= 2 && plannerLegs.length === waypoints.length - 1 && !routed.isFetching;
-  const firstWaypoint = waypoints[0];
-  const savedStartMatchesWaypoint = Boolean(firstWaypoint && courseStartLocation
-    && Math.abs(firstWaypoint.latitude - courseStartLocation.latitude) < 0.0000005
-    && Math.abs(firstWaypoint.longitude - courseStartLocation.longitude) < 0.0000005);
-  const saveCourseStartLocation = useMutation({ mutationFn: onCourseStartLocationChange });
   const save = useMutation({
     mutationFn: () => {
       const body = {
@@ -5730,15 +5715,6 @@ function CoursePlannerPage({
       <aside className="panel course-planner-sidebar">
         <div className="panel-heading">Course details</div>
         <CourseDetailsFields name={name} sportType={sportType} notes={notes} onName={setName} onSport={(value) => { setSportType(value); markGeometryDirty(); }} onNotes={setNotes} />
-        {!editing && <div className="course-start-location">
-          <div><strong>Starting location</strong><small>{courseStartLocation ? `${courseStartLocation.latitude.toFixed(5)}, ${courseStartLocation.longitude.toFixed(5)}` : "No saved start"}</small></div>
-          <p className="muted">New courses begin at this private account location. Move or place the first waypoint before saving to update it.</p>
-          <div className="course-start-location-actions">
-            <button className="secondary-button small-button" type="button" disabled={!canWrite || !firstWaypoint || savedStartMatchesWaypoint || saveCourseStartLocation.isPending} onClick={() => firstWaypoint && saveCourseStartLocation.mutate({ latitude: firstWaypoint.latitude, longitude: firstWaypoint.longitude })}>{saveCourseStartLocation.isPending ? "Saving…" : savedStartMatchesWaypoint ? "Start saved" : courseStartLocation ? "Update saved start" : "Save current start"}</button>
-            {courseStartLocation && <button className="danger-text-button" type="button" disabled={!canWrite || saveCourseStartLocation.isPending} onClick={() => saveCourseStartLocation.mutate(null)}>Forget saved start</button>}
-          </div>
-          {saveCourseStartLocation.error && <div className="row-error">{saveCourseStartLocation.error instanceof Error ? saveCourseStartLocation.error.message : "Could not save starting location"}</div>}
-        </div>}
         <div className="course-planner-summary">
           <span><strong>{waypoints.length}</strong> waypoints</span>
           <span><strong>{plannerLegs.length}</strong> legs</span>

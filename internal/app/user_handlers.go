@@ -278,7 +278,12 @@ func (s *Server) handleGetPreferences(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request) {
-	var update userPreferenceUpdate
+	var update struct {
+		ThemePreference      *string   `json:"themePreference"`
+		ActivityTableColumns *[]string `json:"activityTableColumns"`
+		GearSortBy           *string   `json:"gearSortBy"`
+		DefaultExperience    *string   `json:"defaultExperience"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -288,31 +293,6 @@ func (s *Server) handleUpdatePreferences(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "could not load preferences")
 		return
 	}
-	if err := applyUserPreferenceUpdate(&preferences, update); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.store.UpdateUserPreferences(r.Context(), preferences); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not save preferences")
-		return
-	}
-	saved, err := s.store.GetUserPreferences(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not load saved preferences")
-		return
-	}
-	writeJSON(w, http.StatusOK, saved)
-}
-
-type userPreferenceUpdate struct {
-	ThemePreference      *string         `json:"themePreference"`
-	ActivityTableColumns *[]string       `json:"activityTableColumns"`
-	GearSortBy           *string         `json:"gearSortBy"`
-	DefaultExperience    *string         `json:"defaultExperience"`
-	CourseStartLocation  json.RawMessage `json:"courseStartLocation"`
-}
-
-func applyUserPreferenceUpdate(preferences *UserPreference, update userPreferenceUpdate) error {
 	if update.ThemePreference != nil {
 		preferences.ThemePreference = *update.ThemePreference
 	}
@@ -325,20 +305,14 @@ func applyUserPreferenceUpdate(preferences *UserPreference, update userPreferenc
 	if update.DefaultExperience != nil {
 		preferences.DefaultExperience = *update.DefaultExperience
 	}
-	if update.CourseStartLocation == nil {
-		return nil
+	if err := s.store.UpdateUserPreferences(r.Context(), preferences); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save preferences")
+		return
 	}
-	if strings.TrimSpace(string(update.CourseStartLocation)) == "null" {
-		preferences.CourseStartLocation = nil
-		return nil
+	saved, err := s.store.GetUserPreferences(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load saved preferences")
+		return
 	}
-	var input struct {
-		Latitude  *float64 `json:"latitude"`
-		Longitude *float64 `json:"longitude"`
-	}
-	if err := json.Unmarshal(update.CourseStartLocation, &input); err != nil || input.Latitude == nil || input.Longitude == nil || !validCourseCoordinate(*input.Latitude, *input.Longitude) {
-		return errors.New("courseStartLocation must be null or contain valid latitude and longitude values")
-	}
-	preferences.CourseStartLocation = &CourseStartLocation{Latitude: *input.Latitude, Longitude: *input.Longitude}
-	return nil
+	writeJSON(w, http.StatusOK, saved)
 }

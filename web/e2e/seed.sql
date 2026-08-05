@@ -3,9 +3,7 @@
 update user_settings
 set training_sheet_sheet_url = 'https://docs.google.com/spreadsheets/d/e2e-workbook/edit',
     training_sheet_enabled = false,
-    default_experience = 'full',
-    course_start_latitude = 53.3498,
-    course_start_longitude = -6.2603
+    default_experience = 'full'
 where user_id = (select id from users where username = :'e2e_username');
 
 insert into daily_health_metrics(

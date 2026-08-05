@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -303,23 +302,12 @@ func (s *Store) ensureUserSettings(ctx context.Context, id string) error {
 
 func (s *Store) GetUserPreferences(ctx context.Context) (UserPreference, error) {
 	var preference UserPreference
-	var courseStartLatitude, courseStartLongitude sql.NullFloat64
 	err := s.db.QueryRow(ctx, `
-		select theme_preference, activity_table_columns, gear_sort_by, default_experience,
-			course_start_latitude, course_start_longitude
+		select theme_preference, activity_table_columns, gear_sort_by, default_experience
 		from user_settings where user_id = $1
-	`, scopedUserID(ctx)).Scan(
-		&preference.ThemePreference, &preference.ActivityTableColumns, &preference.GearSortBy,
-		&preference.DefaultExperience, &courseStartLatitude, &courseStartLongitude,
-	)
+	`, scopedUserID(ctx)).Scan(&preference.ThemePreference, &preference.ActivityTableColumns, &preference.GearSortBy, &preference.DefaultExperience)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UserPreference{ThemePreference: "system", GearSortBy: "distance_percent", DefaultExperience: "full"}, nil
-	}
-	if err == nil && courseStartLatitude.Valid && courseStartLongitude.Valid {
-		preference.CourseStartLocation = &CourseStartLocation{
-			Latitude:  courseStartLatitude.Float64,
-			Longitude: courseStartLongitude.Float64,
-		}
 	}
 	return preference, err
 }
@@ -335,21 +323,11 @@ func (s *Store) UpdateUserPreferences(ctx context.Context, preference UserPrefer
 		columns = []string{}
 	}
 	defaultExperience := normalizeDefaultExperience(preference.DefaultExperience)
-	var courseStartLatitude, courseStartLongitude *float64
-	if preference.CourseStartLocation != nil {
-		if !validCourseCoordinate(preference.CourseStartLocation.Latitude, preference.CourseStartLocation.Longitude) {
-			return errors.New("course start location must contain valid latitude and longitude values")
-		}
-		courseStartLatitude = &preference.CourseStartLocation.Latitude
-		courseStartLongitude = &preference.CourseStartLocation.Longitude
-	}
 	_, err := s.db.Exec(ctx, `
 		update user_settings
-		set theme_preference = $2, activity_table_columns = $3, gear_sort_by = $4,
-			default_experience = $5, course_start_latitude = $6,
-			course_start_longitude = $7, updated_at = now()
+		set theme_preference = $2, activity_table_columns = $3, gear_sort_by = $4, default_experience = $5, updated_at = now()
 		where user_id = $1
-	`, scopedUserID(ctx), theme, columns, gearSort, defaultExperience, courseStartLatitude, courseStartLongitude)
+	`, scopedUserID(ctx), theme, columns, gearSort, defaultExperience)
 	return err
 }
 

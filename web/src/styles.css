@@ -3583,46 +3583,6 @@ textarea {
   gap: 6px;
 }
 
-.course-start-location {
-  display: grid;
-  gap: 7px;
-  padding: 10px;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 7px;
-  background: var(--color-surface-muted);
-}
-
-.course-start-location > div:first-child {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.course-start-location small {
-  color: var(--color-muted);
-  font-size: 11px;
-}
-
-.course-start-location p {
-  margin: 0;
-  font-size: 12px;
-}
-
-.course-start-location-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.course-start-location-actions .danger-text-button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font-size: 12px;
-}
-
 .course-planner-summary span {
   display: grid;
   gap: 2px;

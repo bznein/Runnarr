@@ -25,8 +25,8 @@
   attached and route-smoke-tested across isolated pull-request previews. The
   planner previews elevation, ascent, descent, and coverage before saving and
   can add a final routed leg back to the starting point with one action.
-- Added an optional private per-account starting location that seeds new course
-  plans and can be saved, updated, or forgotten directly from the planner.
+- New course plans now begin at the starting point of the most recently updated
+  saved course when one is available.
 - Matched completed activities now link directly to their source training sheet in both full and simple experiences.
 - Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.

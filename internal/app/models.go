@@ -14,16 +14,10 @@ type User struct {
 }
 
 type UserPreference struct {
-	ThemePreference      string               `json:"themePreference"`
-	ActivityTableColumns []string             `json:"activityTableColumns,omitempty"`
-	GearSortBy           string               `json:"gearSortBy"`
-	DefaultExperience    string               `json:"defaultExperience"`
-	CourseStartLocation  *CourseStartLocation `json:"courseStartLocation"`
-}
-
-type CourseStartLocation struct {
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
+	ThemePreference      string   `json:"themePreference"`
+	ActivityTableColumns []string `json:"activityTableColumns,omitempty"`
+	GearSortBy           string   `json:"gearSortBy"`
+	DefaultExperience    string   `json:"defaultExperience"`
 }
 
 type SessionUser struct {

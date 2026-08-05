@@ -29,12 +29,6 @@ export type UserPreference = {
   activityTableColumns?: string[];
   gearSortBy: string;
   defaultExperience: "full" | "simple";
-  courseStartLocation: CourseStartLocation | null;
-};
-
-export type CourseStartLocation = {
-  latitude: number;
-  longitude: number;
 };
 
 export type ToolsPaceRequest = {

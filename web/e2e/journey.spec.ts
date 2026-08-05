@@ -575,19 +575,8 @@ test.describe("local product journey", () => {
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
     const waypointRows = page.locator(".course-waypoint-list li");
     await expect(waypointRows).toHaveCount(1);
-    await expect(waypointRows.first().locator("small")).toHaveText("53.34980, -6.26030");
-    await expect(page.getByRole("button", { name: "Start saved", exact: true })).toBeDisabled();
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
-      page.getByRole("button", { name: "Forget saved start", exact: true }).click()
-    ]);
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes("/api/preferences") && response.request().method() === "PATCH" && response.ok()),
-      page.getByRole("button", { name: "Save current start", exact: true }).click()
-    ]);
-    await page.reload();
-    await expect(waypointRows).toHaveCount(1);
-    await expect(waypointRows.first().locator("small")).toHaveText("53.34980, -6.26030");
+    await expect(waypointRows.first().locator("small")).toHaveText(`${latitude.toFixed(5)}, -6.31000`);
+    await expect(page.getByText("Starting location", { exact: true })).toHaveCount(0);
     await plannerMap.click({ position: { x: 90, y: 110 } });
     await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
     if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
