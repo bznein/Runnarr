@@ -11,6 +11,9 @@
 
 ### Features
 
+- Added the PostGIS-backed, account-private course foundation with bounded
+  geometry APIs, GPX preview/import/export, duplicate protection, and activity
+  route snapshots.
 - Matched completed activities now link directly to their source training sheet in both full and simple experiences.
 - Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.

@@ -81,8 +81,11 @@ scripts/dev.sh
 and run backend+frontend. `RUNNARR_ADMIN_PASSWORD` is preserved unless missing.
 If `RUNNARR_HTTP_ADDR` is unset or `:8080`, it will be replaced with a random high port.
 `RUNNARR_FRONTEND_PORT` (default `5173`) sets the preferred Vite port.
-Point `DATABASE_URL` in `.env` at your local PostgreSQL before running if you want a
-non-default database URL.
+Point `DATABASE_URL` in `.env` at a PostgreSQL 16 database with PostGIS 3.5+
+before running if you want a non-default database URL. The bundled Compose
+database uses `postgis/postgis:16-3.5-alpine`. Existing deployments should read
+the [PostGIS database upgrade notes](docs/postgis-upgrade.md) before taking the
+course-support migration.
 When using `docker compose up -d db` for local DB, keep `RUNNARR_DB_HOST_PORT` in `.env` aligned to the host-mapped postgres port (default `5432`).
 
 See [docs/development.md](docs/development.md) for full non-dockerized setup notes.

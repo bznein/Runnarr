@@ -159,6 +159,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activities/{id}/navigation", s.handleActivityNavigation)
 			r.Get("/activities/{id}/series", s.handleActivitySeries)
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
+			r.Post("/activities/{id}/course", s.handleSaveActivityAsCourse)
 			r.Post("/activities/{id}/climbs-preview", s.handleActivityClimbsPreview)
 			r.Get("/activities/{id}", s.handleGetActivity)
 			r.Get("/activities/{id}/planned-match-candidates", s.handlePlannedMatchCandidates)
@@ -175,6 +176,18 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/activity-media/{mediaId}/original", s.handleServeOriginalMedia)
 			r.Get("/activity-media/{mediaId}/thumbnail", s.handleServeThumbnailMedia)
 			r.Get("/activity-types", s.handleActivityTypes)
+			r.Get("/courses", s.handleListCourses)
+			r.Post("/courses", s.handleCreateCourse)
+			r.Get("/courses/{id}", s.handleGetCourse)
+			r.Patch("/courses/{id}/details", s.handleUpdateCourseDetails)
+			r.Put("/courses/{id}/plan", s.handleUpdateCoursePlan)
+			r.Put("/courses/{id}/favorite", s.handleSetCourseFavorite)
+			r.Post("/courses/{id}/duplicate", s.handleDuplicateCourse)
+			r.Delete("/courses/{id}", s.handleDeleteCourse)
+			r.Get("/courses/{id}/gpx", s.handleExportCourseGPX)
+			r.Post("/course-imports/preview", s.handlePreviewCourseImport)
+			r.Post("/course-imports/commit", s.handleCommitCourseImport)
+			r.Get("/course-imports/{id}", s.handleGetCourseImport)
 			r.Get("/stats/summary", s.handleSummary)
 			r.Get("/stats/calendar", s.handleCalendar)
 			r.Get("/stats/calendar/day", s.handleCalendarDay)
@@ -1774,6 +1787,10 @@ func (s *Server) limitRequestBody(next http.Handler) http.Handler {
 			switch {
 			case r.URL.Path == "/api/imports":
 				limit = 80<<20 + 1<<20
+			case r.URL.Path == "/api/course-imports/preview" || r.URL.Path == "/api/course-imports/commit":
+				limit = maxCourseImportBytes + 1<<20
+			case r.URL.Path == "/api/courses" || strings.HasSuffix(r.URL.Path, "/plan"):
+				limit = maxCoursePlanRequestBytes
 			case strings.HasSuffix(r.URL.Path, "/media"):
 				limit = maxMediaUploadBytes + 1<<20
 			}
