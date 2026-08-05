@@ -1,4 +1,10 @@
 services:
+  # Keep the non-production database requirement explicit. Preview and staging
+  # hosts consume an installed copy of this override, which can be advanced
+  # independently while a production database upgrade is being prepared.
+  db:
+    image: postgis/postgis:16-3.5-alpine
+
   app:
     environment:
       RUNNARR_TRUST_PROXY: "true"

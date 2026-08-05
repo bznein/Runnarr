@@ -21,6 +21,37 @@ Do not switch PostgreSQL major versions as part of this change. If startup
 reports that the `postgis` extension is unavailable, stop and restore the
 previous application/database images; do not delete or recreate the volume.
 
+## Automated preview and staging host
+
+The deployment host uses root-owned Compose assets installed under
+`/opt/runnarr-deploy`; it does not check out pull-request files. Before testing
+this change in a preview, install the reviewed non-production override while
+holding the deployment lock:
+
+```sh
+sudo flock /srv/runnarr/deploy.lock \
+  install -o root -g root -m 0644 \
+  docker-compose.nonprod.yml \
+  /opt/runnarr-deploy/docker-compose.nonprod.yml
+```
+
+This only updates the configuration used by the next preview or staging
+deployment. It does not recreate a running container and it leaves the
+production Compose path unchanged. Verify the installed asset without starting
+services:
+
+```sh
+sudo docker compose \
+  -f /opt/runnarr-deploy/docker-compose.yml \
+  -f /opt/runnarr-deploy/docker-compose.nonprod.yml \
+  config --format json |
+  jq -e '.services.db.image == "postgis/postgis:16-3.5-alpine"'
+```
+
+Rerun the candidate workflow after this check passes. Install the reviewed base
+Compose asset only as part of the separately backed-up production upgrade
+described above.
+
 ## External PostgreSQL
 
 The target database must have PostGIS 3.5 or newer installed. The application
