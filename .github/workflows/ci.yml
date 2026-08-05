@@ -64,6 +64,11 @@ jobs:
       - name: Test
         run: npm test -- --passWithNoTests
 
+      - name: Validate visual review profiles
+        run: |
+          node --test ../scripts/visual-review-profiles.test.mjs
+          bash ../scripts/visual-review-catalog-check.sh
+
       - name: Build
         run: npm run build
 

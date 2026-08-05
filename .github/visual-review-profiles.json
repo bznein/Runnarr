@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "auth",
+      "tag": "@visual-auth",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "simple-matching",
+      "tag": "@visual-simple-matching",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "activity-inspection",
+      "tag": "@visual-activity-inspection",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "courses",
+      "tag": "@visual-courses",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "match-candidates",
+      "tag": "@visual-match-candidates",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "support-exit",
+      "tag": "@visual-support-exit",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "activity-media",
+      "tag": "@visual-activity-media",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "app-settings",
+      "tag": "@visual-app-settings",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "mobile-navigation",
+      "tag": "@visual-mobile-navigation",
+      "viewports": ["mobile"]
+    },
+    {
+      "id": "planned-workouts",
+      "tag": "@visual-planned-workouts",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "notifications",
+      "tag": "@visual-notifications",
+      "viewports": ["desktop", "mobile"]
+    }
+  ]
+}

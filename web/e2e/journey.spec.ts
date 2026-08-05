@@ -4,6 +4,7 @@ import path from "node:path";
 
 const username = process.env.RUNNARR_E2E_USERNAME ?? "e2e-admin";
 const password = process.env.RUNNARR_E2E_PASSWORD ?? "e2e-password-123";
+const fixtureDate = process.env.RUNNARR_E2E_FIXTURE_DATE ?? new Date().toISOString().slice(0, 10);
 const gpxPath = path.resolve(process.cwd(), "../examples/morning-run.gpx");
 
 function activityName(projectName: string) {
@@ -101,7 +102,6 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
 
   if (await visibleActivityLink(page, name, mobile).count() === 0) {
     const original = await readFile(gpxPath, "utf8");
-    const fixtureDate = new Date().toISOString().slice(0, 10);
     // Keep the sequential browser projects at distinct times so navigation
     // never falls back to UUID ordering for the imported activities.
     const fixtureMinuteOffset = mobile ? 30 : 0;
@@ -133,7 +133,7 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
 }
 
 test.describe("local product journey", () => {
-  test("redirects unauthenticated users, logs in, and logs out", async ({ page }, testInfo) => {
+  test("redirects unauthenticated users, logs in, and logs out", { tag: "@visual-auth" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await page.goto("/");
     await expect(page).toHaveURL(/\/login$/);
@@ -145,12 +145,12 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
   });
 
-  test("provides a complete training-sheet-only matching mode", async ({ page }, testInfo) => {
+  test("provides a complete training-sheet-only matching mode", { tag: "@visual-simple-matching" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const name = activityName(testInfo.project.name);
     let matchState: "unmatched" | "attention" | "complete" = "unmatched";
     let initialCandidates: Record<string, unknown> | undefined;
-    const plannedDate = new Date().toISOString().slice(0, 10);
+    const plannedDate = fixtureDate;
     const matchedPlan = {
       id: "00000000-0000-4000-8000-000000000203",
       source: "training_sheet",
@@ -298,7 +298,7 @@ test.describe("local product journey", () => {
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
-  test("imports and inspects an activity, media, and export", async ({ page }, testInfo) => {
+  test("imports and inspects an activity, media, and export", { tag: "@visual-activity-inspection" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
     const projectName = testInfo.project.name;
@@ -508,7 +508,7 @@ test.describe("local product journey", () => {
     await expect(page.getByText("No structured workout steps were provided; showing recorded laps.", { exact: true })).toBeVisible();
   });
 
-  test("uses the course library, saves an activity route, and reviews a GPX import", async ({ page }, testInfo) => {
+  test("uses the course library, saves an activity route, and reviews a GPX import", { tag: "@visual-courses" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
 
@@ -618,7 +618,7 @@ test.describe("local product journey", () => {
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
-  test("excludes a matched planned run from all candidate windows until unmatch", async ({ page }, testInfo) => {
+  test("excludes a matched planned run from all candidate windows until unmatch", { tag: "@visual-match-candidates" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const plannedName = `E2E ${testInfo.project.name} Match Candidate`;
     const activityAName = `E2E ${testInfo.project.name} Match Activity A`;
@@ -673,7 +673,7 @@ test.describe("local product journey", () => {
     }
   });
 
-  test("exits support view to the dashboard from an activity", async ({ page }, testInfo) => {
+  test("exits support view to the dashboard from an activity", { tag: "@visual-support-exit" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const supportUsername = `e2e-support-${projectSlug(testInfo.project.name)}`;
     const supportPassword = "e2e-support-password-123";
@@ -715,7 +715,7 @@ test.describe("local product journey", () => {
     await expect(page.getByText("Activity not found", { exact: true })).toHaveCount(0);
   });
 
-  test("pins an activity photo to a map location", async ({ page }, testInfo) => {
+  test("pins an activity photo to a map location", { tag: "@visual-activity-media" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const projectName = testInfo.project.name;
     const name = activityName(projectName);
@@ -758,7 +758,7 @@ test.describe("local product journey", () => {
     await expect(page.locator(".media-preview-dialog")).toContainText("GPS");
   });
 
-  test("covers calendar, health, gear, tools, and settings", async ({ page }, testInfo) => {
+  test("covers calendar, health, gear, tools, and settings", { tag: "@visual-app-settings" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
 
@@ -860,7 +860,7 @@ test.describe("local product journey", () => {
     await expect(themePicker.getByRole("radio", { name: "Midnight" })).toBeChecked();
   });
 
-  test("keeps navigation and key controls usable on mobile", async ({ page }, testInfo) => {
+  test("keeps navigation and key controls usable on mobile", { tag: "@visual-mobile-navigation" }, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "mobile-chromium", "This assertion targets the mobile project.");
     await login(page, true);
     await expectNoHorizontalOverflow(page);
@@ -906,7 +906,7 @@ test.describe("local product journey", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("creates, inspects, and opens planned workouts from the calendar", async ({ page }, testInfo) => {
+  test("creates, inspects, and opens planned workouts from the calendar", { tag: "@visual-planned-workouts" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
 
@@ -982,7 +982,7 @@ test.describe("local product journey", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("uses notification inbox, links, and category settings", async ({ page }, testInfo) => {
+  test("uses notification inbox, links, and category settings", { tag: "@visual-notifications" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const notificationID = "00000000-0000-4000-8000-000000000174";
     const timestamp = "2026-07-30T12:00:00Z";

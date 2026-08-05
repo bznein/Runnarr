@@ -23,6 +23,7 @@ The repository Makefile provides the standard checks in one place:
 make check       # Go format, vet, backend tests, frontend tests, and build
 make test-race   # Backend race-enabled tests
 make e2e         # Isolated Docker Compose Playwright suite
+make visual-review # Selected before/after Playwright recordings
 make deployment-check # Deployment script and rendered Compose invariants
 ```
 
@@ -57,9 +58,9 @@ The frontend uses Vite proxy rules for `/api` and `/healthz`, routed from `scrip
 ## Browser end-to-end tests
 
 The Playwright suite exercises the full local web app in desktop Chromium and
-mobile Chromium emulation. It starts an isolated Docker Compose project with a
-fresh PostgreSQL database, seeds deterministic health and gear records, runs
-the tests, and removes only that test project when finished.
+Google Pixel 8 Pro Chrome emulation. It starts an isolated Docker Compose
+project with a fresh PostgreSQL database, seeds deterministic health and gear
+records, runs the tests, and removes only that test project when finished.
 
 Install the web dependencies and browser once:
 
@@ -82,6 +83,46 @@ the npm command, for example `npm run e2e -- --project=mobile-chromium`.
 Videos are written for every executed test under `web/test-results/`. Set
 `PLAYWRIGHT_SLOW_MO` to add a delay between browser actions when reviewing
 them, for example `PLAYWRIGHT_SLOW_MO=250 npm run e2e`.
+
+### Before/after visual review
+
+Material user-facing pull requests can select up to two recording profiles
+from `.github/visual-review-profiles.json`. Each profile combines one tagged
+E2E journey with either the desktop or Pixel 8 Pro viewport. The PR labels use
+the form `visual:<viewport>:<scenario>`, for example:
+
+```text
+visual:desktop:activity-inspection
+visual:mobile:mobile-navigation
+```
+
+Adding a profile label records the selected journey against both the PR's
+`main` merge base and its head. New commits rerun the same profiles. The two
+revisions use separate Docker Compose projects, the same synthetic seed and
+fixture clock, and no provider credentials. A bot comment links separately
+named before/after artifacts containing video, Playwright failure diagnostics,
+and Compose logs. Artifacts expire after seven days.
+
+Generate the same comparison locally from a clean, committed branch with:
+
+```bash
+VISUAL_PROFILES="visual:desktop:activity-inspection" make visual-review
+```
+
+Select two profiles with a comma-separated value. Set `VISUAL_BASE_REF` when
+the comparison base is not `origin/main`:
+
+```bash
+VISUAL_BASE_REF=main \
+VISUAL_PROFILES="visual:desktop:auth,visual:mobile:auth" \
+make visual-review
+```
+
+The command creates a temporary detached worktree for the merge base, runs
+only isolated E2E stacks, and writes both revisions under
+`web/test-results/visual-review/`. A failed before journey is retained as
+comparison evidence; a failed after journey makes the command fail. The
+generated `.webm` files can be attached manually to a PR when needed.
 
 For free-form product exploration against disposable data, start the permanent
 testbed workflow without Playwright driving the browser:

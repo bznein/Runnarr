@@ -14,7 +14,7 @@ insert into daily_health_metrics(
     body_battery_avg, body_battery_min, body_battery_max, hrv_avg_ms,
     hrv_status, weight_kg, body_fat_pct
 )
-select id, 'garmin', current_date, 12450, 2380, 780, 48, 71, 156,
+select id, 'garmin', :'e2e_date'::date, 12450, 2380, 780, 48, 71, 156,
     27900, 7200, 14400, 6300, 900, 86, 23, 61, 72, 41, 98, 58,
     'balanced', 68.4, 14.2
 from users
@@ -50,7 +50,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-pool-swim', 'E2E Pool Swim', 'Swimming',
-    current_date + time '05:00', 1500, 1800, 1900, '{}'::jsonb
+    :'e2e_date'::date + time '05:00', 1500, 1800, 1900, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -88,7 +88,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-strength-activity', 'E2E Strength Training', 'Strength Training',
-    current_date + time '04:00', 1000, 600, 660, '{}'::jsonb
+    :'e2e_date'::date + time '04:00', 1000, 600, 660, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -106,7 +106,7 @@ insert into gears(
     default_activity_types
 )
 select id, 'garmin', 'e2e-shoes', 'E2E Daily Trainers', 'shoes', 'Runnarr',
-    'Test Trainer', false, 423000, 800000, now() - interval '90 days', now() - interval '1 day',
+    'Test Trainer', false, 423000, 800000, :'e2e_now'::timestamptz - interval '90 days', :'e2e_now'::timestamptz - interval '1 day',
     array['running']::text[]
 from users
 where username = :'e2e_username'
@@ -127,7 +127,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-cycling-activity', 'E2E Cycling Activity', 'Cycling',
-    current_date + time '07:00', 25000, 3600, 3750, '{}'::jsonb
+    :'e2e_date'::date + time '07:00', 25000, 3600, 3750, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -144,7 +144,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'e2e', 'e2e-calendar-matched-run', 'E2E Calendar Matched Run', 'Run',
-    current_date + time '03:00', 8000, 2880, 3000, '{}'::jsonb
+    :'e2e_date'::date + time '03:00', 8000, 2880, 3000, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -164,7 +164,7 @@ insert into activities(
     distance_m, moving_time_s, elapsed_time_s, raw
 )
 select id, 'training_sheet', 'e2e-calendar-planned-run', 'E2E Calendar Planned Run', 'Run',
-    current_date + 1, 0, 0, 0, '{}'::jsonb
+    :'e2e_date'::date + 1, 0, 0, 0, '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -182,9 +182,9 @@ insert into planned_activities(
     matched_activity_id, matched_at
 )
 select users.id, 'training_sheet', 'e2e-calendar-planned-run', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A0', current_date + 1, 'E2E Calendar Planned Run', 'Run', 'completed',
+    'E2E Plan', 'A0', :'e2e_date'::date + 1, 'E2E Calendar Planned Run', 'Run', 'completed',
     'https://docs.google.com/spreadsheets/d/e2e-workbook/edit#gid=e2e-sheet', '{}'::jsonb,
-    matched_activity.id, now()
+    matched_activity.id, :'e2e_now'::timestamptz
 from users
 join activities matched_activity
     on matched_activity.user_id = users.id
@@ -206,7 +206,7 @@ insert into training_sheet_writebacks(
     interval_status, feedback_status, last_attempt_at
 )
 select planned.id, planned.matched_activity_id, 'failed', 'E2E writeback failure',
-    'not_applicable', 'not_provided', now()
+    'not_applicable', 'not_provided', :'e2e_now'::timestamptz
 from planned_activities planned
 join users on users.id = planned.user_id
 where users.username = :'e2e_username'
@@ -243,7 +243,7 @@ on conflict (id) do update set
     scheduled_date = excluded.scheduled_date,
     garmin_excluded = true,
     archived_at = null,
-    updated_at = now();
+    updated_at = :'e2e_now'::timestamptz;
 
 -- A deterministic spatial fixture keeps the course library and detail views
 -- inspectable before the browser journey creates user-scoped courses itself.
@@ -255,7 +255,7 @@ insert into courses(
 select '00000000-0000-4000-8000-000000000180'::uuid, id,
     'E2E Riverside Loop', 'Run', 'Synthetic course for library and map inspection.',
     true, 1, 'e2e-riverside-loop-v1', 4210, 38, 35, 1, 5, 1, 0,
-    '{"fixture":"e2e"}'::jsonb, now() - interval '2 days', now() - interval '1 day'
+    '{"fixture":"e2e"}'::jsonb, :'e2e_now'::timestamptz - interval '2 days', :'e2e_now'::timestamptz - interval '1 day'
 from users
 where username = :'e2e_username'
 on conflict (id) do update set
@@ -307,7 +307,7 @@ on conflict (activity_id) do update set
     sport_type = excluded.sport_type,
     steps = excluded.steps,
     raw = excluded.raw,
-    updated_at = now();
+    updated_at = :'e2e_now'::timestamptz;
 
 insert into activity_intervals(
     activity_id, interval_index, category, provider_type,
@@ -333,7 +333,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-run', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A1', current_date, '2mins E2E Planned Run', 'Run', 'pending',
+    'E2E Plan', 'A1', :'e2e_date'::date, '2mins E2E Planned Run', 'Run', 'pending',
     '{"planCellBackgroundColor":"#ffffff"}'::jsonb
 from users
 where username = :'e2e_username'
@@ -351,7 +351,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-recovery', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A2', current_date - 2, 'E2E Planned Recovery Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A2', :'e2e_date'::date - 2, 'E2E Planned Recovery Run', 'Run', 'pending', '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -368,7 +368,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-speed', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A3', current_date, 'E2E Planned Speed Work', 'Run', 'pending',
+    'E2E Plan', 'A3', :'e2e_date'::date, 'E2E Planned Speed Work', 'Run', 'pending',
     '{"planCellBackgroundColor":"#3d85c6","workoutTable":{"rows":[{"label":"5min rep 1"}]}}'::jsonb
 from users
 where username = :'e2e_username'
@@ -386,7 +386,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-long', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A4', current_date + 3, '2 hours E2E Planned Long Run', 'Run', 'pending',
+    'E2E Plan', 'A4', :'e2e_date'::date + 3, '2 hours E2E Planned Long Run', 'Run', 'pending',
     '{"planCellBackgroundColor":"#674ea7"}'::jsonb
 from users
 where username = :'e2e_username'
@@ -404,7 +404,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select id, 'training_sheet', 'e2e-planned-far', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A5', current_date + 14, 'E2E Planned Far Run', 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', 'A5', :'e2e_date'::date + 14, 'E2E Planned Far Run', 'Run', 'pending', '{}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (user_id, source, source_id) do update set
@@ -421,7 +421,7 @@ insert into planned_activities(
     plan_cell, planned_date, name, sport_type, status, raw
 )
 select users.id, 'training_sheet', fixture.source_id, 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', fixture.plan_cell, current_date + 3, fixture.name, 'Run', 'pending', '{}'::jsonb
+    'E2E Plan', fixture.plan_cell, :'e2e_date'::date + 3, fixture.name, 'Run', 'pending', '{}'::jsonb
 from users
 cross join (values
     ('e2e-workbook:e2e-sheet:A6', 'A6', 'E2E chromium Match Candidate'),
@@ -466,14 +466,14 @@ on conflict (id) do update set
     parse_messages = excluded.parse_messages,
     scheduled_date = excluded.scheduled_date,
     archived_at = null,
-    updated_at = now();
+    updated_at = :'e2e_now'::timestamptz;
 
 insert into planned_activities(
     id, user_id, source, source_id, workbook_id, sheet_id, sheet_title,
     plan_cell, planned_date, name, sport_type, notes, status, raw
 )
 select '00000000-0000-4000-8000-000000000171'::uuid, id, 'manual',
-    'workout:00000000-0000-4000-8000-000000000172', '', '', '', '', current_date + 40,
+    'workout:00000000-0000-4000-8000-000000000172', '', '', '', '', :'e2e_date'::date + 40,
     'E2E Manual Tempo', 'Run', '', 'pending', '{"fixture":"e2e-workout"}'::jsonb
 from users
 where username = :'e2e_username'
@@ -497,7 +497,7 @@ select '00000000-0000-4000-8000-000000000172'::uuid, id, 'manual',
       {"order":2,"kind":"work","endCondition":{"type":"time","value":1200,"unit":"seconds"},"target":{"type":"pace","paceSecondsPerKM":255}},
       {"order":3,"kind":"cooldown","endCondition":{"type":"time","value":480,"unit":"seconds"},"target":{"type":"none"}}
     ]}'::jsonb,
-    'ready', '[]'::jsonb, current_date + 40, 1
+    'ready', '[]'::jsonb, :'e2e_date'::date + 40, 1
 from users
 where username = :'e2e_username'
 on conflict (id) do update set
@@ -510,4 +510,4 @@ on conflict (id) do update set
     parse_messages = excluded.parse_messages,
     scheduled_date = excluded.scheduled_date,
     archived_at = null,
-    updated_at = now();
+    updated_at = :'e2e_now'::timestamptz;

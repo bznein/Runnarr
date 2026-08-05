@@ -1,0 +1,156 @@
+name: Visual review recordings
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
+      - unlabeled
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-review-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Resolve visual profiles
+    if: >-
+      ${{
+        !github.event.pull_request.draft &&
+        (
+          github.event.action == 'synchronize' ||
+          github.event.action == 'reopened' ||
+          github.event.action == 'ready_for_review' ||
+          startsWith(github.event.label.name, 'visual:')
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.profiles.outputs.enabled }}
+      profiles: ${{ steps.profiles.outputs.profiles }}
+      merge_base: ${{ steps.revisions.outputs.merge_base }}
+      head_sha: ${{ steps.revisions.outputs.head_sha }}
+      fixture_date: ${{ steps.fixture.outputs.fixture_date }}
+      fixture_timestamp: ${{ steps.fixture.outputs.fixture_timestamp }}
+    steps:
+      - name: Checkout PR driver
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve selected profiles
+        id: profiles
+        env:
+          LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          profiles="$(node scripts/visual-review-profiles.mjs resolve --labels-json "${LABELS_JSON}")"
+          count="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).length))' "${profiles}")"
+          echo "profiles=${profiles}" >> "${GITHUB_OUTPUT}"
+          if [ "${count}" -gt 0 ]; then
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Resolve exact revisions
+        id: revisions
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "${BASE_SHA}^{commit}"
+          merge_base="$(git merge-base "${BASE_SHA}" "${HEAD_SHA}")"
+          [[ "${merge_base}" =~ ^[0-9a-f]{40}$ ]]
+          echo "merge_base=${merge_base}" >> "${GITHUB_OUTPUT}"
+          echo "head_sha=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Fix fixture clock
+        id: fixture
+        run: |
+          fixture_date="$(TZ=Europe/Dublin date +%F)"
+          echo "fixture_date=${fixture_date}" >> "${GITHUB_OUTPUT}"
+          echo "fixture_timestamp=${fixture_date}T12:00:00Z" >> "${GITHUB_OUTPUT}"
+
+  record:
+    name: Record ${{ matrix.revision }}
+    needs:
+      - resolve
+    if: needs.resolve.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        revision:
+          - before
+          - after
+    steps:
+      - name: Checkout PR driver
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.head_sha }}
+          path: driver
+          persist-credentials: false
+
+      - name: Checkout ${{ matrix.revision }} app
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.revision == 'before' && needs.resolve.outputs.merge_base || needs.resolve.outputs.head_sha }}
+          path: app
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: driver/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright Chromium
+        working-directory: driver/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Run selected journeys
+        id: journey
+        continue-on-error: true
+        env:
+          RUNNARR_E2E_APP_ROOT: ${{ github.workspace }}/app
+          RUNNARR_E2E_DRIVER_ROOT: ${{ github.workspace }}/driver
+          RUNNARR_E2E_SEED_FILE: ${{ github.workspace }}/driver/web/e2e/seed.sql
+          RUNNARR_E2E_ARTIFACT_DIR: ${{ github.workspace }}/visual-artifacts/${{ matrix.revision }}
+          RUNNARR_E2E_FIXTURE_DATE: ${{ needs.resolve.outputs.fixture_date }}
+          RUNNARR_E2E_FIXTURE_TIMESTAMP: ${{ needs.resolve.outputs.fixture_timestamp }}
+          RUNNARR_E2E_PROJECT: runnarr-visual-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.revision }}
+          RUNNARR_VISUAL_PROFILES_JSON: ${{ needs.resolve.outputs.profiles }}
+          PLAYWRIGHT_SLOW_MO: "200"
+        run: bash driver/scripts/e2e.sh --config playwright.visual.config.ts
+
+      - name: Upload ${{ matrix.revision }} recording artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runnarr-visual-${{ matrix.revision }}-pr-${{ github.event.pull_request.number }}-${{ matrix.revision == 'before' && needs.resolve.outputs.merge_base || needs.resolve.outputs.head_sha }}
+          path: ${{ github.workspace }}/visual-artifacts/${{ matrix.revision }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail an unusable after recording
+        if: always() && matrix.revision == 'after' && steps.journey.outcome != 'success'
+        run: exit 1

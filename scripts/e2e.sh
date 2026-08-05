@@ -3,17 +3,45 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_ROOT="$(cd "${RUNNARR_E2E_APP_ROOT:-${ROOT}}" && pwd)"
+DRIVER_ROOT="$(cd "${RUNNARR_E2E_DRIVER_ROOT:-${ROOT}}" && pwd)"
+SEED_FILE="${RUNNARR_E2E_SEED_FILE:-${DRIVER_ROOT}/web/e2e/seed.sql}"
+TESTBED_SEED_FILE="${RUNNARR_E2E_TESTBED_SEED_FILE:-${DRIVER_ROOT}/web/e2e/testbed-seed.sql}"
+ARTIFACT_DIR="${RUNNARR_E2E_ARTIFACT_DIR:-}"
 E2E_PROJECT="${RUNNARR_E2E_PROJECT:-runnarr-e2e-${BASHPID}}"
 E2E_NETWORK="${E2E_PROJECT}_network"
 E2E_USERNAME="${RUNNARR_E2E_USERNAME:-e2e-admin}"
 E2E_PASSWORD="${RUNNARR_E2E_PASSWORD:-e2e-password-123}"
-COMPOSE_OVERRIDE="$(mktemp "${TMPDIR:-/tmp}/runnarr-e2e-compose.XXXXXX.yml")"
+E2E_FIXTURE_DATE="${RUNNARR_E2E_FIXTURE_DATE:-$(TZ=Europe/Dublin date +%F)}"
+E2E_FIXTURE_TIMESTAMP="${RUNNARR_E2E_FIXTURE_TIMESTAMP:-${E2E_FIXTURE_DATE}T12:00:00Z}"
+COMPOSE_OVERRIDE=""
 NETWORK_CREATED=0
 TESTBED_MODE=0
 
 if [ "${1:-}" = "--testbed" ]; then
   TESTBED_MODE=1
   shift
+fi
+
+if [[ ! "${E2E_PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "Invalid Docker Compose project name: ${E2E_PROJECT}" >&2
+  exit 1
+fi
+if [[ ! "${E2E_FIXTURE_DATE}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+  echo "RUNNARR_E2E_FIXTURE_DATE must use YYYY-MM-DD." >&2
+  exit 1
+fi
+if [[ ! "${E2E_FIXTURE_TIMESTAMP}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+  echo "RUNNARR_E2E_FIXTURE_TIMESTAMP must be a UTC timestamp ending in Z." >&2
+  exit 1
+fi
+if [ ! -f "${APP_ROOT}/docker-compose.yml" ]; then
+  echo "No docker-compose.yml found under app root ${APP_ROOT}." >&2
+  exit 1
+fi
+if [ ! -f "${SEED_FILE}" ]; then
+  echo "E2E seed file not found: ${SEED_FILE}" >&2
+  exit 1
 fi
 
 pick_port() {
@@ -31,6 +59,7 @@ pick_port() {
 
 E2E_APP_PORT="${RUNNARR_E2E_PORT:-$(pick_port 37617)}"
 E2E_DB_PORT="${RUNNARR_E2E_DB_PORT:-$(pick_port 35432)}"
+COMPOSE_OVERRIDE="$(mktemp "${TMPDIR:-/tmp}/runnarr-e2e-compose.XXXXXX.yml")"
 export COMPOSE_PROJECT_NAME="${E2E_PROJECT}"
 export DATABASE_URL="postgres://runnarr:runnarr@db:5432/runnarr?sslmode=disable"
 export POSTGRES_USER="runnarr"
@@ -46,11 +75,13 @@ export RUNNARR_PUBLIC_MODE="false"
 export RUNNARR_LOCAL_AUTH_ENABLED="true"
 export PLAYWRIGHT_BASE_URL="${RUNNARR_BASE_URL}"
 export RUNNARR_GARMIN_BRIDGE_SCRIPT="/app/garmin_bridge_testbed.py"
+export RUNNARR_E2E_FIXTURE_DATE="${E2E_FIXTURE_DATE}"
+export RUNNARR_E2E_FIXTURE_TIMESTAMP="${E2E_FIXTURE_TIMESTAMP}"
 
 compose() {
   docker compose \
     --project-name "${E2E_PROJECT}" \
-    --file "${ROOT}/docker-compose.yml" \
+    --file "${APP_ROOT}/docker-compose.yml" \
     --file "${COMPOSE_OVERRIDE}" \
     "$@"
 }
@@ -73,6 +104,18 @@ create_network() {
 
 cleanup() {
   local status="$?"
+  if [ -n "${ARTIFACT_DIR}" ]; then
+    mkdir -p "${ARTIFACT_DIR}"
+    compose ps --all > "${ARTIFACT_DIR}/compose-status.txt" 2>&1 || true
+    compose logs --no-color > "${ARTIFACT_DIR}/compose.log" 2>&1 || true
+    {
+      printf 'compose_project=%s\n' "${E2E_PROJECT}"
+      printf 'app_root=%s\n' "${APP_ROOT}"
+      printf 'fixture_date=%s\n' "${E2E_FIXTURE_DATE}"
+      printf 'fixture_timestamp=%s\n' "${E2E_FIXTURE_TIMESTAMP}"
+      printf 'playwright_status=%s\n' "${status}"
+    } > "${ARTIFACT_DIR}/run-metadata.txt"
+  fi
   if [ "${status}" -ne 0 ]; then
     compose logs --no-color || true
   fi
@@ -80,7 +123,9 @@ cleanup() {
   if [ "${NETWORK_CREATED}" -eq 1 ]; then
     docker network rm "${E2E_NETWORK}" >/dev/null 2>&1 || true
   fi
-  rm -f "${COMPOSE_OVERRIDE}"
+  if [ -n "${COMPOSE_OVERRIDE}" ]; then
+    rm -f "${COMPOSE_OVERRIDE}"
+  fi
   exit "${status}"
 }
 
@@ -119,10 +164,20 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 
-compose exec --no-TTY db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -v "e2e_username=${E2E_USERNAME}" < "${ROOT}/web/e2e/seed.sql"
+compose exec --no-TTY db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
+  -v "e2e_username=${E2E_USERNAME}" \
+  -v "e2e_date=${E2E_FIXTURE_DATE}" \
+  -v "e2e_now=${E2E_FIXTURE_TIMESTAMP}" < "${SEED_FILE}"
 
 if [ "${TESTBED_MODE}" -eq 1 ]; then
-  compose exec --no-TTY db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -v "e2e_username=${E2E_USERNAME}" < "${ROOT}/web/e2e/testbed-seed.sql"
+  if [ ! -f "${TESTBED_SEED_FILE}" ]; then
+    echo "E2E testbed seed file not found: ${TESTBED_SEED_FILE}" >&2
+    exit 1
+  fi
+  compose exec --no-TTY db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" \
+    -v "e2e_username=${E2E_USERNAME}" \
+    -v "e2e_date=${E2E_FIXTURE_DATE}" \
+    -v "e2e_now=${E2E_FIXTURE_TIMESTAMP}" < "${TESTBED_SEED_FILE}"
   printf '\nRunnarr testbed is ready.\n'
   printf 'URL:      %s\n' "${RUNNARR_BASE_URL}"
   printf 'Username: %s\n' "${E2E_USERNAME}"
@@ -136,5 +191,5 @@ if [ "${TESTBED_MODE}" -eq 1 ]; then
   done
 fi
 
-cd "${ROOT}/web"
+cd "${DRIVER_ROOT}/web"
 npx playwright test "$@"

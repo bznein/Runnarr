@@ -1,0 +1,155 @@
+name: Visual review comment
+
+on:
+  workflow_run:
+    workflows:
+      - Visual review recordings
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  comment:
+    name: Update visual review comment
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Add or update artifact links
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if (run.pull_requests.length !== 1) {
+              core.info("Visual review comments require exactly one associated pull request.");
+              return;
+            }
+
+            const pullNumber = run.pull_requests[0].number;
+            const { data: pull } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullNumber
+            });
+            if (pull.state !== "open" || pull.head.sha !== run.head_sha) {
+              core.info("Ignoring a visual review run that is no longer for the current open PR head.");
+              return;
+            }
+
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: run.workflow_id,
+              event: "pull_request",
+              head_sha: run.head_sha,
+              per_page: 100
+            });
+            const currentRuns = runs
+              .filter(candidate => candidate.pull_requests?.some(item => item.number === pullNumber))
+              .sort((left, right) => right.run_number - left.run_number);
+            if (currentRuns[0]?.id !== run.id) {
+              core.info("Ignoring an older visual review run for the same PR revision.");
+              return;
+            }
+
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              filter: "all",
+              per_page: 100
+            });
+            const resolveJob = jobs.find(item => item.name === "Resolve visual profiles");
+            if (!resolveJob || resolveJob.conclusion === "skipped") {
+              core.info("Ignoring a run triggered by an unrelated PR label change.");
+              return;
+            }
+
+            const marker = "<!-- runnarr-visual-review -->";
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pullNumber,
+              per_page: 100
+            });
+            const existing = comments.find(comment =>
+              comment.user.type === "Bot" && comment.body.includes(marker)
+            );
+            const upsert = async (body) => {
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullNumber,
+                  body
+                });
+              }
+            };
+
+            const profilePattern = /^visual:(desktop|mobile):[a-z0-9]+(?:-[a-z0-9]+)*$/;
+            const profiles = pull.labels
+              .map(label => typeof label === "string" ? label : label.name)
+              .filter(label => profilePattern.test(label))
+              .sort();
+            if (profiles.length === 0) {
+              if (existing) {
+                await upsert(`${marker}
+            ### Visual review
+
+            Visual review is not requested for the current PR revision.
+            `);
+              }
+              return;
+            }
+
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              per_page: 100
+            });
+
+            const revision = (name) => {
+              const prefix = `runnarr-visual-${name}-pr-${pullNumber}-`;
+              const artifact = artifacts.find(item => item.name.startsWith(prefix));
+              const sha = artifact?.name.slice(prefix.length);
+              const job = jobs.find(item => item.name.toLowerCase() === `record ${name}`);
+              const journey = job?.steps?.find(step => step.name === "Run selected journeys");
+              const outcome = journey?.conclusion ?? job?.conclusion ?? "not run";
+              const url = artifact
+                ? `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}/artifacts/${artifact.id}`
+                : undefined;
+              return {
+                sha: /^[0-9a-f]{40}$/.test(sha ?? "") ? sha : "unknown",
+                outcome,
+                link: url ? `[Download artifact](${url})` : "Artifact not produced"
+              };
+            };
+
+            const before = revision("before");
+            const after = revision("after");
+            const body = `${marker}
+            ### Visual review
+
+            Profiles: ${profiles.map(profile => `\`${profile}\``).join(", ")}
+
+            | Revision | Result | Commit | Recording and diagnostics |
+            | --- | --- | --- | --- |
+            | Before | ${before.outcome} | \`${before.sha}\` | ${before.link} |
+            | After | ${after.outcome} | \`${after.sha}\` | ${after.link} |
+
+            - [Workflow run](${run.html_url})
+            - Synthetic fixtures only; artifacts expire seven days after the run.
+            `;
+            await upsert(body);
