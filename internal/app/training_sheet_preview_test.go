@@ -85,6 +85,34 @@ func TestTrainingSheetPreviewDoesNotWarnForMissingFeedback(t *testing.T) {
 	}
 }
 
+func TestReflectionWritebackUpdatesIncludeOnlyRPEAndFeedback(t *testing.T) {
+	updates := []trainingSheetPreviewUpdate{
+		{Update: googleValueRangeUpdate{Range: "'Week'!D3"}, Section: "summary", Label: "Distance"},
+		{Update: googleValueRangeUpdate{Range: "'Week'!D8"}, Section: "summary", Label: "RPE"},
+		{Update: googleValueRangeUpdate{Range: "'Week'!B12"}, Section: "intervals", Label: "7min rep 1"},
+		{Update: googleValueRangeUpdate{Range: "'Week'!C19"}, Section: "feedback", Label: "How did it feel/go?"},
+	}
+	got := reflectionWritebackUpdates(updates)
+	if len(got) != 2 || got[0].Range != "'Week'!D8" || got[1].Range != "'Week'!C19" {
+		t.Fatalf("reflection updates = %#v, want only RPE and feedback", got)
+	}
+}
+
+func TestTrainingSheetWritebackRetryScopeKeepsReflectionRetryFocused(t *testing.T) {
+	reflectionFailure := &TrainingSheetWritebackStatus{
+		SummaryStatus: "completed", IntervalsStatus: "not_applicable", FeedbackStatus: "failed",
+	}
+	if got := trainingSheetWritebackRetryScope(reflectionFailure); got != trainingSheetWritebackScopeReflection {
+		t.Fatalf("reflection retry scope = %q, want reflection", got)
+	}
+	fullFailure := &TrainingSheetWritebackStatus{
+		SummaryStatus: "failed", IntervalsStatus: "completed", FeedbackStatus: "failed",
+	}
+	if got := trainingSheetWritebackRetryScope(fullFailure); got != trainingSheetWritebackScopeFull {
+		t.Fatalf("multi-section retry scope = %q, want full", got)
+	}
+}
+
 func updatesToGoogle(updates []trainingSheetPreviewUpdate) []googleValueRangeUpdate {
 	result := make([]googleValueRangeUpdate, len(updates))
 	for index, update := range updates {

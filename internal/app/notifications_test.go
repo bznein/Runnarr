@@ -101,6 +101,25 @@ func TestSafeNotificationError(t *testing.T) {
 	}
 }
 
+func TestActivityAutoMatchNotificationPromptsForReflection(t *testing.T) {
+	planned := PlannedActivity{ID: "plan-1", Name: "Tempo run", FeedbackCell: "C19"}
+	input := activityAutoMatchNotificationInput("activity-1", planned)
+	if input.Severity != "info" || input.Kind != "activity_auto_matched" {
+		t.Fatalf("notification metadata = %#v", input)
+	}
+	if input.ActionPath != "/activities/activity-1#check-in" {
+		t.Fatalf("action path = %q, want direct reflection prompt", input.ActionPath)
+	}
+	if !strings.Contains(input.Body, "RPE and feedback") {
+		t.Fatalf("body = %q, want RPE and feedback reminder", input.Body)
+	}
+
+	input = activityAutoMatchNotificationInput("activity-1", PlannedActivity{ID: "plan-1", Name: "Easy run"})
+	if strings.Contains(input.Body, "feedback") || !strings.Contains(input.Body, "RPE") {
+		t.Fatalf("body without feedback cell = %q, want RPE-only reminder", input.Body)
+	}
+}
+
 func TestValidatePushEndpoint(t *testing.T) {
 	valid := []string{
 		"https://fcm.googleapis.com/fcm/send/example",

@@ -764,7 +764,7 @@ func (s *Server) handleRenameActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Feedback != nil || rpeSet {
 		if planned, matchErr := s.store.GetMatchedPlannedActivity(r.Context(), id); matchErr == nil {
-			s.queueTrainingSheetWriteback(r.Context(), planned.ID, id)
+			s.queueTrainingSheetReflectionWriteback(r.Context(), planned.ID, id)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"activity": activity})

@@ -26,6 +26,7 @@ import { hasIntervalAnalysis, resolveActivityAnalysisTab } from "./activityAnaly
 import type { ActivityAnalysisTab } from "./activityAnalysis";
 import { fullPathForSimplePath, normalizeSimpleMatchFilter, shouldRedirectToSimple, simpleIntervalSummary, simpleMatchStatusLabel } from "./simpleMode";
 import type { SimpleMatchFilter } from "./simpleMode";
+import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
 import type {
   Activity,
   ActivityClimb,
@@ -2966,7 +2967,9 @@ function ActivityNavigation({
 
 function ActivityDetailPage({ config, simple = false, canWrite = true }: { config?: AppConfig; simple?: boolean; canWrite?: boolean }) {
   const { id } = useParams();
+  const location = useLocation();
   const activityIdRef = useRef(id);
+  const reflectionPromptLocationRef = useRef<string | undefined>(undefined);
   activityIdRef.current = id;
   const activityViewRef = useRef({ id, generation: 0 });
   if (activityViewRef.current.id !== id) {
@@ -3255,6 +3258,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
 
   const item = activity.data?.activity;
   const writeback = plannedMatchCandidates.data?.writeback;
+  const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const intervalAnalysisAvailable = hasIntervalAnalysis(item);
   const visibleAnalysisTab = resolveActivityAnalysisTab(analysisTab, intervalAnalysisAvailable);
   const effectiveClimbs = item ? (climbPreview.data?.climbs ?? item.climbs ?? []) : [];
@@ -3279,6 +3283,12 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
     const timeout = window.setTimeout(() => document.getElementById("writeback")?.scrollIntoView({ block: "center" }));
     return () => window.clearTimeout(timeout);
   }, [searchParams, writeback]);
+
+  useEffect(() => {
+    if (!canWrite || location.hash !== "#check-in" || !item || !matchedPlannedActivity || reflectionPromptLocationRef.current === location.key) return;
+    reflectionPromptLocationRef.current = location.key;
+    setCheckInOpen(true);
+  }, [canWrite, item, location.hash, location.key, matchedPlannedActivity]);
 
   if (activity.isLoading) {
     return simple ? <section className="simple-page"><LoadingRow /></section> : <Page title="Activity"><LoadingRow /></Page>;
@@ -3334,7 +3344,6 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
   const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
   const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
   const canSaveClimbSensitivity = !isClimbSensitivitySaved;
-  const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
   const loadingCandidateRetry = retryingPlannedMatchCandidates;
@@ -3485,14 +3494,14 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
             </div>
             {writeback ? (
               <div className="activity-writeback-statuses">
-                <span>Summary <strong>{writeback.summaryStatus || "pending"}</strong></span>
-                <span>Intervals <strong>{writeback.intervalsStatus || "pending"}</strong></span>
-                <span>Feedback <strong>{writeback.feedbackStatus || "pending"}</strong></span>
+                <span>Summary <strong>{trainingSheetWritebackStatusLabel(writeback.summaryStatus)}</strong></span>
+                <span>Intervals <strong>{trainingSheetWritebackStatusLabel(writeback.intervalsStatus)}</strong></span>
+                <span>Reflection <strong>{trainingSheetWritebackStatusLabel(writeback.feedbackStatus)}</strong></span>
               </div>
             ) : <p className="muted">Writeback has not started.</p>}
             {writeback?.summaryError && <div className="row-error">Summary: {writeback.summaryError}</div>}
             {writeback?.intervalsError && <div className="row-error">Intervals: {writeback.intervalsError}</div>}
-            {writeback?.feedbackError && <div className="row-error">Feedback: {writeback.feedbackError}</div>}
+            {writeback?.feedbackError && <div className="row-error">Reflection: {writeback.feedbackError}</div>}
             {canRetryWriteback && <button className="secondary-button small-button" type="button" disabled={!canWrite || !writeReady || retryWriteback.isPending} onClick={() => retryWriteback.mutate()}><RefreshCw size={14} />{retryWriteback.isPending ? "Retrying…" : "Retry writeback"}</button>}
           </section>
         )}
@@ -3702,9 +3711,9 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
       {writeback && <section id="writeback" className="panel activity-writeback-panel">
         <div><div className="panel-heading">Training sheet writeback</div><p className="muted">{matchedPlannedActivity?.name || "Matched planned activity"}</p></div>
         <div className="activity-writeback-statuses">
-          <span>Summary <strong>{writeback.summaryStatus || "pending"}</strong></span>
-          <span>Intervals <strong>{writeback.intervalsStatus || "pending"}</strong></span>
-          <span>Feedback <strong>{writeback.feedbackStatus || "pending"}</strong></span>
+          <span>Summary <strong>{trainingSheetWritebackStatusLabel(writeback.summaryStatus)}</strong></span>
+          <span>Intervals <strong>{trainingSheetWritebackStatusLabel(writeback.intervalsStatus)}</strong></span>
+          <span>Reflection <strong>{trainingSheetWritebackStatusLabel(writeback.feedbackStatus)}</strong></span>
         </div>
         {canRetryWriteback && <button className="secondary-button small-button" type="button" disabled={retryWriteback.isPending} onClick={() => retryWriteback.mutate()}><RefreshCw size={14} />{retryWriteback.isPending ? "Retrying…" : "Retry writeback"}</button>}
       </section>}
