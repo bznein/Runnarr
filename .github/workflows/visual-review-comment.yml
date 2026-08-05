@@ -10,7 +10,6 @@ on:
 permissions:
   contents: read
   actions: read
-  issues: write
   pull-requests: read
 
 concurrency:
@@ -329,6 +328,10 @@ jobs:
     if: always() && needs.authorize.outputs.mode != 'ignore' && needs.authorize.outputs.mode != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
     steps:
       - name: Download stream-link manifest
         if: needs.authorize.outputs.mode == 'enabled'
