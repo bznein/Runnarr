@@ -4209,6 +4209,13 @@ textarea {
   gap: 3px;
 }
 
+.simple-matched-heading > .simple-matched-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .simple-mode-settings,
 .simple-mode-settings-actions {
   justify-content: space-between;
@@ -4243,6 +4250,7 @@ textarea {
 
   .simple-page-heading,
   .simple-activity-heading,
+  .simple-matched-heading,
   .simple-mode-settings,
   .simple-mode-settings-actions {
     align-items: stretch;
@@ -4283,6 +4291,11 @@ textarea {
 
   .simple-run-facts {
     grid-template-columns: 1fr;
+  }
+
+  .simple-matched-heading > .simple-matched-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .simple-match-form {
