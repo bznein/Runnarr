@@ -27,6 +27,7 @@ import type { ActivityAnalysisTab } from "./activityAnalysis";
 import { fullPathForSimplePath, normalizeSimpleMatchFilter, shouldRedirectToSimple, simpleIntervalSummary, simpleMatchStatusLabel } from "./simpleMode";
 import type { SimpleMatchFilter } from "./simpleMode";
 import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
+import { trainingSheetSourceURL } from "./trainingSheetLink";
 import type {
   Activity,
   ActivityClimb,
@@ -3344,6 +3345,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
   const activeClimbPreset = climbSensitivityPresetForValue(climbSensitivity);
   const activeClimbPresetLabel = climbSensitivityPresetLabel(climbSensitivity);
   const canSaveClimbSensitivity = !isClimbSensitivitySaved;
+  const matchedTrainingSheetURL = trainingSheetSourceURL(matchedPlannedActivity?.sourceUrl);
   const feedbackAvailable = Boolean(matchedPlannedActivity?.feedbackCell?.trim());
   const loadingMorePlans = plannedMatchWindowDays === 30 && plannedMatchCandidates.isFetching;
   const loadingCandidateRetry = retryingPlannedMatchCandidates;
@@ -3486,11 +3488,19 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
                 <strong>{matchedPlannedActivity.name}</strong>
                 <span className="muted">{formatDate(matchedPlannedActivity.plannedDate)}</span>
               </div>
-              <button className="danger-button small-button" type="button" disabled={!canWrite || unmatchPlannedActivity.isPending} onClick={() => {
-                if (window.confirm("Unmatch this run? Values already written to Google Sheets will not be reverted.")) {
-                  unmatchPlannedActivity.mutate();
-                }
-              }}>{unmatchPlannedActivity.isPending ? "Unmatching…" : "Unmatch"}</button>
+              <div className="simple-matched-actions">
+                {matchedTrainingSheetURL && (
+                  <a className="secondary-button small-button" href={matchedTrainingSheetURL} target="_blank" rel="noreferrer">
+                    <ExternalLink size={14} />
+                    Training sheet
+                  </a>
+                )}
+                <button className="danger-button small-button" type="button" disabled={!canWrite || unmatchPlannedActivity.isPending} onClick={() => {
+                  if (window.confirm("Unmatch this run? Values already written to Google Sheets will not be reverted.")) {
+                    unmatchPlannedActivity.mutate();
+                  }
+                }}>{unmatchPlannedActivity.isPending ? "Unmatching…" : "Unmatch"}</button>
+              </div>
             </div>
             {writeback ? (
               <div className="activity-writeback-statuses">
@@ -3609,6 +3619,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
               matched={Boolean(matchedPlannedActivity)}
               matchedName={matchedPlannedActivity?.name}
               matchedWorkoutId={matchedPlannedActivity?.workoutId}
+              matchedTrainingSheetURL={matchedTrainingSheetURL}
               loading={plannedMatchCandidates.isLoading}
               working={previewPlannedActivity.isPending || applyPlannedActivity.isPending || unmatchPlannedActivity.isPending}
               onMatch={() => openMatchDialog()}
@@ -4739,6 +4750,7 @@ function ActivityPlannedMatchAction({
   matched,
   matchedName,
   matchedWorkoutId,
+  matchedTrainingSheetURL,
   loading,
   working,
   onMatch,
@@ -4747,6 +4759,7 @@ function ActivityPlannedMatchAction({
   matched: boolean;
   matchedName?: string;
   matchedWorkoutId?: string;
+  matchedTrainingSheetURL?: string;
   loading: boolean;
   working: boolean;
   onMatch: () => void;
@@ -4756,6 +4769,7 @@ function ActivityPlannedMatchAction({
   return (
     <>
       {matched && matchedWorkoutId && <Link className="secondary-button" to={`/workouts/${matchedWorkoutId}`} title={`Open workout for ${matchedName ?? "planned run"}`}><RouteIcon size={16} />Workout</Link>}
+      {matched && matchedTrainingSheetURL && <a className="secondary-button" href={matchedTrainingSheetURL} target="_blank" rel="noreferrer" title={`Open training sheet for ${matchedName ?? "planned run"}`}><ExternalLink size={16} />Training sheet</a>}
       <button
         className="secondary-button"
         type="button"

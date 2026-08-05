@@ -160,7 +160,8 @@ test.describe("local product journey", () => {
       plannedDate,
       name: "2mins E2E Planned Run",
       sportType: "Run",
-      status: "completed"
+      status: "completed",
+      sourceUrl: "https://docs.google.com/spreadsheets/d/e2e-workbook/edit#gid=e2e-sheet"
     };
 
     await page.route("**/api/providers/google/status", async (route) => {
@@ -267,6 +268,10 @@ test.describe("local product journey", () => {
 
     const matchedPanel = page.locator(".simple-matched-panel");
     await expect(matchedPanel.getByText("Matched planned run", { exact: true })).toBeVisible();
+    const simpleTrainingSheetLink = matchedPanel.getByRole("link", { name: "Training sheet", exact: true });
+    await expect(simpleTrainingSheetLink).toHaveAttribute("href", "https://docs.google.com/spreadsheets/d/e2e-workbook/edit#gid=e2e-sheet");
+    await expect(simpleTrainingSheetLink).toHaveAttribute("target", "_blank");
+    await expect(simpleTrainingSheetLink).toHaveAttribute("rel", "noreferrer");
     await expect(matchedPanel.getByText("E2E writeback failed", { exact: false })).toBeVisible();
     await matchedPanel.getByRole("button", { name: "Retry writeback", exact: true }).click();
     await expect(matchedPanel.getByText("Complete", { exact: true }).first()).toBeVisible();
@@ -796,6 +801,10 @@ test.describe("local product journey", () => {
     await visibleActivityLink(page, "E2E Calendar Matched Run", mobile).click();
     await expect(page.getByRole("heading", { name: "E2E Calendar Matched Run" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Workout", exact: true })).toHaveAttribute("href", "/workouts/00000000-0000-4000-8000-000000000173");
+    const trainingSheetLink = page.getByRole("link", { name: "Training sheet", exact: true });
+    await expect(trainingSheetLink).toHaveAttribute("href", "https://docs.google.com/spreadsheets/d/e2e-workbook/edit#gid=e2e-sheet");
+    await expect(trainingSheetLink).toHaveAttribute("target", "_blank");
+    await expect(trainingSheetLink).toHaveAttribute("rel", "noreferrer");
 
     await navigateTo(page, "Settings", mobile);
     if (await page.getByText("Connected as Offline Garmin Testbed", { exact: true }).count() === 0) {

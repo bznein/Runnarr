@@ -178,11 +178,12 @@ on conflict (user_id, source, source_id) do update set
 
 insert into planned_activities(
     user_id, source, source_id, workbook_id, sheet_id, sheet_title,
-    plan_cell, planned_date, name, sport_type, status, raw,
+    plan_cell, planned_date, name, sport_type, status, source_url, raw,
     matched_activity_id, matched_at
 )
 select users.id, 'training_sheet', 'e2e-calendar-planned-run', 'e2e-workbook', 'e2e-sheet',
-    'E2E Plan', 'A0', current_date + 1, 'E2E Calendar Planned Run', 'Run', 'completed', '{}'::jsonb,
+    'E2E Plan', 'A0', current_date + 1, 'E2E Calendar Planned Run', 'Run', 'completed',
+    'https://docs.google.com/spreadsheets/d/e2e-workbook/edit#gid=e2e-sheet', '{}'::jsonb,
     matched_activity.id, now()
 from users
 join activities matched_activity
@@ -195,6 +196,7 @@ on conflict (user_id, source, source_id) do update set
     name = excluded.name,
     sport_type = excluded.sport_type,
     status = excluded.status,
+    source_url = excluded.source_url,
     matched_activity_id = excluded.matched_activity_id,
     matched_at = excluded.matched_at,
     raw = excluded.raw;
