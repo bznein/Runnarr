@@ -586,6 +586,19 @@ test.describe("local product journey", () => {
     await expect(backToStart).toBeDisabled();
     await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
     await expect(page.getByText("Elevation coverage", { exact: true })).toBeVisible();
+    await page.context().grantPermissions(["geolocation"], { origin: new URL(page.url()).origin });
+    await page.context().setGeolocation({ latitude: 53.2707, longitude: -9.0568, accuracy: 12 });
+    await page.getByRole("button", { name: "Current location", exact: true }).click();
+    const locationMarker = page.locator(".course-planner-map .course-location-marker-icon");
+    await expect(locationMarker).toBeVisible();
+    await expect.poll(async () => {
+      const mapBounds = await plannerMap.boundingBox();
+      const markerBounds = await locationMarker.boundingBox();
+      if (!mapBounds || !markerBounds) return Number.POSITIVE_INFINITY;
+      const horizontalOffset = Math.abs(markerBounds.x + markerBounds.width / 2 - (mapBounds.x + mapBounds.width / 2));
+      const verticalOffset = Math.abs(markerBounds.y + markerBounds.height / 2 - (mapBounds.y + mapBounds.height / 2));
+      return Math.max(horizontalOffset, verticalOffset);
+    }).toBeLessThan(8);
     const plannedName = `E2E ${testInfo.project.name} Planned Course`;
     await page.locator(".course-planner-sidebar").getByLabel("Name").fill(plannedName);
     page.once("dialog", (dialog) => void dialog.accept());

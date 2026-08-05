@@ -5754,7 +5754,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAd
       {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={`Waypoint ${index + 1}`} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
       {canEdit && <MapLocationPicker onSelect={onAdd} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
-      {position && <><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
+      {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
       <FitMapContent points={fitPoints} />
     </MapContainer>
     <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>
@@ -5957,7 +5957,7 @@ function CourseMap({ legs, tileURL, highlighted, allowLocation = false }: { legs
       {allPoints[0] && <Marker position={allPoints[0]} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
       {allPoints.length > 1 && <Marker position={allPoints[allPoints.length - 1]} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
-      {position && <><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
+      {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
       <FitMapContent points={allPoints} />
     </MapContainer>
     {allowLocation && <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>}
@@ -7913,6 +7913,15 @@ function FitMapContent({ points }: { points: RoutePoint[] }) {
       map.setView(points[0], 15);
     }
   }, [map, pointsKey]);
+  return null;
+}
+
+function CenterMapOnPoint({ point }: { point: RoutePoint }) {
+  const map = useMap();
+  const pointKey = routePointsKey([point]);
+  useEffect(() => {
+    map.flyTo(point, Math.max(map.getZoom(), 15), { animate: true, duration: 0.45 });
+  }, [map, pointKey]);
   return null;
 }
 

@@ -39,6 +39,8 @@
 
 ### Fixes
 
+- Course-map current-location controls now center the map on the detected
+  position instead of only adding an off-screen marker.
 - New Valhalla-routed course legs now fetch regional elevation profiles and
   calculate inspectable ascent and descent while preserving routes when the
   elevation service is unavailable.
