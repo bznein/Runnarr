@@ -23,6 +23,53 @@ validate_pr_number "179" || fail "valid PR rejected"
 ! validate_pr_number "0" || fail "invalid PR accepted"
 validate_deployment_id "20260731T120000Z-0123456789ab" || fail "valid deployment id rejected"
 
+DEPLOY_CONFIG="${TEMPORARY}/deploy.conf"
+cat > "${DEPLOY_CONFIG}" <<'EOF'
+RUNNARR_DEPLOY_ROOT=/old/state
+RUNNARR_DEPLOY_BASE_DOMAIN=old.example.com
+RUNNARR_BACKUP_AGE_RECIPIENT=age1existingrecipient
+RUNNARR_STAGING_SEED_USERNAME=existing-staging-admin
+RUNNARR_PRODUCTION_URL=https://runnarr.existing.example.com
+EOF
+write_deploy_config \
+  "${DEPLOY_CONFIG}" \
+  "/srv/runnarr" \
+  "/opt/runnarr-deploy" \
+  "example.com" \
+  "10.90.0.0/24"
+grep -Fxq 'RUNNARR_DEPLOY_ROOT=/srv/runnarr' "${DEPLOY_CONFIG}" ||
+  fail "deployment config did not refresh installer-managed paths"
+grep -Fxq 'RUNNARR_DEPLOY_BASE_DOMAIN=example.com' "${DEPLOY_CONFIG}" ||
+  fail "deployment config did not refresh the base domain"
+for preserved_line in \
+  'RUNNARR_BACKUP_AGE_RECIPIENT=age1existingrecipient' \
+  'RUNNARR_STAGING_SEED_USERNAME=existing-staging-admin' \
+  'RUNNARR_PRODUCTION_URL=https://runnarr.existing.example.com'; do
+  [[ "$(grep -Fxc "${preserved_line}" "${DEPLOY_CONFIG}")" -eq 1 ]] ||
+    fail "deployment config did not preserve ${preserved_line%%=*}"
+done
+[[ "$(stat -c '%a' "${DEPLOY_CONFIG}")" == "600" ]] ||
+  fail "rendered deployment config is not private"
+
+while IFS= read -r seed_variable; do
+  [[ "$(grep -Fc -- "-v \"${seed_variable}=" "${ROOT}/deploy/runnarr-deploy")" -eq 2 ]] ||
+    fail "both deployed seed commands must define ${seed_variable}"
+done < <(
+  grep -hoE ":'[A-Za-z_][A-Za-z0-9_]*'" \
+    "${ROOT}/web/e2e/seed.sql" \
+    "${ROOT}/web/e2e/testbed-seed.sql" |
+    tr -d ":'" |
+    sort -u
+)
+for seed_file in \
+  "${ROOT}/web/e2e/seed.sql" \
+  "${ROOT}/web/e2e/testbed-seed.sql"; do
+  grep -Fq '\if :{?e2e_date}' "${seed_file}" ||
+    fail "${seed_file} is not compatible with pre-fixture-clock deployment helpers"
+  grep -Fq '\if :{?e2e_now}' "${seed_file}" ||
+    fail "${seed_file} does not default its fixture timestamp"
+done
+
 bash -n \
   "${ROOT}/deploy/lib.sh" \
   "${ROOT}/deploy/runnarr-deploy" \

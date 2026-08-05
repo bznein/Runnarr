@@ -1,5 +1,17 @@
 \set ON_ERROR_STOP on
 
+-- This file runs in a separate psql process from seed.sql, so it needs the
+-- same compatibility defaults when the host deployment helper is older than
+-- the candidate image.
+\if :{?e2e_date}
+\else
+select to_char(current_timestamp at time zone 'Europe/Dublin', 'YYYY-MM-DD') as e2e_date \gset
+\endif
+\if :{?e2e_now}
+\else
+select :'e2e_date' || 'T12:00:00Z' as e2e_now \gset
+\endif
+
 update courses
 set name = 'Testbed Riverside Loop',
     notes = 'Synthetic course. Safe to favorite, duplicate, export, or delete.'

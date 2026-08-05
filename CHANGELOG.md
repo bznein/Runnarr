@@ -41,6 +41,11 @@
 
 ### Fixes
 
+- Preview and staging deployments now provide every required synthetic-fixture
+  date variable when seeding candidate databases, while candidate seed files
+  remain compatible with hosts whose deployment helper predates those inputs.
+- Rerunning the deployment host installer now preserves the backup recipient,
+  staging seed username, and production URL in `deploy.conf`.
 - Course-map current-location controls now center the map on the detected
   position instead of only adding an off-screen marker.
 - Course-planner metrics now lead with distance, while elevation coverage is

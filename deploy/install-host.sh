@@ -29,6 +29,8 @@ TUNNEL_CREDENTIALS="$3"
 }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=deploy/lib.sh
+source "${ROOT}/deploy/lib.sh"
 ASSET_ROOT="/opt/runnarr-deploy"
 CONFIG_ROOT="/etc/runnarr"
 STATE_ROOT="/srv/runnarr"
@@ -90,18 +92,12 @@ sed \
   "${ROOT}/deploy/ingress/cloudflared.yml.template" > "${CONFIG_ROOT}/ingress/cloudflared.yml"
 install -m 0600 "${TUNNEL_CREDENTIALS}" "${CONFIG_ROOT}/ingress/tunnel-credentials.json"
 
-cat > "${CONFIG_ROOT}/deploy.conf" <<EOF
-RUNNARR_DEPLOY_ROOT=${STATE_ROOT}
-RUNNARR_DEPLOY_ASSETS=${ASSET_ROOT}
-RUNNARR_DEPLOY_BASE_DOMAIN=${BASE_DOMAIN}
-RUNNARR_NONPROD_INGRESS_NETWORK=runnarr-nonprod-ingress
-RUNNARR_NONPROD_INGRESS_SUBNET=${NONPROD_INGRESS_SUBNET}
-RUNNARR_MAX_PREVIEWS=10
-RUNNARR_MIN_AVAILABLE_MEMORY_BYTES=12884901888
-RUNNARR_MIN_FREE_DISK_BYTES=10737418240
-RUNNARR_BACKUP_KEEP=3
-EOF
-chmod 0600 "${CONFIG_ROOT}/deploy.conf"
+write_deploy_config \
+  "${CONFIG_ROOT}/deploy.conf" \
+  "${STATE_ROOT}" \
+  "${ASSET_ROOT}" \
+  "${BASE_DOMAIN}" \
+  "${NONPROD_INGRESS_SUBNET}"
 chgrp "${DEPLOY_USER}" "${CONFIG_ROOT}/deploy.conf"
 chmod 0640 "${CONFIG_ROOT}/deploy.conf"
 

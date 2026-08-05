@@ -121,6 +121,9 @@ RUNNARR_STAGING_SEED_USERNAME=staging-admin
 RUNNARR_PRODUCTION_URL=https://runnarr.example.com
 ```
 
+Rerunning `install-host.sh` refreshes installer-managed paths and limits while
+preserving these operator-managed values.
+
 Authenticate the deployment account to the private package with a classic PAT
 that has only `read:packages`. The helper prompts without echoing the token,
 streams it to Docker, and restricts the resulting Docker config:
