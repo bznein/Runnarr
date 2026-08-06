@@ -944,7 +944,7 @@ test.describe("local product journey", () => {
 
     await navigateTo(page, "Workouts", mobile);
     await expect(page.getByRole("heading", { name: "Workouts" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /E2E Manual Tempo/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /E2E Manual Surges/ })).toBeVisible();
     const scheduledWorkout = page.locator(".workout-list-row").filter({ hasText: "E2E Planned Speed Work" });
     await expect(scheduledWorkout.getByText("Scheduled", { exact: true })).toBeVisible();
     await scheduledWorkout.click();
@@ -952,22 +952,31 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("link", { name: /Open in Garmin/ })).toHaveCount(0);
 
     await page.getByRole("link", { name: "Back", exact: true }).click();
-    await page.getByRole("link", { name: /E2E Manual Tempo/ }).click();
-    await expect(page.getByRole("heading", { name: "E2E Manual Tempo" })).toBeVisible();
-    await expect(page.getByLabel("Prescription")).toHaveValue("12mins warm up//20mins@4:15//8mins cool down");
-    await expect(page.locator(".workout-step.work")).toContainText("20:00");
+    await page.getByRole("link", { name: /E2E Manual Surges/ }).click();
+    await expect(page.getByRole("heading", { name: "E2E Manual Surges" })).toBeVisible();
+    await expect(page.getByLabel("Prescription")).toHaveValue("47mins with surges");
+    const seededSurges = page.locator(".workout-step.repeat");
+    await expect(seededSurges.getByText("9× repeat", { exact: true })).toBeVisible();
+    await expect(seededSurges.locator(".workout-step.work").nth(0)).toContainText("4:30");
+    await expect(seededSurges.locator(".workout-step.work").nth(1)).toContainText("0:30");
+    await expect(page.locator(".workout-step-list > .workout-step.work")).toContainText("2:00");
 
     await page.getByRole("link", { name: "Back", exact: true }).click();
     await page.getByRole("link", { name: "New workout", exact: true }).click();
-    const createdName = `E2E ${testInfo.project.name} Track Repeats`;
+    const createdName = `E2E ${testInfo.project.name} Surges`;
     const scheduled = new Date();
     scheduled.setDate(scheduled.getDate() + 40);
     const scheduledDate = scheduled.toISOString().slice(0, 10);
     await page.getByLabel("Name").fill(createdName);
     await page.getByLabel("Date").fill(scheduledDate);
-    await page.getByLabel("Prescription").fill("10mins warm up//3x2mins@4:00(1min)//10mins cool down");
+    await page.getByLabel("Prescription").fill("47mins with surges");
     await page.getByRole("button", { name: "Preview prescription", exact: true }).click();
-    await expect(page.getByText("3× repeat", { exact: true })).toBeVisible();
+    const parsedSurges = page.locator(".workout-step.repeat");
+    await expect(parsedSurges.getByText("9× repeat", { exact: true })).toBeVisible();
+    await expect(parsedSurges.locator(".workout-step.work").nth(0)).toContainText("4:30");
+    await expect(parsedSurges.locator(".workout-step.work").nth(1)).toContainText("0:30");
+    await expect(page.locator(".workout-step-list > .workout-step.work")).toContainText("2:00");
+    await expect(page.locator(".workout-step.warmup, .workout-step.recovery, .workout-step.cooldown")).toHaveCount(0);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("heading", { name: createdName })).toBeVisible();
 
@@ -975,10 +984,10 @@ test.describe("local product journey", () => {
     seededDate.setDate(seededDate.getDate() + 40);
     const seededDateText = seededDate.toISOString().slice(0, 10);
     await page.goto(`/calendar/day/${seededDateText}`);
-    const seededWorkoutLink = page.getByRole("link", { name: "E2E Manual Tempo", exact: true });
+    const seededWorkoutLink = page.getByRole("link", { name: "E2E Manual Surges", exact: true });
     await expect(seededWorkoutLink).toHaveAttribute("href", "/workouts/00000000-0000-4000-8000-000000000172");
     await seededWorkoutLink.click();
-    await expect(page.getByRole("heading", { name: "E2E Manual Tempo" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "E2E Manual Surges" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
   });
 

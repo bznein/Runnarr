@@ -78,3 +78,65 @@ func TestParseWorkoutPrescriptionPaceRangesAndHashIgnoreResults(t *testing.T) {
 		t.Fatal("display/result changes altered source hash")
 	}
 }
+
+func TestParseWorkoutPrescriptionSurges(t *testing.T) {
+	result := parseWorkoutPrescription("45mins easy, conversational pace, with a fast & relaxed 30-second surge, every 5 minutes", nil)
+	if result.Status == workoutParseError {
+		t.Fatalf("parse failed: %#v", result.Messages)
+	}
+	if result.Definition.EstimatedDurationS != 45*60 || len(result.Definition.Steps) != 1 {
+		t.Fatalf("definition = %#v", result.Definition)
+	}
+	repeat := result.Definition.Steps[0]
+	if repeat.Kind != workoutStepRepeat || repeat.RepeatCount != 9 || repeat.SkipLastRecovery || len(repeat.Children) != 2 {
+		t.Fatalf("repeat = %#v", repeat)
+	}
+	if repeat.Children[0].Kind != workoutStepWork || repeat.Children[0].EndCondition == nil || repeat.Children[0].EndCondition.Value != 270 {
+		t.Fatalf("steady step = %#v", repeat.Children[0])
+	}
+	if repeat.Children[1].Kind != workoutStepWork || repeat.Children[1].EndCondition == nil || repeat.Children[1].EndCondition.Value != 30 {
+		t.Fatalf("surge step = %#v", repeat.Children[1])
+	}
+	for _, child := range repeat.Children {
+		if child.Target.Type != workoutTargetNone {
+			t.Fatalf("surge child has target: %#v", child)
+		}
+	}
+}
+
+func TestParseWorkoutPrescriptionSurgesKeepsRemainder(t *testing.T) {
+	result := parseWorkoutPrescription("47 min with surges", nil)
+	if result.Status == workoutParseError || result.Definition.EstimatedDurationS != 47*60 || len(result.Definition.Steps) != 2 {
+		t.Fatalf("definition = %#v, messages = %#v", result.Definition, result.Messages)
+	}
+	if result.Definition.Steps[0].RepeatCount != 9 {
+		t.Fatalf("repeat = %#v", result.Definition.Steps[0])
+	}
+	remainder := result.Definition.Steps[1]
+	if remainder.Kind != workoutStepWork || remainder.EndCondition == nil || remainder.EndCondition.Value != 120 || remainder.Description != "Final run" {
+		t.Fatalf("remainder = %#v", remainder)
+	}
+
+	short := parseWorkoutPrescription("7mins w/surges", nil)
+	if short.Status == workoutParseError || len(short.Definition.Steps) != 3 || short.Definition.EstimatedDurationS != 7*60 {
+		t.Fatalf("short definition = %#v, messages = %#v", short.Definition, short.Messages)
+	}
+	for _, step := range short.Definition.Steps {
+		if step.Kind != workoutStepWork {
+			t.Fatalf("short step = %#v", step)
+		}
+	}
+}
+
+func TestWorkoutPrescriptionForPlannedUsesSurgeTitleFallback(t *testing.T) {
+	full := "45mins easy, conversational pace, with a fast & relaxed 30-second surge, every 5 minutes"
+	if got := workoutPrescriptionForPlanned(PlannedActivity{Name: "45mins w/surges", Notes: full}); got != full {
+		t.Fatalf("detailed prescription = %q", got)
+	}
+	if got := workoutPrescriptionForPlanned(PlannedActivity{Name: "50mins w/surges", Notes: "Easy conversational run"}); got != "50mins w/surges" {
+		t.Fatalf("title fallback = %q", got)
+	}
+	if got := workoutPrescriptionForPlanned(PlannedActivity{Name: "45mins", Notes: "Easy conversational run"}); got != "" {
+		t.Fatalf("unstructured prescription = %q", got)
+	}
+}

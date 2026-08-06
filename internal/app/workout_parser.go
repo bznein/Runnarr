@@ -18,13 +18,14 @@ var (
 	workoutDistancePattern     = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(kilometres?|kilometers?|kms?|km|metres?|meters?|m)\b`)
 	workoutPacePattern         = regexp.MustCompile(`(?i)@(\d+):(\d{2})(?:\s*-\s*(?:(\d+):)?(\d{2}))?`)
 	workoutPaceAliasPattern    = regexp.MustCompile(`(?i)(\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:minutes?|mins?|min|seconds?|secs?|sec))\s*:(\d+:\d{2})`)
+	workoutSurgesPattern       = regexp.MustCompile(`(?is)^\s*(\d+)\s*(?:minutes?|mins?|min)\b.*\bsurges?\b`)
 )
 
 func isStructuredWorkoutPrescription(value string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	return strings.Contains(normalized, "//") || strings.Contains(normalized, "@") ||
 		strings.Contains(normalized, "continuous") || strings.Contains(normalized, "sets of") ||
-		workoutRepeatPrefixPattern.MatchString(normalized)
+		workoutRepeatPrefixPattern.MatchString(normalized) || workoutSurgesPattern.MatchString(normalized)
 }
 
 func parseWorkoutPrescription(source string, table *trainingSheetWorkoutTable) WorkoutParseResult {
@@ -81,6 +82,9 @@ func parseWorkoutBlock(raw string) ([]WorkoutStep, []WorkoutParseMessage, error)
 	if block == "" {
 		return nil, nil, nil
 	}
+	if steps, matched, err := parseSurgesWorkoutBlock(block); matched {
+		return steps, nil, err
+	}
 	lower := strings.ToLower(block)
 	if strings.Contains(lower, "warm up") || strings.Contains(lower, "warmup") {
 		step, err := parseExecutableWorkoutStep(block, workoutStepWarmup)
@@ -99,6 +103,50 @@ func parseWorkoutBlock(raw string) ([]WorkoutStep, []WorkoutParseMessage, error)
 		return []WorkoutStep{{Kind: workoutStepRepeat, RepeatCount: count, Description: block, Target: noWorkoutTarget(), Children: children}}, messages, nil
 	}
 	return parseWorkoutSequence(block)
+}
+
+func parseSurgesWorkoutBlock(value string) ([]WorkoutStep, bool, error) {
+	match := workoutSurgesPattern.FindStringSubmatch(value)
+	if len(match) != 2 {
+		return nil, false, nil
+	}
+	totalMinutes, err := strconv.Atoi(match[1])
+	if err != nil || totalMinutes <= 0 {
+		return nil, true, fmt.Errorf("Surge workout duration must be greater than zero")
+	}
+
+	const blockSeconds = 5 * 60
+	fullBlocks := totalMinutes * 60 / blockSeconds
+	remainderSeconds := totalMinutes*60 - fullBlocks*blockSeconds
+	steady := WorkoutStep{
+		Kind: workoutStepWork, Description: "Steady run",
+		EndCondition: &WorkoutEndCondition{Type: workoutEndTime, Value: 4.5 * 60, Unit: "seconds"},
+		Target:       noWorkoutTarget(),
+	}
+	surge := WorkoutStep{
+		Kind: workoutStepWork, Description: "Surge",
+		EndCondition: &WorkoutEndCondition{Type: workoutEndTime, Value: 30, Unit: "seconds"},
+		Target:       noWorkoutTarget(),
+	}
+
+	steps := make([]WorkoutStep, 0, 3)
+	switch {
+	case fullBlocks >= 2:
+		steps = append(steps, WorkoutStep{
+			Kind: workoutStepRepeat, RepeatCount: fullBlocks, Description: strings.TrimSpace(value),
+			Target: noWorkoutTarget(), Children: []WorkoutStep{steady, surge},
+		})
+	case fullBlocks == 1:
+		steps = append(steps, steady, surge)
+	}
+	if remainderSeconds > 0 {
+		steps = append(steps, WorkoutStep{
+			Kind: workoutStepWork, Description: "Final run",
+			EndCondition: &WorkoutEndCondition{Type: workoutEndTime, Value: float64(remainderSeconds), Unit: "seconds"},
+			Target:       noWorkoutTarget(),
+		})
+	}
+	return steps, true, nil
 }
 
 func parseWorkoutSequence(value string) ([]WorkoutStep, []WorkoutParseMessage, error) {
