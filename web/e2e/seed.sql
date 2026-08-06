@@ -486,7 +486,7 @@ insert into planned_activities(
 )
 select '00000000-0000-4000-8000-000000000171'::uuid, id, 'manual',
     'workout:00000000-0000-4000-8000-000000000172', '', '', '', '', :'e2e_date'::date + 40,
-    'E2E Manual Tempo', 'Run', '', 'pending', '{"fixture":"e2e-workout"}'::jsonb
+    'E2E Manual Surges', 'Run', '', 'pending', '{"fixture":"e2e-workout"}'::jsonb
 from users
 where username = :'e2e_username'
 on conflict (id) do update set
@@ -502,12 +502,14 @@ insert into workouts(
     definition, parse_status, parse_messages, scheduled_date, revision
 )
 select '00000000-0000-4000-8000-000000000172'::uuid, id, 'manual',
-    '00000000-0000-4000-8000-000000000171'::uuid, 'E2E Manual Tempo', 'Run',
-    '12mins warm up//20mins@4:15//8mins cool down', 'e2e-manual-workout',
-    '{"version":1,"sportType":"Run","estimatedDurationS":2400,"steps":[
-      {"order":1,"kind":"warmup","endCondition":{"type":"time","value":720,"unit":"seconds"},"target":{"type":"none"}},
-      {"order":2,"kind":"work","endCondition":{"type":"time","value":1200,"unit":"seconds"},"target":{"type":"pace","paceSecondsPerKM":255}},
-      {"order":3,"kind":"cooldown","endCondition":{"type":"time","value":480,"unit":"seconds"},"target":{"type":"none"}}
+    '00000000-0000-4000-8000-000000000171'::uuid, 'E2E Manual Surges', 'Run',
+    '47mins with surges', 'e2e-manual-workout',
+    '{"version":1,"sportType":"Run","estimatedDurationS":2820,"steps":[
+      {"order":1,"kind":"repeat","repeatCount":9,"target":{"type":"none"},"children":[
+        {"order":2,"kind":"work","description":"Steady run","endCondition":{"type":"time","value":270,"unit":"seconds"},"target":{"type":"none"}},
+        {"order":3,"kind":"work","description":"Surge","endCondition":{"type":"time","value":30,"unit":"seconds"},"target":{"type":"none"}}
+      ]},
+      {"order":4,"kind":"work","description":"Final run","endCondition":{"type":"time","value":120,"unit":"seconds"},"target":{"type":"none"}}
     ]}'::jsonb,
     'ready', '[]'::jsonb, :'e2e_date'::date + 40, 1
 from users

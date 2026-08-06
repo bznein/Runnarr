@@ -42,6 +42,38 @@ func TestCompileGarminWorkoutExplicitRangeIgnoresTolerance(t *testing.T) {
 	}
 }
 
+func TestCompileGarminWorkoutSurgesUsesActiveIntervals(t *testing.T) {
+	parsed := parseWorkoutPrescription("45mins w/surges", nil)
+	compiled, err := compileGarminWorkout(parsed.Definition, 10, "owner-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment := compiled.Payload["workoutSegments"].([]any)[0].(map[string]any)
+	steps := segment["workoutSteps"].([]any)
+	if len(steps) != 1 {
+		t.Fatalf("steps = %#v", steps)
+	}
+	repeat := steps[0].(map[string]any)
+	if repeat["numberOfIterations"] != float64(9) || repeat["skipLastRestStep"] != false {
+		t.Fatalf("repeat = %#v", repeat)
+	}
+	children := repeat["workoutSteps"].([]any)
+	if len(children) != 2 {
+		t.Fatalf("children = %#v", children)
+	}
+	for index, wantDuration := range []float64{270, 30} {
+		child := children[index].(map[string]any)
+		stepType := child["stepType"].(map[string]any)
+		targetType := child["targetType"].(map[string]any)
+		if stepType["stepTypeKey"] != "interval" || child["endConditionValue"] != wantDuration || targetType["workoutTargetTypeKey"] != "no.target" {
+			t.Fatalf("child %d = %#v", index, child)
+		}
+	}
+	if compiled.Payload["estimatedDurationInSecs"] != float64(45*60) {
+		t.Fatalf("duration = %#v", compiled.Payload["estimatedDurationInSecs"])
+	}
+}
+
 func TestGarminWorkoutOwnershipRequiresIDAndMarker(t *testing.T) {
 	remote := map[string]any{"workoutId": "123", "description": "runnarr:owner:hash"}
 	if err := garminWorkoutRemoteOwned(remote, "123", "runnarr:owner:hash"); err != nil {

@@ -41,6 +41,9 @@
 
 ### Fixes
 
+- Training-sheet and manual prescriptions such as `45mins w/surges` now create
+  five-minute blocks with a 4:30 steady run and 30-second surge, retaining any
+  leftover duration as a final run step.
 - Preview and staging deployments now provide every required synthetic-fixture
   date variable when seeding candidate databases, while candidate seed files
   remain compatible with hosts whose deployment helper predates those inputs.

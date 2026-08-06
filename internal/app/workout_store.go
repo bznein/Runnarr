@@ -146,7 +146,8 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 	if err != nil {
 		return err
 	}
-	if !isStructuredWorkoutPrescription(planned.Notes) {
+	prescription := workoutPrescriptionForPlanned(planned)
+	if prescription == "" {
 		var archivedID string
 		err = s.db.QueryRow(ctx, `
 			update workouts set archived_at = now(), garmin_excluded = true, updated_at = now()
@@ -167,7 +168,7 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 		return nil
 	}
 	table := workoutTableFromPlanned(planned)
-	parsed := parseWorkoutPrescription(planned.Notes, table)
+	parsed := parseWorkoutPrescription(prescription, table)
 	definitionBytes, err := json.Marshal(parsed.Definition)
 	if err != nil {
 		return err
@@ -176,7 +177,7 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 	if err != nil {
 		return err
 	}
-	sourceHash := workoutSourceHash(planned.Notes, table)
+	sourceHash := workoutSourceHash(prescription, table)
 	var previous struct {
 		ID, Name, SportType, SourceHash, ParseStatus, ScheduledDate string
 	}
@@ -204,7 +205,7 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 			generated_at = case when workouts.source_hash <> excluded.source_hash then now() else workouts.generated_at end,
 			updated_at = now()
 		returning id::text
-	`, scopedUserID(ctx), plannedID, planned.Name, planned.SportType, planned.Notes, sourceHash,
+	`, scopedUserID(ctx), plannedID, planned.Name, planned.SportType, prescription, sourceHash,
 		definitionBytes, parsed.Status, messagesBytes, planned.PlannedDate.Format("2006-01-02")).Scan(&workoutID)
 	if err != nil {
 		return err
@@ -224,6 +225,16 @@ func (s *Store) UpsertSheetWorkoutForPlanned(ctx context.Context, planned Planne
 		}
 	}
 	return nil
+}
+
+func workoutPrescriptionForPlanned(planned PlannedActivity) string {
+	if notes := strings.TrimSpace(planned.Notes); isStructuredWorkoutPrescription(notes) {
+		return notes
+	}
+	if name := strings.TrimSpace(planned.Name); workoutSurgesPattern.MatchString(name) {
+		return name
+	}
+	return ""
 }
 
 func (s *Store) BackfillSheetWorkouts(ctx context.Context, notify bool) error {
