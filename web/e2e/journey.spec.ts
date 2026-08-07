@@ -661,6 +661,7 @@ test.describe("local product journey", () => {
       const firstCoordinates = await waypointRows.first().locator("small").innerText();
       const secondCoordinates = await waypointRows.nth(1).locator("small").innerText();
       if (mobile) {
+        await waypointRows.nth(1).evaluate((row) => row.scrollIntoView({ block: "center" }));
         const dragHandle = waypointRows.first().locator(".course-waypoint-drag-handle");
         const handleBounds = await dragHandle.boundingBox();
         const targetBounds = await waypointRows.nth(1).boundingBox();
@@ -668,11 +669,11 @@ test.describe("local product journey", () => {
         expect(targetBounds).not.toBeNull();
         const pointer = { pointerId: 7, pointerType: "touch", isPrimary: true };
         await dragHandle.dispatchEvent("pointerdown", { ...pointer, clientX: handleBounds!.x + handleBounds!.width / 2, clientY: handleBounds!.y + handleBounds!.height / 2 });
-        await dragHandle.dispatchEvent("pointermove", { ...pointer, clientX: targetBounds!.x + targetBounds!.width / 2, clientY: targetBounds!.y + targetBounds!.height / 2 });
+        await dragHandle.dispatchEvent("pointermove", { ...pointer, clientX: targetBounds!.x + targetBounds!.width / 2, clientY: targetBounds!.y + Math.min(24, targetBounds!.height / 2) });
         await expect(waypointRows.nth(1)).toHaveClass(/drop-after/);
         await expect(waypointRows.nth(1)).toHaveAttribute("data-drop-label", "Move waypoint 1 after waypoint 2");
         await page.waitForTimeout(600);
-        await dragHandle.dispatchEvent("pointerup", { ...pointer, clientX: targetBounds!.x + targetBounds!.width / 2, clientY: targetBounds!.y + targetBounds!.height / 2 });
+        await dragHandle.dispatchEvent("pointerup", { ...pointer, clientX: targetBounds!.x + targetBounds!.width / 2, clientY: targetBounds!.y + Math.min(24, targetBounds!.height / 2) });
       } else {
         const dragData = await page.evaluateHandle(() => new DataTransfer());
         await waypointRows.first().dispatchEvent("dragstart", { dataTransfer: dragData });
