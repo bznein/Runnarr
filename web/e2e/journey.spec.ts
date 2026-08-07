@@ -609,7 +609,7 @@ test.describe("local product journey", () => {
       return Math.max(horizontalOffset, verticalOffset);
     }).toBeLessThan(8);
     const plannedName = `E2E ${testInfo.project.name} Planned Course`;
-    await page.locator(".course-planner-sidebar").getByLabel("Name").fill(plannedName);
+    await page.locator(".course-planner-sidebar").getByLabel("Name", { exact: true }).fill(plannedName);
     page.once("dialog", (dialog) => void dialog.accept());
     await Promise.all([
       page.waitForResponse((response) => response.url().endsWith("/api/courses") && response.request().method() === "POST" && response.status() === 201),
