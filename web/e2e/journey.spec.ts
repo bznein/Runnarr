@@ -508,7 +508,7 @@ test.describe("local product journey", () => {
     await expect(page.getByText("No structured workout steps were provided; showing recorded laps.", { exact: true })).toBeVisible();
   });
 
-  test("uses the course library, saves an activity route, and reviews a GPX import", { tag: "@visual-courses" }, async ({ page }, testInfo) => {
+  test("uses the course library, saves an activity route, and reviews a GPX import", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     await login(page, mobile);
@@ -623,6 +623,35 @@ test.describe("local product journey", () => {
       await page.getByRole("link", { name: "Edit route", exact: true }).click();
       await expect(page.getByLabel("Waypoint 2 name")).toHaveValue("Canal turn");
     }
+    if (mobile) await expectNoHorizontalOverflow(page);
+  });
+
+  test("expands the course planner map while selecting waypoints", { tag: "@visual-courses" }, async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    await login(page, mobile);
+    await navigateTo(page, "Courses", mobile);
+    await page.getByRole("link", { name: "New course", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+
+    const plannerMap = page.locator(".course-planner-map .leaflet-container");
+    const waypointRows = page.locator(".course-waypoint-list li");
+    await expect(waypointRows).toHaveCount(1);
+    await page.getByRole("button", { name: "Enter fullscreen map", exact: true }).click();
+    const fullscreenPanel = page.getByRole("region", { name: "Course route map" });
+    await expect(page.getByRole("button", { name: "Exit fullscreen map", exact: true })).toBeVisible();
+    await expect(fullscreenPanel).toHaveClass(/course-planner-map-fullscreen/);
+    const fullscreenBounds = await fullscreenPanel.boundingBox();
+    const viewport = page.viewportSize();
+    expect(fullscreenBounds).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(fullscreenBounds!.width).toBeGreaterThanOrEqual(viewport!.width - 1);
+    expect(fullscreenBounds!.height).toBeGreaterThanOrEqual(viewport!.height - 1);
+
+    await plannerMap.click({ position: { x: 90, y: 110 } });
+    await expect(waypointRows).toHaveCount(2);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Enter fullscreen map", exact: true })).toBeVisible();
+    await expect(fullscreenPanel).not.toHaveClass(/course-planner-map-fullscreen/);
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
