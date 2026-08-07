@@ -581,6 +581,11 @@ test.describe("local product journey", () => {
     await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
     if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
     await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
+    const secondCoordinates = await waypointRows.nth(1).locator("small").innerText();
+    const thirdCoordinates = await waypointRows.nth(2).locator("small").innerText();
+    await waypointRows.nth(1).dragTo(waypointRows.nth(2));
+    await expect(waypointRows.nth(1).locator("small")).toHaveText(thirdCoordinates);
+    await expect(waypointRows.nth(2).locator("small")).toHaveText(secondCoordinates);
     const startCoordinates = await waypointRows.first().locator("small").innerText();
     const backToStart = page.getByRole("button", { name: "Back to start", exact: true });
     await expect(backToStart).toBeEnabled();

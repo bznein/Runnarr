@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, HeartPulse, LocateFixed, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, GripVertical, HeartPulse, LocateFixed, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
 import { divIcon } from "leaflet";
 import { Circle, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -5583,6 +5583,8 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [geometryDirty, setGeometryDirty] = useState(!editing);
   const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
   const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
+  const [draggedWaypointIndex, setDraggedWaypointIndex] = useState<number>();
+  const [waypointDropIndex, setWaypointDropIndex] = useState<number>();
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
   const previousCourse = useQuery({
     queryKey: ["courses", "planner-start"],
@@ -5694,6 +5696,17 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     setDirectLegIndexes([]);
     markGeometryDirty();
   };
+  const moveWaypointInList = (fromIndex: number, toIndex: number) => {
+    if (!canWrite || fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= waypoints.length || toIndex >= waypoints.length) return;
+    setWaypoints((current) => {
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return reindexWaypoints(next);
+    });
+    setDirectLegIndexes([]);
+    markGeometryDirty();
+  };
   const setDirect = (index: number, direct: boolean) => {
     setDirectLegIndexes((current) => direct ? Array.from(new Set([...current, index])).sort((a, b) => a - b) : current.filter((item) => item !== index));
     markGeometryDirty();
@@ -5722,7 +5735,33 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
         <div className="course-waypoint-heading"><strong>Waypoints</strong>{waypoints.length > 0 && <span className="course-waypoint-heading-actions">{waypoints.length >= 2 && <button className="course-back-to-start-button" type="button" title={returnsToStart ? "The course already finishes at its start." : "Add a final leg back to the starting point."} disabled={!canWrite || returnsToStart || waypoints.length >= 100} onClick={addReturnToStart}><RotateCcw size={13} />Back to start</button>}<button className="danger-text-button" type="button" disabled={!canWrite} onClick={() => { setWaypoints([]); setDirectLegIndexes([]); markGeometryDirty(); }}>Clear</button></span>}</div>
         {waypoints.length === 0 && <p className="muted">Click the map to add a start and finish.</p>}
         <ol className="course-waypoint-list">
-          {waypoints.map((waypoint, index) => <li key={`${waypoint.index}-${waypoint.latitude}-${waypoint.longitude}`}>
+          {waypoints.map((waypoint, index) => <li
+            key={`${waypoint.index}-${waypoint.latitude}-${waypoint.longitude}`}
+            className={`${draggedWaypointIndex === index ? "dragging" : ""} ${waypointDropIndex === index && draggedWaypointIndex !== index ? "drag-over" : ""}`.trim()}
+            draggable={canWrite}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", String(index));
+              setDraggedWaypointIndex(index);
+            }}
+            onDragEnter={() => setWaypointDropIndex(index)}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const fromIndex = draggedWaypointIndex ?? Number(event.dataTransfer.getData("text/plain"));
+              moveWaypointInList(fromIndex, index);
+              setDraggedWaypointIndex(undefined);
+              setWaypointDropIndex(undefined);
+            }}
+            onDragEnd={() => {
+              setDraggedWaypointIndex(undefined);
+              setWaypointDropIndex(undefined);
+            }}
+          >
+            <GripVertical className="course-waypoint-drag-handle" size={16} aria-hidden="true" />
             <span className="course-waypoint-number">{index + 1}</span>
             <span><strong>{index === 0 ? "Start" : index === waypoints.length - 1 ? "Finish" : `Waypoint ${index + 1}`}</strong><small>{waypoint.latitude.toFixed(5)}, {waypoint.longitude.toFixed(5)}</small></span>
             <span className="course-waypoint-actions"><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} earlier`} disabled={!canWrite || index === 0} onClick={() => reorderWaypoint(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} later`} disabled={!canWrite || index === waypoints.length - 1} onClick={() => reorderWaypoint(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger" type="button" aria-label={`Remove waypoint ${index + 1}`} disabled={!canWrite} onClick={() => removeWaypoint(index)}><X size={14} /></button></span>
