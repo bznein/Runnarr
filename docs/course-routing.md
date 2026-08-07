@@ -1,10 +1,18 @@
 # Course routing
 
 Runnarr's course planner can connect adjacent waypoints through a self-hosted
-Valhalla routing service. The browser sends planner waypoints only to Runnarr;
-Runnarr calls Valhalla from the backend. If routing is disabled or a particular
-leg cannot be routed, that leg remains visible as a dashed direct line and can
-still be saved after confirmation.
+Valhalla routing service and generate closed-loop alternatives from a starting
+point and target distance. The browser sends planner coordinates only to
+Runnarr; Runnarr calls Valhalla from the backend. If routing is disabled or a
+particular manually planned leg cannot be routed, that leg remains visible as
+a dashed direct line and can still be saved after confirmation.
+
+Loop generation requires exactly one draft waypoint. It accepts 1–100 km for
+Run, Walk, and Hike, and 5–300 km for Cycling. Runnarr evaluates a bounded set
+of `/isochrone` isodistance control points and `/route` results, then returns up
+to three distinct alternatives within 10% of the target. If none qualify, the
+closest result within 20% is returned with a distance warning. Selecting a
+result only populates the normal editable planner; it does not save a course.
 
 ## Bundled optional service
 
@@ -96,9 +104,11 @@ network. Production is not connected to this service.
 ## Existing Valhalla service
 
 To use an existing deployment, set `RUNNARR_ROUTING_URL` to its HTTP(S) origin,
-enable routing, and leave the bundled profile off. Runnarr calls `/route` with
-two coordinates at a time, then calls `/height` with the returned geometry.
-It uses Valhalla's `pedestrian` costing for Run, Walk, and Hike courses and
+enable routing, and leave the bundled profile off. Manual planning calls
+`/route` for adjacent waypoints and `/height` for the returned geometry. Loop
+generation additionally calls `/isochrone`, evaluates multi-location `/route`
+responses, and enriches only the selected alternatives through `/height`. It
+uses Valhalla's `pedestrian` costing for Run, Walk, and Hike courses and
 `bicycle` costing for Cycling. The service must have regional elevation data;
 otherwise the routed geometry remains usable and the affected leg explicitly
 reports that elevation is unavailable.
@@ -119,3 +129,6 @@ tiles remain a separate browser-side privacy boundary controlled by
 - Valhalla coverage ends at the boundaries of the configured graph. Uncovered
   or disconnected legs fall back independently instead of discarding the
   course draft.
+- Generated loops are best-effort route proposals. Sparse or constrained path
+  networks may yield fewer than three distinct alternatives or no result within
+  the 20% hard distance limit.

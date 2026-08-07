@@ -28,6 +28,7 @@ import { fullPathForSimplePath, normalizeSimpleMatchFilter, shouldRedirectToSimp
 import type { SimpleMatchFilter } from "./simpleMode";
 import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
 import { trainingSheetSourceURL } from "./trainingSheetLink";
+import { courseLoopDeviationLabel, courseLoopDistanceHint, parseCourseLoopDistanceKM } from "./courseLoopGeneration";
 import type {
   Activity,
   ActivityClimb,
@@ -46,6 +47,7 @@ import type {
   CourseImportPreview,
   CourseImportSelection,
   CourseLeg,
+  CourseLoopCandidate,
   CourseProfilePoint,
   CourseRoutingLeg,
   CourseSport,
@@ -5583,6 +5585,11 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [geometryDirty, setGeometryDirty] = useState(!editing);
   const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
   const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
+  const [generatedCandidate, setGeneratedCandidate] = useState<CourseLoopCandidate>();
+  const [loopTargetKM, setLoopTargetKM] = useState("10");
+  const [loopVariation, setLoopVariation] = useState(0);
+  const [loopCandidates, setLoopCandidates] = useState<CourseLoopCandidate[]>([]);
+  const [activeLoopID, setActiveLoopID] = useState("");
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
   const previousCourse = useQuery({
     queryKey: ["courses", "planner-start"],
@@ -5616,6 +5623,20 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
 
   const waypointKey = waypoints.map((point) => `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`).join(";");
   const directKey = directLegIndexes.slice().sort((a, b) => a - b).join(",");
+  const loopDistanceKM = parseCourseLoopDistanceKM(loopTargetKM, sportType);
+  const generateLoops = useMutation({
+    mutationFn: (variation: number) => api.generateCourseLoops({
+      sportType,
+      start: waypoints[0],
+      targetDistanceM: loopDistanceKM! * 1000,
+      variation
+    }),
+    onSuccess: (result) => {
+      setLoopCandidates(result.candidates);
+      setActiveLoopID(result.candidates[0]?.id ?? "");
+      setLoopVariation(result.variation + 1);
+    }
+  });
   const routed = useQuery({
     queryKey: ["course-routing", sportType, waypointKey, directKey],
     queryFn: () => api.routeCourseLegs({ sportType, waypoints, directLegIndexes }),
@@ -5625,16 +5646,17 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   });
   const fallbackLegs = plannerDirectLegs(waypoints, routed.error ? "Routing request failed; this leg is direct." : "");
   const plannerLegs: CourseRoutingLeg[] = !geometryDirty
-    ? seedLegs.map((leg) => ({ ...leg }))
+    ? (generatedCandidate?.legs ?? seedLegs).map((leg) => ({ ...leg }))
     : routed.data?.legs.length === waypoints.length - 1
       ? routed.data.legs
       : fallbackLegs;
   const directLegs = plannerLegs.filter((leg) => leg.mode === "direct");
-  const routeDistanceM = !geometryDirty ? course.data?.distanceM ?? courseLegDistance(plannerLegs) : routed.data?.distanceM ?? courseLegDistance(plannerLegs);
-  const elevationGainM = !geometryDirty ? course.data?.elevationGainM : routed.data?.elevationGainM;
-  const elevationLossM = !geometryDirty ? course.data?.elevationLossM : routed.data?.elevationLossM;
-  const elevationCoverage = !geometryDirty ? course.data?.elevationCoverage : routed.data?.elevationCoverage;
-  const elevationProfile = !geometryDirty ? course.data?.profile ?? [] : routed.data?.profile ?? [];
+  const routeDistanceM = !geometryDirty ? generatedCandidate?.distanceM ?? course.data?.distanceM ?? courseLegDistance(plannerLegs) : routed.data?.distanceM ?? courseLegDistance(plannerLegs);
+  const elevationGainM = !geometryDirty ? generatedCandidate?.elevationGainM ?? course.data?.elevationGainM : routed.data?.elevationGainM;
+  const elevationLossM = !geometryDirty ? generatedCandidate?.elevationLossM ?? course.data?.elevationLossM : routed.data?.elevationLossM;
+  const elevationCoverage = !geometryDirty ? generatedCandidate?.elevationCoverage ?? course.data?.elevationCoverage : routed.data?.elevationCoverage;
+  const elevationProfile = !geometryDirty ? generatedCandidate?.profile ?? course.data?.profile ?? [] : routed.data?.profile ?? [];
+  const activeLoop = loopCandidates.find((candidate) => candidate.id === activeLoopID) ?? loopCandidates[0];
   const returnsToStart = plannerReturnsToStart(waypoints);
   const canSave = canWrite && name.trim().length > 0 && waypoints.length >= 2 && plannerLegs.length === waypoints.length - 1 && !routed.isFetching;
   const save = useMutation({
@@ -5655,7 +5677,12 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
 
   const markGeometryDirty = () => {
     setGeometryDirty(true);
+    setGeneratedCandidate(undefined);
+    setLoopCandidates([]);
+    setActiveLoopID("");
+    setLoopVariation(0);
     setHighlighted(undefined);
+    generateLoops.reset();
     save.reset();
   };
   const reindexWaypoints = (items: typeof waypoints) => items.map((point, index) => ({ ...point, index }));
@@ -5698,6 +5725,22 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     setDirectLegIndexes((current) => direct ? Array.from(new Set([...current, index])).sort((a, b) => a - b) : current.filter((item) => item !== index));
     markGeometryDirty();
   };
+  const generateLoopBatch = () => {
+    if (editing || !canWrite || !routingEnabled || waypoints.length !== 1 || loopDistanceKM === undefined || generateLoops.isPending) return;
+    generateLoops.mutate(loopVariation);
+  };
+  const useGeneratedLoop = (candidate: CourseLoopCandidate) => {
+    setWaypoints(candidate.waypoints.map((waypoint, index) => ({ ...waypoint, index })));
+    setSeedLegs(candidate.legs);
+    setGeneratedCandidate(candidate);
+    setDirectLegIndexes([]);
+    setGeometryDirty(false);
+    setLoopCandidates([]);
+    setActiveLoopID("");
+    setHighlighted(undefined);
+    generateLoops.reset();
+    save.reset();
+  };
   const submit = () => {
     if (!canSave) return;
     if (directLegs.length > 0 && !window.confirm(`${directLegs.length} ${directLegs.length === 1 ? "leg is" : "legs are"} direct rather than routed. Save this course anyway?`)) return;
@@ -5715,6 +5758,24 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
       <aside className="panel course-planner-sidebar">
         <div className="panel-heading">Course details</div>
         <CourseDetailsFields name={name} sportType={sportType} notes={notes} onName={setName} onSport={(value) => { setSportType(value); markGeometryDirty(); }} onNotes={setNotes} />
+        {!editing && <section className="course-loop-generator" aria-labelledby="course-loop-generator-title">
+          <div><strong id="course-loop-generator-title">Generate a loop</strong><small>Choose one starting waypoint and a target distance.</small></div>
+          <div className="course-loop-generator-controls">
+            <label className="field"><span>Target distance</span><span className="course-loop-distance-input"><input type="number" min={sportType === "Cycling" ? 5 : 1} max={sportType === "Cycling" ? 300 : 100} step="0.1" inputMode="decimal" value={loopTargetKM} onChange={(event) => { setLoopTargetKM(event.target.value); setLoopCandidates([]); setActiveLoopID(""); setLoopVariation(0); generateLoops.reset(); }} /><span>km</span></span><small>{courseLoopDistanceHint(sportType)}</small></label>
+            <button className="secondary-button" type="button" disabled={!canWrite || !routingEnabled || waypoints.length !== 1 || loopDistanceKM === undefined || generateLoops.isPending} onClick={generateLoopBatch}>{generateLoops.isPending ? "Generating…" : loopCandidates.length > 0 ? "Generate again" : "Generate loops"}</button>
+          </div>
+          {waypoints.length === 0 && <small className="muted">Click the map to set the starting point.</small>}
+          {waypoints.length > 1 && <small className="muted">Keep exactly one waypoint to generate a new loop.</small>}
+          {loopTargetKM && loopDistanceKM === undefined && <small className="row-error">Enter a distance within {courseLoopDistanceHint(sportType)}.</small>}
+          {generateLoops.error && <div className="row-error">{generateLoops.error instanceof ApiError && generateLoops.error.status === 422 ? "No usable loop was found within 20% of that distance. Try another distance or starting point." : courseMutationMessage(generateLoops.error)}</div>}
+          {loopCandidates.length > 0 && <div className="course-loop-alternatives" role="radiogroup" aria-label="Generated loop alternatives">
+            {loopCandidates.map((candidate, index) => <button className={`course-loop-alternative ${candidate.id === activeLoop?.id ? "active" : ""}`} type="button" role="radio" aria-checked={candidate.id === activeLoop?.id} key={candidate.id} onClick={() => setActiveLoopID(candidate.id)} onMouseEnter={() => setActiveLoopID(candidate.id)}>
+              <span className={`course-loop-swatch course-loop-swatch-${index + 1}`} aria-hidden="true" />
+              <span><strong>Route {index + 1}</strong><small>{formatDistance(candidate.distanceM)} · {courseLoopDeviationLabel(candidate.distanceDeviationPct)}</small>{candidate.warning && <small className="warning-text">{candidate.warning}</small>}</span>
+            </button>)}
+            <button className="primary-button" type="button" disabled={!activeLoop} onClick={() => activeLoop && useGeneratedLoop(activeLoop)}>Use selected route</button>
+          </div>}
+        </section>}
         <div className="course-planner-summary">
           <span><strong>{waypoints.length}</strong> waypoints</span>
           <span><strong>{plannerLegs.length}</strong> legs</span>
@@ -5730,8 +5791,8 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
         </ol>
       </aside>
       <section className="panel course-planner-map-panel">
-        <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">Click to add; drag numbered waypoints to adjust.</span></div>{routed.isFetching && <span className="muted">Routing…</span>}</div>
-        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} onAdd={addWaypoint} onMove={moveWaypoint} />
+        <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">{loopCandidates.length > 0 ? "Compare the generated loops, then choose one to edit." : "Click to add; drag numbered waypoints to adjust."}</span></div>{routed.isFetching && <span className="muted">Routing…</span>}</div>
+        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} alternatives={loopCandidates} activeAlternativeID={activeLoop?.id} onAlternativeSelect={setActiveLoopID} onAlternativeUse={useGeneratedLoop} tileURL={mapTileURL} canEdit={canWrite} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} onAdd={addWaypoint} onMove={moveWaypoint} />
       </section>
     </section>
     {plannerLegs.length > 0 && <section className="course-planner-elevation-preview">
@@ -5750,11 +5811,13 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   </Page>;
 }
 
-function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
+function CoursePlannerMap({ legs, waypoints, alternatives = [], activeAlternativeID, onAlternativeSelect, onAlternativeUse, tileURL, canEdit, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; alternatives?: CourseLoopCandidate[]; activeAlternativeID?: string; onAlternativeSelect?: (id: string) => void; onAlternativeUse?: (candidate: CourseLoopCandidate) => void; tileURL?: string; canEdit: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
   const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
+  const alternativePoints = alternatives.map((candidate) => candidate.legs.flatMap((leg) => decodeCoursePolyline(leg.encodedPolyline)));
   const waypointPoints = waypoints.map((point) => [point.latitude, point.longitude] as RoutePoint);
   const allPoints = pointsByLeg.flat();
-  const fitPoints = allPoints.length > 0 ? allPoints : waypointPoints;
+  const allAlternativePoints = alternativePoints.flat();
+  const fitPoints = allAlternativePoints.length > 0 ? allAlternativePoints : allPoints.length > 0 ? allPoints : waypointPoints;
   const center = fitPoints[0] ?? [53.3498, -6.2603] as RoutePoint;
   const [position, setPosition] = useState<{ point: RoutePoint; accuracy: number }>();
   const [locationError, setLocationError] = useState("");
@@ -5768,13 +5831,15 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAd
   return <div className="map-frame course-map-frame course-planner-map">
     <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
+      {alternativePoints.map((points, index) => points.length > 1 && <Polyline key={alternatives[index].id} positions={points} eventHandlers={{ click: () => onAlternativeSelect?.(alternatives[index].id) }} pathOptions={{ color: ["#2f6df6", "#7b5cc4", "#2a8c73"][index] ?? "#2f6df6", weight: alternatives[index].id === activeAlternativeID ? 7 : 4, opacity: alternatives[index].id === activeAlternativeID ? 0.95 : 0.55 }} />)}
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
       {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={`Waypoint ${index + 1}`} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
-      {canEdit && <MapLocationPicker onSelect={onAdd} />}
+      {canEdit && alternatives.length === 0 && <MapLocationPicker onSelect={onAdd} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
       {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
       <FitMapContent points={fitPoints} />
     </MapContainer>
+    {alternatives.length > 0 && <div className="course-loop-map-selector" aria-label="Map route alternatives"><span>{alternatives.map((candidate, index) => <button className={candidate.id === activeAlternativeID ? "active" : ""} type="button" aria-label={`Show route ${index + 1}`} aria-pressed={candidate.id === activeAlternativeID} key={candidate.id} onClick={() => onAlternativeSelect?.(candidate.id)}>{index + 1}</button>)}</span><button className="primary-button small-button" type="button" onClick={() => { const candidate = alternatives.find((item) => item.id === activeAlternativeID) ?? alternatives[0]; if (candidate) onAlternativeUse?.(candidate); }}>Use route</button></div>}
     <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>
     {locationError && <div className="row-error course-location-error">{locationError}</div>}
     {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}

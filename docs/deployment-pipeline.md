@@ -162,8 +162,9 @@ so preview acceptance exercises the selected graph.
 
 When preview routing is active, newly deployed previews receive only the
 internal `http://valhalla:8002` endpoint. The shared container is connected to
-each isolated preview network and must pass a real Dublin pedestrian route
-before that preview can be accepted. Staging remains unchanged.
+each isolated preview network and must pass a real Dublin pedestrian route,
+isodistance contour, and elevation profile before that preview can be accepted.
+Staging remains unchanged.
 Production uses its own bundled Valhalla graph; preview routing remains a
 separate shared non-production service.
 

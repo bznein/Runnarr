@@ -27,6 +27,9 @@
   can add a final routed leg back to the starting point with one action.
 - New course plans now begin at the starting point of the most recently updated
   saved course when one is available.
+- New course plans can generate up to three distinct, editable closed-loop
+  alternatives from one starting point and a sport-specific target distance,
+  with explicit distance tolerances and repeatable new batches.
 - Matched completed activities now link directly to their source training sheet in both full and simple experiences.
 - Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.

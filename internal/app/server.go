@@ -181,6 +181,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/courses", s.handleListCourses)
 			r.Post("/courses", s.handleCreateCourse)
 			r.Post("/course-routing/legs", s.handleRouteCourseLegs)
+			r.Post("/course-routing/loops", s.handleGenerateCourseLoops)
 			r.Get("/courses/{id}", s.handleGetCourse)
 			r.Patch("/courses/{id}/details", s.handleUpdateCourseDetails)
 			r.Put("/courses/{id}/plan", s.handleUpdateCoursePlan)

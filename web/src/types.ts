@@ -222,6 +222,19 @@ export type CourseRoutingResponse = {
   profile: CourseProfilePoint[];
 };
 
+export type CourseLoopCandidate = CourseRoutingResponse & {
+  id: string;
+  waypoints: CourseWaypoint[];
+  distanceDeviationPct: number;
+  warning?: string;
+};
+
+export type CourseLoopGenerationResponse = {
+  targetDistanceM: number;
+  variation: number;
+  candidates: CourseLoopCandidate[];
+};
+
 export type CoursePlanInput = {
   revision?: number;
   name: string;
