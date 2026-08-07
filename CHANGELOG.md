@@ -11,6 +11,8 @@
 
 ### Features
 
+- Course-planner waypoints can now be reordered by mouse, touch, or pen dragging,
+  with a labeled insertion preview and arrow controls for keyboard use.
 - Added the PostGIS-backed, account-private course foundation with bounded
   geometry APIs, GPX preview/import/export, duplicate protection, and activity
   route snapshots.

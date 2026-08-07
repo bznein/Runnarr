@@ -582,8 +582,8 @@ test.describe("local product journey", () => {
     await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
     if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
     await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
+    const waypointName = "Canal turn beside the old stone bridge";
     if (!visualBaseline) {
-      const waypointName = "Canal turn beside the old stone bridge";
       await waypointRows.nth(1).getByLabel("Waypoint 2 name").fill(waypointName);
       const mapLabel = page.getByLabel(`Waypoint 2: ${waypointName}`, { exact: true });
       await expect(mapLabel).toBeVisible();
@@ -593,6 +593,20 @@ test.describe("local product journey", () => {
       await expect(mapLabel).toBeFocused();
       await expect(mapLabel).toHaveCSS("white-space", "normal");
     }
+    const secondCoordinates = await waypointRows.nth(1).locator("small").innerText();
+    const thirdCoordinates = await waypointRows.nth(2).locator("small").innerText();
+    if (await waypointRows.nth(1).getAttribute("draggable") === "true") {
+      const dragData = await page.evaluateHandle(() => new DataTransfer());
+      await waypointRows.nth(1).dispatchEvent("dragstart", { dataTransfer: dragData });
+      await waypointRows.nth(2).dispatchEvent("dragenter", { dataTransfer: dragData });
+      await waypointRows.nth(2).dispatchEvent("dragover", { dataTransfer: dragData });
+      await expect(waypointRows.nth(2)).toHaveClass(/drop-after/);
+      await expect(waypointRows.nth(2)).toHaveAttribute("data-drop-label", "Move waypoint 2 after waypoint 3");
+      await waypointRows.nth(2).dispatchEvent("drop", { dataTransfer: dragData });
+      await expect(waypointRows.nth(1).locator("small")).toHaveText(thirdCoordinates);
+      await expect(waypointRows.nth(2).locator("small")).toHaveText(secondCoordinates);
+    }
+    if (!visualBaseline) await expect(page.getByLabel(`Waypoint 3: ${waypointName}`, { exact: true })).toBeVisible();
     const startCoordinates = await waypointRows.first().locator("small").innerText();
     const backToStart = page.getByRole("button", { name: "Back to start", exact: true });
     await expect(backToStart).toBeEnabled();
@@ -629,7 +643,7 @@ test.describe("local product journey", () => {
     await expect(page.getByText(/direct leg/).first()).toBeVisible();
     if (!visualBaseline) {
       await page.getByRole("link", { name: "Edit route", exact: true }).click();
-      await expect(page.getByLabel("Waypoint 2 name")).toHaveValue("Canal turn beside the old stone bridge");
+      await expect(page.getByLabel("Waypoint 3 name")).toHaveValue(waypointName);
     }
     if (mobile) await expectNoHorizontalOverflow(page);
   });
@@ -669,6 +683,37 @@ test.describe("local product journey", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Enter fullscreen map", exact: true })).toBeVisible();
     await expect(fullscreenPanel).not.toHaveClass(/course-planner-map-fullscreen/);
+    if (await waypointRows.first().getAttribute("draggable") === "true") {
+      const firstCoordinates = await waypointRows.first().locator("small").innerText();
+      const secondCoordinates = await waypointRows.nth(1).locator("small").innerText();
+      if (mobile) {
+        await waypointRows.nth(1).evaluate((row) => row.scrollIntoView({ block: "center" }));
+        const dragHandle = waypointRows.first().locator(".course-waypoint-drag-handle");
+        const handleBounds = await dragHandle.boundingBox();
+        const targetBounds = await waypointRows.nth(1).boundingBox();
+        expect(handleBounds).not.toBeNull();
+        expect(targetBounds).not.toBeNull();
+        const pointer = { pointerId: 7, pointerType: "touch", isPrimary: true };
+        await dragHandle.dispatchEvent("pointerdown", { ...pointer, clientX: handleBounds!.x + handleBounds!.width / 2, clientY: handleBounds!.y + handleBounds!.height / 2 });
+        await dragHandle.dispatchEvent("pointermove", { ...pointer, clientX: targetBounds!.x + targetBounds!.width / 2, clientY: targetBounds!.y + Math.min(24, targetBounds!.height / 2) });
+        await expect(waypointRows.nth(1)).toHaveClass(/drop-after/);
+        await expect(waypointRows.nth(1)).toHaveAttribute("data-drop-label", "Move waypoint 1 after waypoint 2");
+        await page.waitForTimeout(600);
+        await dragHandle.dispatchEvent("pointerup", { ...pointer, clientX: targetBounds!.x + targetBounds!.width / 2, clientY: targetBounds!.y + Math.min(24, targetBounds!.height / 2) });
+      } else {
+        const dragData = await page.evaluateHandle(() => new DataTransfer());
+        await waypointRows.first().dispatchEvent("dragstart", { dataTransfer: dragData });
+        await waypointRows.nth(1).dispatchEvent("dragenter", { dataTransfer: dragData });
+        await waypointRows.nth(1).dispatchEvent("dragover", { dataTransfer: dragData });
+        await expect(waypointRows.nth(1)).toHaveClass(/drop-after/);
+        await expect(waypointRows.nth(1)).toHaveAttribute("data-drop-label", "Move waypoint 1 after waypoint 2");
+        await page.waitForTimeout(600);
+        await waypointRows.nth(1).dispatchEvent("drop", { dataTransfer: dragData });
+      }
+      await expect(waypointRows.first().locator("small")).toHaveText(secondCoordinates);
+      await expect(waypointRows.nth(1).locator("small")).toHaveText(firstCoordinates);
+      if (!visualBaseline) await expect(page.getByLabel(`Waypoint 2: ${waypointName}`, { exact: true })).toBeVisible();
+    }
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
