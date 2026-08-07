@@ -383,6 +383,18 @@ request = urllib.request.Request(
 response = json.load(urllib.request.urlopen(request, timeout=20))
 legs = response["trip"]["legs"]
 assert legs and legs[0]["shape"]
+isochrone_request = urllib.request.Request(
+    sys.argv[1] + "/isochrone",
+    data=json.dumps({
+        "locations": [{"lat": float(sys.argv[2]), "lon": float(sys.argv[3])}],
+        "costing": "pedestrian",
+        "contours": [{"distance": 0.5}],
+        "polygons": False,
+    }).encode(),
+    headers={"Content-Type": "application/json"},
+)
+isochrone_response = json.load(urllib.request.urlopen(isochrone_request, timeout=20))
+assert isochrone_response["features"]
 height_request = urllib.request.Request(
     sys.argv[1] + "/height",
     data=json.dumps({

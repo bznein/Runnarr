@@ -19,6 +19,61 @@ function isMobileProject(projectName: string) {
   return projectName === "mobile-chromium";
 }
 
+type E2ERoutePoint = [number, number];
+
+function encodeE2ECoursePolyline(points: E2ERoutePoint[]) {
+  let previousLatitude = 0;
+  let previousLongitude = 0;
+  let encoded = "";
+  const encodeValue = (value: number) => {
+    let shifted = value < 0 ? ~(value << 1) : value << 1;
+    let result = "";
+    while (shifted >= 0x20) {
+      result += String.fromCharCode((0x20 | (shifted & 0x1f)) + 63);
+      shifted >>>= 5;
+    }
+    return result + String.fromCharCode(shifted + 63);
+  };
+  for (const [latitude, longitude] of points) {
+    const nextLatitude = Math.round(latitude * 1_000_000);
+    const nextLongitude = Math.round(longitude * 1_000_000);
+    encoded += encodeValue(nextLatitude - previousLatitude);
+    encoded += encodeValue(nextLongitude - previousLongitude);
+    previousLatitude = nextLatitude;
+    previousLongitude = nextLongitude;
+  }
+  return encoded;
+}
+
+function e2eCourseLoopCandidate(index: number, start: E2ERoutePoint) {
+  const direction = index === 1 ? 1 : index === 2 ? -1 : 0.65;
+  const points: E2ERoutePoint[] = [
+    start,
+    [start[0] + 0.026 * direction, start[1] + 0.034],
+    [start[0] - 0.021 * direction, start[1] + 0.042 * direction],
+    start
+  ];
+  const distanceM = [9800, 10300, 10800][index - 1];
+  return {
+    id: `route-${index}`,
+    routingEnabled: true,
+    waypoints: points.map(([latitude, longitude], waypointIndex) => ({ index: waypointIndex, latitude, longitude })),
+    legs: points.slice(1).map((end, legIndex) => ({
+      index: legIndex,
+      mode: "routed",
+      encodedPolyline: encodeE2ECoursePolyline([points[legIndex], end]),
+      elevationsM: [20 + legIndex * 8, 28 + legIndex * 8],
+      pointCount: 2
+    })),
+    distanceM,
+    distanceDeviationPct: [-2, 3, 8][index - 1],
+    elevationGainM: 42 + index,
+    elevationLossM: 39 + index,
+    elevationCoverage: 1,
+    profile: points.map(([latitude, longitude], pointIndex) => ({ distanceM: distanceM * pointIndex / 3, elevationM: 20 + pointIndex * 8, latitude, longitude }))
+  };
+}
+
 function visibleActivityContainer(page: Page, mobile: boolean) {
   const selector = mobile
     ? ".activity-card-list:visible, .empty-state:visible"
@@ -511,6 +566,22 @@ test.describe("local product journey", () => {
   test("uses the course library, saves an activity route, and reviews a GPX import", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
+    const loopVariations: number[] = [];
+    await page.route(/\/api\/config$/, async (route) => {
+      const response = await route.fetch();
+      const config = await response.json() as Record<string, unknown>;
+      await route.fulfill({ response, json: { ...config, courseRoutingEnabled: true } });
+    });
+    await page.route("**/api/course-routing/loops", async (route) => {
+      const input = route.request().postDataJSON() as { start: { latitude: number; longitude: number }; targetDistanceM: number; variation: number };
+      loopVariations.push(input.variation);
+      const start: E2ERoutePoint = [input.start.latitude, input.start.longitude];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ targetDistanceM: input.targetDistanceM, variation: input.variation, candidates: [1, 2, 3].map((index) => e2eCourseLoopCandidate(index, start)) })
+      });
+    });
     await login(page, mobile);
 
     await navigateTo(page, "Courses", mobile);
@@ -572,16 +643,22 @@ test.describe("local product journey", () => {
     await navigateTo(page, "Courses", mobile);
     await page.getByRole("link", { name: "New course", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
-    await expect(page.getByText("Routing is not enabled.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Routing is not enabled.", { exact: true })).toHaveCount(0);
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
     const waypointRows = page.locator(".course-waypoint-list li");
     await expect(waypointRows).toHaveCount(1);
     await expect(waypointRows.first().locator("small")).toHaveText(`${latitude.toFixed(5)}, -6.31000`);
     await expect(page.getByText("Starting location", { exact: true })).toHaveCount(0);
-    await plannerMap.click({ position: { x: 90, y: 110 } });
-    await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
-    if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
-    await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
+    await page.getByRole("button", { name: "Generate loops", exact: true }).click();
+    await expect(page.getByRole("radio", { name: /Route 1/ })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Route 2/ })).toContainText("10.3 km");
+    await expect(page.getByRole("button", { name: "Generate again", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Generate again", exact: true }).click();
+    await expect.poll(() => loopVariations).toEqual([0, 1]);
+    await page.getByRole("radio", { name: /Route 2/ }).click();
+    await expect(page.getByRole("radio", { name: /Route 2/ })).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("button", { name: "Use selected route", exact: true }).click();
+    await expect(waypointRows).toHaveCount(4);
     const waypointName = "Canal turn beside the old stone bridge";
     if (!visualBaseline) {
       await waypointRows.nth(1).getByLabel("Waypoint 2 name").fill(waypointName);
@@ -593,32 +670,15 @@ test.describe("local product journey", () => {
       await expect(mapLabel).toBeFocused();
       await expect(mapLabel).toHaveCSS("white-space", "normal");
     }
-    const secondCoordinates = await waypointRows.nth(1).locator("small").innerText();
-    const thirdCoordinates = await waypointRows.nth(2).locator("small").innerText();
-    if (await waypointRows.nth(1).getAttribute("draggable") === "true") {
-      const dragData = await page.evaluateHandle(() => new DataTransfer());
-      await waypointRows.nth(1).dispatchEvent("dragstart", { dataTransfer: dragData });
-      await waypointRows.nth(2).dispatchEvent("dragenter", { dataTransfer: dragData });
-      await waypointRows.nth(2).dispatchEvent("dragover", { dataTransfer: dragData });
-      await expect(waypointRows.nth(2)).toHaveClass(/drop-after/);
-      await expect(waypointRows.nth(2)).toHaveAttribute("data-drop-label", "Move waypoint 2 after waypoint 3");
-      await waypointRows.nth(2).dispatchEvent("drop", { dataTransfer: dragData });
-      await expect(waypointRows.nth(1).locator("small")).toHaveText(thirdCoordinates);
-      await expect(waypointRows.nth(2).locator("small")).toHaveText(secondCoordinates);
-    }
-    if (!visualBaseline) await expect(page.getByLabel(`Waypoint 3: ${waypointName}`, { exact: true })).toBeVisible();
     const startCoordinates = await waypointRows.first().locator("small").innerText();
     const backToStart = page.getByRole("button", { name: "Back to start", exact: true });
-    await expect(backToStart).toBeEnabled();
-    await backToStart.click();
-    await expect(waypointRows).toHaveCount(mobile ? 5 : 4);
     await expect(waypointRows.last().locator("small")).toHaveText(startCoordinates);
     await expect(backToStart).toBeDisabled();
     await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
     const plannerMetrics = page.locator(".course-planner-elevation-metrics .metric");
     await expect(plannerMetrics).toHaveCount(3);
     await expect(plannerMetrics.first()).toContainText("Distance");
-    await expect(page.getByText("Elevation covers 0% of this route", { exact: false })).toBeVisible();
+    await expect(page.locator(".course-elevation-coverage-notice")).toHaveCount(0);
     await page.context().grantPermissions(["geolocation"], { origin: new URL(page.url()).origin });
     await page.context().setGeolocation({ latitude: 53.2707, longitude: -9.0568, accuracy: 12 });
     await page.getByRole("button", { name: "Current location", exact: true }).click();
@@ -634,16 +694,16 @@ test.describe("local product journey", () => {
     }).toBeLessThan(8);
     const plannedName = `E2E ${testInfo.project.name} Planned Course`;
     await page.locator(".course-planner-sidebar").getByLabel("Name", { exact: true }).fill(plannedName);
-    page.once("dialog", (dialog) => void dialog.accept());
     await Promise.all([
       page.waitForResponse((response) => response.url().endsWith("/api/courses") && response.request().method() === "POST" && response.status() === 201),
       page.getByRole("button", { name: "Save course", exact: true }).click()
     ]);
     await expect(page.getByRole("heading", { name: plannedName, exact: true })).toBeVisible();
-    await expect(page.getByText(/direct leg/).first()).toBeVisible();
+    await expect(page.getByText(/direct leg/)).toHaveCount(0);
     if (!visualBaseline) {
       await page.getByRole("link", { name: "Edit route", exact: true }).click();
-      await expect(page.getByLabel("Waypoint 3 name")).toHaveValue(waypointName);
+      await expect(page.getByLabel("Waypoint 2 name")).toHaveValue(waypointName);
+      await expect(page.getByText("Routed", { exact: true }).first()).toBeVisible();
     }
     if (mobile) await expectNoHorizontalOverflow(page);
   });
@@ -652,6 +712,22 @@ test.describe("local product journey", () => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     const waypointName = "Canal turn beside the old stone bridge";
+    if (!visualBaseline) {
+      await page.route(/\/api\/config$/, async (route) => {
+        const response = await route.fetch();
+        const config = await response.json() as Record<string, unknown>;
+        await route.fulfill({ response, json: { ...config, courseRoutingEnabled: true } });
+      });
+      await page.route("**/api/course-routing/loops", async (route) => {
+        const input = route.request().postDataJSON() as { start: { latitude: number; longitude: number }; targetDistanceM: number; variation: number };
+        const start: E2ERoutePoint = [input.start.latitude, input.start.longitude];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ targetDistanceM: input.targetDistanceM, variation: input.variation, candidates: [1, 2, 3].map((index) => e2eCourseLoopCandidate(index, start)) })
+        });
+      });
+    }
     await login(page, mobile);
     await navigateTo(page, "Courses", mobile);
     await page.getByRole("link", { name: "New course", exact: true }).click();
@@ -660,7 +736,11 @@ test.describe("local product journey", () => {
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
     const waypointRows = page.locator(".course-waypoint-list li");
     await expect(waypointRows).toHaveCount(1);
-    if (!visualBaseline) await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
+    if (!visualBaseline) {
+      await page.getByRole("button", { name: "Generate loops", exact: true }).click();
+      await expect(page.getByRole("radio", { name: /Route 1/ })).toBeVisible();
+      await expect(page.getByRole("radio", { name: /Route 3/ })).toBeVisible();
+    }
     await page.getByRole("button", { name: "Enter fullscreen map", exact: true }).click();
     const fullscreenPanel = page.getByRole("region", { name: "Course route map" });
     await expect(page.getByRole("button", { name: "Exit fullscreen map", exact: true })).toBeVisible();
@@ -672,14 +752,19 @@ test.describe("local product journey", () => {
     expect(fullscreenBounds!.width).toBeGreaterThanOrEqual(viewport!.width - 1);
     expect(fullscreenBounds!.height).toBeGreaterThanOrEqual(viewport!.height - 1);
     if (!visualBaseline) {
+      await expect(page.getByLabel("Map route alternatives")).toBeVisible();
+      await page.getByRole("button", { name: "Use route", exact: true }).click();
+      await expect(waypointRows).toHaveCount(4);
+      await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
       const mapLabel = page.getByLabel(`Waypoint 1: ${waypointName}`, { exact: true });
       await expect(mapLabel).toBeVisible();
       await expect(mapLabel).toHaveAttribute("title", waypointName);
       await expect.poll(() => mapLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    } else {
+      await plannerMap.click({ position: { x: 90, y: 110 } });
+      await expect(waypointRows).toHaveCount(2);
     }
 
-    await plannerMap.click({ position: { x: 90, y: 110 } });
-    await expect(waypointRows).toHaveCount(2);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Enter fullscreen map", exact: true })).toBeVisible();
     await expect(fullscreenPanel).not.toHaveClass(/course-planner-map-fullscreen/);

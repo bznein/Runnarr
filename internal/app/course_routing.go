@@ -157,16 +157,12 @@ func plannerLegPointContribution(index, pointCount int) int {
 }
 
 func (service *CourseRoutingService) routeLeg(ctx context.Context, index int, sport CourseSport, start, end CourseWaypoint) (CourseRoutingLeg, error) {
-	costing := "pedestrian"
-	if sport == CourseSportCycling {
-		costing = "bicycle"
-	}
 	body, err := json.Marshal(map[string]any{
 		"locations": []map[string]float64{
 			{"lat": start.Latitude, "lon": start.Longitude},
 			{"lat": end.Latitude, "lon": end.Longitude},
 		},
-		"costing":      costing,
+		"costing":      courseRoutingCosting(sport),
 		"shape_format": "polyline6",
 		"units":        "kilometers",
 	})

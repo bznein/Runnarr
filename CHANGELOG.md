@@ -29,6 +29,9 @@
   can add a final routed leg back to the starting point with one action.
 - New course plans now begin at the starting point of the most recently updated
   saved course when one is available.
+- New course plans can generate up to three distinct, editable closed-loop
+  alternatives from one starting point and a sport-specific target distance,
+  with explicit distance tolerances and repeatable new batches.
 - Course planner waypoints can now be given custom names that persist across
   route edits and course duplication, with compact map labels that reveal the
   full name on hover or keyboard focus.

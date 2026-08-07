@@ -163,6 +163,10 @@ grep -Fq 'disconnect_preview_routing "previews/${pr}"' \
   fail "preview teardown does not detach shared Valhalla"
 grep -Fq 'sys.argv[1] + "/height"' "${ROOT}/deploy/runnarr-deploy" ||
   fail "preview routing acceptance does not query elevation"
+grep -Fq 'sys.argv[1] + "/isochrone"' "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview routing acceptance does not query isodistance contours"
+grep -Fq 'assert isochrone_response["features"]' "${ROOT}/deploy/runnarr-deploy" ||
+  fail "preview routing acceptance allows empty isodistance contours"
 grep -Fq 'assert heights and all(value is not None for value in heights)' \
   "${ROOT}/deploy/runnarr-deploy" ||
   fail "preview routing acceptance allows missing elevation values"

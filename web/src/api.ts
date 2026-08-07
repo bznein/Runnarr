@@ -20,6 +20,7 @@ import type {
   CourseImportResult,
   CourseImportSelection,
   CourseListPage,
+  CourseLoopGenerationResponse,
   CoursePlanInput,
   CourseRoutingResponse,
   CourseSport,
@@ -290,6 +291,8 @@ export const api = {
     request<Course>(`/api/courses/${encodeURIComponent(id)}/plan`, { method: "PUT", body: JSON.stringify(body) }),
   routeCourseLegs: (body: { sportType: CourseSport; waypoints: Array<{ index: number; latitude: number; longitude: number }>; directLegIndexes: number[] }) =>
     request<CourseRoutingResponse>("/api/course-routing/legs", { method: "POST", body: JSON.stringify(body) }),
+  generateCourseLoops: (body: { sportType: CourseSport; start: { index: number; latitude: number; longitude: number }; targetDistanceM: number; variation: number }) =>
+    request<CourseLoopGenerationResponse>("/api/course-routing/loops", { method: "POST", body: JSON.stringify(body) }),
   updateCourseDetails: (id: string, body: { revision: number; name: string; sportType: CourseSport; notes: string }) =>
     request<Course>(`/api/courses/${encodeURIComponent(id)}/details`, { method: "PATCH", body: JSON.stringify(body) }),
   setCourseFavorite: (id: string, favorite: boolean) =>

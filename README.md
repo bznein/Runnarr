@@ -57,13 +57,15 @@ Course detail supports local metadata, favorites, duplication, permanent
 deletion, GPX export, and a one-shot current-location overlay. Location is
 requested only after pressing the control and is not stored separately by
 Runnarr. When a saved course is available, its starting point seeds the next
-new course draft.
+new course draft. With routing enabled, a new draft can also generate up to
+three distinct closed-loop alternatives from that start and a target distance;
+the selected result remains fully editable before it is saved.
 
-The waypoint planner can keep individual legs direct or route them through an
-optional backend-connected Valhalla service. The normal stack leaves this
-heavier regional service off. See the [course-routing guide](docs/course-routing.md)
-for graph sizing, Compose startup, privacy boundaries, and external-service
-configuration.
+The waypoint planner can keep individual legs direct, route them through an
+optional backend-connected Valhalla service, or use Valhalla isodistance data
+to propose generated loops. The normal stack leaves this heavier regional
+service off. See the [course-routing guide](docs/course-routing.md) for graph
+sizing, Compose startup, privacy boundaries, and external-service configuration.
 
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 
