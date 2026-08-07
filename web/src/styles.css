@@ -3660,6 +3660,26 @@ textarea {
   min-width: 0;
 }
 
+.course-waypoint-name {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: var(--color-heading);
+  background: transparent;
+  font: inherit;
+  font-weight: 680;
+}
+
+.course-waypoint-name:focus {
+  outline: 1px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.course-waypoint-name:disabled {
+  opacity: 1;
+}
+
 .course-waypoint-list small {
   overflow: hidden;
   color: var(--color-muted);

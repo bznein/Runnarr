@@ -15,24 +15,25 @@ import (
 )
 
 const (
-	maxCourseNameRunes        = 160
-	maxCourseNotesRunes       = 5000
-	maxCoursePoints           = 100000
-	maxCourseWaypoints        = 500
-	maxCourseImportBytes      = 10 << 20
-	maxCoursePlanRequestBytes = 16 << 20
-	maxCourseImportSegments   = 100
-	maxCourseMapPreview       = 5000
-	maxCourseProfilePoints    = 1200
-	maxPreservedCourseAnchors = 25
-	courseElevationRadiusM    = 150.0
-	courseElevationMaxGapM    = 500.0
-	courseElevationMinCover   = 0.90
-	courseFootJumpMinM        = 250.0
-	courseFootJumpSpeedMPS    = 25.0
-	courseBikeJumpMinM        = 500.0
-	courseBikeJumpSpeedMPS    = 60.0
-	courseUntimedMaxJumpM     = 5000.0
+	maxCourseNameRunes         = 160
+	maxCourseWaypointNameRunes = 160
+	maxCourseNotesRunes        = 5000
+	maxCoursePoints            = 100000
+	maxCourseWaypoints         = 500
+	maxCourseImportBytes       = 10 << 20
+	maxCoursePlanRequestBytes  = 16 << 20
+	maxCourseImportSegments    = 100
+	maxCourseMapPreview        = 5000
+	maxCourseProfilePoints     = 1200
+	maxPreservedCourseAnchors  = 25
+	courseElevationRadiusM     = 150.0
+	courseElevationMaxGapM     = 500.0
+	courseElevationMinCover    = 0.90
+	courseFootJumpMinM         = 250.0
+	courseFootJumpSpeedMPS     = 25.0
+	courseBikeJumpMinM         = 500.0
+	courseBikeJumpSpeedMPS     = 60.0
+	courseUntimedMaxJumpM      = 5000.0
 )
 
 var (
@@ -67,6 +68,7 @@ type CoursePoint struct {
 type CourseWaypoint struct {
 	ID        string  `json:"id,omitempty"`
 	Index     int     `json:"index"`
+	Name      string  `json:"name,omitempty"`
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
 }
@@ -157,11 +159,17 @@ type CourseLegInput struct {
 }
 
 type CoursePlanInput struct {
-	Revision  int              `json:"revision,omitempty"`
-	Name      string           `json:"name"`
-	SportType CourseSport      `json:"sportType"`
-	Notes     string           `json:"notes"`
-	Legs      []CourseLegInput `json:"legs"`
+	Revision  int                   `json:"revision,omitempty"`
+	Name      string                `json:"name"`
+	SportType CourseSport           `json:"sportType"`
+	Notes     string                `json:"notes"`
+	Waypoints []CourseWaypointInput `json:"waypoints,omitempty"`
+	Legs      []CourseLegInput      `json:"legs"`
+}
+
+type CourseWaypointInput struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
 }
 
 type CourseDuplicateInput struct {
@@ -291,6 +299,21 @@ func courseFromPlan(input CoursePlanInput, diagnostics map[string]any) (Course, 
 	if err := finalizeCourse(&course); err != nil {
 		return Course{}, err
 	}
+	if len(input.Waypoints) > 0 {
+		if len(input.Waypoints) != len(course.Waypoints) {
+			return Course{}, fmt.Errorf("%w: waypoint names must align with course geometry", ErrCourseInvalid)
+		}
+		for index, source := range input.Waypoints {
+			if source.Index != index {
+				return Course{}, fmt.Errorf("%w: waypoint indexes must be sequential", ErrCourseInvalid)
+			}
+			name := strings.TrimSpace(source.Name)
+			if utf8.RuneCountInString(name) > maxCourseWaypointNameRunes {
+				return Course{}, fmt.Errorf("%w: waypoint names must be at most %d characters", ErrCourseInvalid, maxCourseWaypointNameRunes)
+			}
+			course.Waypoints[index].Name = name
+		}
+	}
 	return course, nil
 }
 
@@ -324,6 +347,7 @@ func finalizeCourse(course *Course) error {
 	if course == nil || len(course.Legs) == 0 || len(course.Legs) > maxCourseWaypoints-1 {
 		return fmt.Errorf("%w: invalid leg count", ErrCourseInvalid)
 	}
+	storedWaypoints := append([]CourseWaypoint(nil), course.Waypoints...)
 	flat := make([]CoursePoint, 0)
 	waypoints := make([]CourseWaypoint, 0, len(course.Legs)+1)
 	directCount := 0
@@ -363,6 +387,13 @@ func finalizeCourse(course *Course) error {
 		}
 		last := points[len(points)-1]
 		waypoints = append(waypoints, CourseWaypoint{Index: index + 1, Latitude: last.Latitude, Longitude: last.Longitude})
+	}
+	for index := range waypoints {
+		if index >= len(storedWaypoints) || storedWaypoints[index].Index != index {
+			continue
+		}
+		waypoints[index].ID = storedWaypoints[index].ID
+		waypoints[index].Name = storedWaypoints[index].Name
 	}
 	if len(flat) < 2 || len(flat) > maxCoursePoints {
 		return fmt.Errorf("%w: course geometry must contain between 2 and %d points", ErrCourseInvalid, maxCoursePoints)

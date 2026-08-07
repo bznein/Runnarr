@@ -581,6 +581,8 @@ test.describe("local product journey", () => {
     await plannerMap.click({ position: { x: mobile ? 220 : 330, y: 230 } });
     if (mobile) await plannerMap.click({ position: { x: 140, y: 300 } });
     await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
+    const namedWaypoint = waypointRows.nth(1).getByLabel("Waypoint 2 name");
+    await namedWaypoint.fill("Canal turn");
     const startCoordinates = await waypointRows.first().locator("small").innerText();
     const backToStart = page.getByRole("button", { name: "Back to start", exact: true });
     await expect(backToStart).toBeEnabled();
@@ -615,6 +617,8 @@ test.describe("local product journey", () => {
     ]);
     await expect(page.getByRole("heading", { name: plannedName, exact: true })).toBeVisible();
     await expect(page.getByText(/direct leg/).first()).toBeVisible();
+    await page.getByRole("link", { name: "Edit route", exact: true }).click();
+    await expect(page.getByLabel("Waypoint 2 name")).toHaveValue("Canal turn");
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 

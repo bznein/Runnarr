@@ -50,6 +50,7 @@ import type {
   CourseRoutingLeg,
   CourseSport,
   CourseSummary,
+  CourseWaypoint,
   DailyHealthMetric,
   HealthChartPoint,
   Gear,
@@ -5578,7 +5579,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [name, setName] = useState("");
   const [sportType, setSportType] = useState<CourseSport>("Run");
   const [notes, setNotes] = useState("");
-  const [waypoints, setWaypoints] = useState<Array<{ index: number; latitude: number; longitude: number }>>([]);
+  const [waypoints, setWaypoints] = useState<CourseWaypoint[]>([]);
   const [seedLegs, setSeedLegs] = useState<CourseLeg[]>([]);
   const [geometryDirty, setGeometryDirty] = useState(!editing);
   const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
@@ -5608,7 +5609,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     setName(course.data.name);
     setSportType(course.data.sportType);
     setNotes(course.data.notes ?? "");
-    setWaypoints(course.data.waypoints.map((waypoint, index) => ({ index, latitude: waypoint.latitude, longitude: waypoint.longitude })));
+    setWaypoints(course.data.waypoints.map((waypoint, index) => ({ index, name: waypoint.name, latitude: waypoint.latitude, longitude: waypoint.longitude })));
     setSeedLegs(course.data.legs);
     setDirectLegIndexes(course.data.legs.filter((leg) => leg.mode === "direct").map((leg) => leg.index));
     setGeometryDirty(false);
@@ -5643,6 +5644,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
         name: name.trim(),
         sportType,
         notes,
+        waypoints: waypoints.map((waypoint) => ({ index: waypoint.index, name: waypoint.name })),
         legs: plannerLegs.map((leg) => ({ mode: leg.mode, encodedPolyline: leg.encodedPolyline, elevationsM: leg.elevationsM }))
       };
       return editing ? api.updateCoursePlan(id!, { ...body, revision: course.data!.revision }) : api.createCourse(body);
@@ -5682,6 +5684,10 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     setWaypoints((current) => reindexWaypoints(current.filter((item) => item.index !== index)));
     setDirectLegIndexes([]);
     markGeometryDirty();
+  };
+  const renameWaypoint = (index: number, value: string) => {
+    setWaypoints((current) => current.map((item) => item.index === index ? { ...item, name: value } : item));
+    save.reset();
   };
   const reorderWaypoint = (index: number, direction: -1 | 1) => {
     setWaypoints((current) => {
@@ -5724,7 +5730,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
         <ol className="course-waypoint-list">
           {waypoints.map((waypoint, index) => <li key={`${waypoint.index}-${waypoint.latitude}-${waypoint.longitude}`}>
             <span className="course-waypoint-number">{index + 1}</span>
-            <span><strong>{index === 0 ? "Start" : index === waypoints.length - 1 ? "Finish" : `Waypoint ${index + 1}`}</strong><small>{waypoint.latitude.toFixed(5)}, {waypoint.longitude.toFixed(5)}</small></span>
+            <span><input className="course-waypoint-name" aria-label={`Waypoint ${index + 1} name`} maxLength={160} placeholder={defaultCourseWaypointName(index, waypoints.length)} value={waypoint.name ?? ""} disabled={!canWrite} onChange={(event) => renameWaypoint(index, event.target.value)} /><small>{waypoint.latitude.toFixed(5)}, {waypoint.longitude.toFixed(5)}</small></span>
             <span className="course-waypoint-actions"><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} earlier`} disabled={!canWrite || index === 0} onClick={() => reorderWaypoint(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" type="button" aria-label={`Move waypoint ${index + 1} later`} disabled={!canWrite || index === waypoints.length - 1} onClick={() => reorderWaypoint(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger" type="button" aria-label={`Remove waypoint ${index + 1}`} disabled={!canWrite} onClick={() => removeWaypoint(index)}><X size={14} /></button></span>
           </li>)}
         </ol>
@@ -5750,7 +5756,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   </Page>;
 }
 
-function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
+function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: CourseWaypoint[]; tileURL?: string; canEdit: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
   const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
   const waypointPoints = waypoints.map((point) => [point.latitude, point.longitude] as RoutePoint);
   const allPoints = pointsByLeg.flat();
@@ -5769,7 +5775,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAd
     <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
-      {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={`Waypoint ${index + 1}`} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
+      {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={waypoint.name?.trim() || defaultCourseWaypointName(index, waypoints.length)} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
       {canEdit && <MapLocationPicker onSelect={onAdd} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
       {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
@@ -5779,6 +5785,12 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAd
     {locationError && <div className="row-error course-location-error">{locationError}</div>}
     {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}
   </div>;
+}
+
+function defaultCourseWaypointName(index: number, count: number) {
+  if (index === 0) return "Start";
+  if (index === count - 1) return "Finish";
+  return `Waypoint ${index + 1}`;
 }
 
 function plannerDirectLegs(waypoints: Array<{ latitude: number; longitude: number }>, warning: string): CourseRoutingLeg[] {
