@@ -711,6 +711,22 @@ test.describe("local product journey", () => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     const waypointName = "Canal turn beside the old stone bridge";
+    if (!visualBaseline) {
+      await page.route(/\/api\/config$/, async (route) => {
+        const response = await route.fetch();
+        const config = await response.json() as Record<string, unknown>;
+        await route.fulfill({ response, json: { ...config, courseRoutingEnabled: true } });
+      });
+      await page.route("**/api/course-routing/loops", async (route) => {
+        const input = route.request().postDataJSON() as { start: { latitude: number; longitude: number }; targetDistanceM: number; variation: number };
+        const start: E2ERoutePoint = [input.start.latitude, input.start.longitude];
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ targetDistanceM: input.targetDistanceM, variation: input.variation, candidates: [1, 2, 3].map((index) => e2eCourseLoopCandidate(index, start)) })
+        });
+      });
+    }
     await login(page, mobile);
     await navigateTo(page, "Courses", mobile);
     await page.getByRole("link", { name: "New course", exact: true }).click();
@@ -719,7 +735,11 @@ test.describe("local product journey", () => {
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
     const waypointRows = page.locator(".course-waypoint-list li");
     await expect(waypointRows).toHaveCount(1);
-    if (!visualBaseline) await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
+    if (!visualBaseline) {
+      await page.getByRole("button", { name: "Generate loops", exact: true }).click();
+      await expect(page.getByRole("radio", { name: /Route 1/ })).toBeVisible();
+      await expect(page.getByRole("radio", { name: /Route 3/ })).toBeVisible();
+    }
     await page.getByRole("button", { name: "Enter fullscreen map", exact: true }).click();
     const fullscreenPanel = page.getByRole("region", { name: "Course route map" });
     await expect(page.getByRole("button", { name: "Exit fullscreen map", exact: true })).toBeVisible();
@@ -731,14 +751,19 @@ test.describe("local product journey", () => {
     expect(fullscreenBounds!.width).toBeGreaterThanOrEqual(viewport!.width - 1);
     expect(fullscreenBounds!.height).toBeGreaterThanOrEqual(viewport!.height - 1);
     if (!visualBaseline) {
+      await expect(page.getByLabel("Map route alternatives")).toBeVisible();
+      await page.getByRole("button", { name: "Use route", exact: true }).click();
+      await expect(waypointRows).toHaveCount(4);
+      await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
       const mapLabel = page.getByLabel(`Waypoint 1: ${waypointName}`, { exact: true });
       await expect(mapLabel).toBeVisible();
       await expect(mapLabel).toHaveAttribute("title", waypointName);
       await expect.poll(() => mapLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+    } else {
+      await plannerMap.click({ position: { x: 90, y: 110 } });
+      await expect(waypointRows).toHaveCount(2);
     }
 
-    await plannerMap.click({ position: { x: 90, y: 110 } });
-    await expect(waypointRows).toHaveCount(2);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Enter fullscreen map", exact: true })).toBeVisible();
     await expect(fullscreenPanel).not.toHaveClass(/course-planner-map-fullscreen/);
