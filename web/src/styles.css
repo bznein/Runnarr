@@ -3726,6 +3726,26 @@ textarea {
   min-width: 0;
 }
 
+.course-waypoint-name {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: var(--color-heading);
+  background: transparent;
+  font: inherit;
+  font-weight: 680;
+}
+
+.course-waypoint-name:focus {
+  outline: 1px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.course-waypoint-name:disabled {
+  opacity: 1;
+}
+
 .course-waypoint-list small {
   overflow: hidden;
   color: var(--color-muted);
@@ -3829,6 +3849,56 @@ textarea {
   box-shadow: var(--shadow-marker-strong);
   font-size: 11px;
   font-weight: 800;
+}
+
+.course-waypoint-map-tooltip.leaflet-tooltip {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.course-waypoint-map-tooltip.leaflet-tooltip::before {
+  display: none;
+}
+
+.course-waypoint-map-label {
+  display: block;
+  max-width: 132px;
+  overflow: hidden;
+  padding: 4px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-heading);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  box-shadow: var(--shadow-marker);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-waypoint-map-label:hover,
+.course-waypoint-map-label:focus {
+  max-width: min(260px, calc(100vw - 32px));
+  overflow: visible;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+@media (max-width: 720px) {
+  .course-waypoint-map-label {
+    max-width: 108px;
+  }
+
+  .course-waypoint-map-label:hover,
+  .course-waypoint-map-label:focus {
+    max-width: min(220px, calc(100vw - 24px));
+  }
 }
 
 .course-leg-panel,

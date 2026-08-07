@@ -130,6 +130,27 @@ func (s *Store) GetCourse(ctx context.Context, id string) (Course, error) {
 	if err != nil {
 		return Course{}, err
 	}
+	waypointRows, err := s.db.Query(ctx, `
+		select id::text, waypoint_index, name, st_y(location), st_x(location)
+		from course_waypoints where course_id = $1 order by waypoint_index
+	`, id)
+	if err != nil {
+		return Course{}, err
+	}
+	waypoints := make([]CourseWaypoint, 0, summary.LegCount+1)
+	for waypointRows.Next() {
+		var waypoint CourseWaypoint
+		if err := waypointRows.Scan(&waypoint.ID, &waypoint.Index, &waypoint.Name, &waypoint.Latitude, &waypoint.Longitude); err != nil {
+			waypointRows.Close()
+			return Course{}, err
+		}
+		waypoints = append(waypoints, waypoint)
+	}
+	if err := waypointRows.Err(); err != nil {
+		waypointRows.Close()
+		return Course{}, err
+	}
+	waypointRows.Close()
 	rows, err := s.db.Query(ctx, `
 		select id::text, leg_index, mode, st_asgeojson(geometry, 9), elevations
 		from course_legs where course_id = $1 order by leg_index
@@ -157,7 +178,7 @@ func (s *Store) GetCourse(ctx context.Context, id string) (Course, error) {
 	if err := rows.Err(); err != nil {
 		return Course{}, err
 	}
-	course := Course{CourseSummary: summary, Legs: legs}
+	course := Course{CourseSummary: summary, Waypoints: waypoints, Legs: legs}
 	if err := finalizeCourse(&course); err != nil {
 		return Course{}, err
 	}
@@ -236,9 +257,9 @@ func insertCourseTx(ctx context.Context, tx pgx.Tx, userID string, course Course
 func insertCourseGeometryTx(ctx context.Context, tx pgx.Tx, courseID string, course Course) error {
 	for _, waypoint := range course.Waypoints {
 		if _, err := tx.Exec(ctx, `
-			insert into course_waypoints(course_id, waypoint_index, location)
-			values($1, $2, st_setsrid(st_makepoint($3, $4), 4326))
-		`, courseID, waypoint.Index, waypoint.Longitude, waypoint.Latitude); err != nil {
+			insert into course_waypoints(course_id, waypoint_index, name, location)
+			values($1, $2, $3, st_setsrid(st_makepoint($4, $5), 4326))
+		`, courseID, waypoint.Index, waypoint.Name, waypoint.Longitude, waypoint.Latitude); err != nil {
 			return err
 		}
 	}
@@ -287,6 +308,11 @@ func (s *Store) UpdateCoursePlan(ctx context.Context, id string, input CoursePla
 	prepared, err := courseFromPlan(input, current.Diagnostics)
 	if err != nil {
 		return Course{}, err
+	}
+	if len(input.Waypoints) == 0 && len(current.Waypoints) == len(prepared.Waypoints) {
+		for index := range prepared.Waypoints {
+			prepared.Waypoints[index].Name = current.Waypoints[index].Name
+		}
 	}
 	diagnostics, err := json.Marshal(prepared.Diagnostics)
 	if err != nil {
