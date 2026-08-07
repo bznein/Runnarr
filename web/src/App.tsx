@@ -5,7 +5,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import type { QueryClient } from "@tanstack/react-query";
 import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, HeartPulse, LocateFixed, LogOut, Map as MapIcon, Maximize2, Menu, Minimize2, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
 import { divIcon } from "leaflet";
-import { Circle, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { Circle, MapContainer, Marker, Polyline, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { activityGPXURL, courseGPXURL, api, ApiError, setCsrfToken } from "./api";
 import { HEALTH_CHART_Y_AXIS_WIDTH, formatHealthAxisBPM, formatHealthAxisHours, formatHealthAxisInteger, formatHealthAxisMS } from "./healthChart";
@@ -5790,7 +5790,13 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highl
     <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
-      {waypoints.map((waypoint, index) => <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={waypoint.name?.trim() || defaultCourseWaypointName(index, waypoints.length)} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined} />)}
+      {waypoints.map((waypoint, index) => {
+        const customName = waypoint.name?.trim();
+        const markerName = customName || defaultCourseWaypointName(index, waypoints.length);
+        return <Marker key={waypoint.index} position={[waypoint.latitude, waypoint.longitude]} icon={courseWaypointIcon(index + 1)} draggable={canEdit} title={markerName} eventHandlers={canEdit ? { dragend: (event) => { const value = (event.target as { getLatLng: () => { lat: number; lng: number } }).getLatLng(); onMove(index, [value.lat, value.lng]); } } : undefined}>
+          {customName && <LeafletTooltip permanent interactive direction="top" offset={[0, -12]} opacity={1} className="course-waypoint-map-tooltip"><span className="course-waypoint-map-label" tabIndex={0} title={customName} aria-label={`Waypoint ${index + 1}: ${customName}`}>{customName}</span></LeafletTooltip>}
+        </Marker>;
+      })}
       {canEdit && <MapLocationPicker onSelect={onAdd} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
       {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}

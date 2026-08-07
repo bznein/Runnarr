@@ -28,7 +28,8 @@
 - New course plans now begin at the starting point of the most recently updated
   saved course when one is available.
 - Course planner waypoints can now be given custom names that persist across
-  route edits and course duplication.
+  route edits and course duplication, with compact map labels that reveal the
+  full name on hover or keyboard focus.
 - Course planner maps can expand to the full viewport while selecting and
   adjusting waypoints, with an explicit exit control and Escape-key support.
 - Matched completed activities now link directly to their source training sheet in both full and simple experiences.
