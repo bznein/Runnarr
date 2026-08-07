@@ -699,10 +699,11 @@ test.describe("local product journey", () => {
       page.getByRole("button", { name: "Save course", exact: true }).click()
     ]);
     await expect(page.getByRole("heading", { name: plannedName, exact: true })).toBeVisible();
-    await expect(page.getByText("Routed", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/direct leg/)).toHaveCount(0);
     if (!visualBaseline) {
       await page.getByRole("link", { name: "Edit route", exact: true }).click();
       await expect(page.getByLabel("Waypoint 2 name")).toHaveValue(waypointName);
+      await expect(page.getByText("Routed", { exact: true }).first()).toBeVisible();
     }
     if (mobile) await expectNoHorizontalOverflow(page);
   });
