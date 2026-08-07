@@ -508,7 +508,7 @@ test.describe("local product journey", () => {
     await expect(page.getByText("No structured workout steps were provided; showing recorded laps.", { exact: true })).toBeVisible();
   });
 
-  test("uses the course library, saves an activity route, and reviews a GPX import", { tag: "@visual-courses" }, async ({ page }, testInfo) => {
+  test("uses the course library, saves an activity route, and reviews a GPX import", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
 
@@ -618,7 +618,7 @@ test.describe("local product journey", () => {
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
-  test("expands the course planner map while selecting waypoints", { tag: "@visual-course-planner-fullscreen" }, async ({ page }, testInfo) => {
+  test("expands the course planner map while selecting waypoints", { tag: "@visual-courses" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await login(page, mobile);
     await navigateTo(page, "Courses", mobile);

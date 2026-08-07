@@ -22,11 +22,6 @@
       "viewports": ["desktop", "mobile"]
     },
     {
-      "id": "course-planner-fullscreen",
-      "tag": "@visual-course-planner-fullscreen",
-      "viewports": ["desktop", "mobile"]
-    },
-    {
       "id": "match-candidates",
       "tag": "@visual-match-candidates",
       "viewports": ["desktop", "mobile"]
