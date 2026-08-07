@@ -583,7 +583,12 @@ test.describe("local product journey", () => {
     await expect(waypointRows).toHaveCount(mobile ? 4 : 3);
     const secondCoordinates = await waypointRows.nth(1).locator("small").innerText();
     const thirdCoordinates = await waypointRows.nth(2).locator("small").innerText();
-    await waypointRows.nth(1).dragTo(waypointRows.nth(2));
+    const dragData = await page.evaluateHandle(() => new DataTransfer());
+    await expect(waypointRows.nth(1)).toHaveAttribute("draggable", "true");
+    await waypointRows.nth(1).dispatchEvent("dragstart", { dataTransfer: dragData });
+    await waypointRows.nth(2).dispatchEvent("dragenter", { dataTransfer: dragData });
+    await waypointRows.nth(2).dispatchEvent("dragover", { dataTransfer: dragData });
+    await waypointRows.nth(2).dispatchEvent("drop", { dataTransfer: dragData });
     await expect(waypointRows.nth(1).locator("small")).toHaveText(thirdCoordinates);
     await expect(waypointRows.nth(2).locator("small")).toHaveText(secondCoordinates);
     const startCoordinates = await waypointRows.first().locator("small").innerText();
