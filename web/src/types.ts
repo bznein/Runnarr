@@ -106,6 +106,7 @@ export type CourseLegMode = "preserved" | "routed" | "direct";
 export type CourseWaypoint = {
   id?: string;
   index: number;
+  name?: string;
   latitude: number;
   longitude: number;
 };
@@ -240,6 +241,7 @@ export type CoursePlanInput = {
   name: string;
   sportType: CourseSport;
   notes: string;
+  waypoints: Array<Pick<CourseWaypoint, "index" | "name">>;
   legs: Array<{
     mode: CourseLegMode;
     encodedPolyline: string;

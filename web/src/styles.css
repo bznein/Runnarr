@@ -3785,18 +3785,104 @@ textarea {
 }
 
 .course-waypoint-list li {
+  position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
   padding: 8px;
   border: 1px solid var(--color-border-soft);
   border-radius: 7px;
+  transition: margin 140ms ease, border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
 }
 
-.course-waypoint-list li > span:nth-child(2) {
+.course-waypoint-list li[draggable="true"] {
+  cursor: grab;
+}
+
+.course-waypoint-list li[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.course-waypoint-list li.dragging {
+  opacity: 0.45;
+}
+
+.course-waypoint-list li.drag-over {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 24%, transparent);
+}
+
+.course-waypoint-list li.drop-before {
+  margin-top: 28px;
+}
+
+.course-waypoint-list li.drop-after {
+  margin-bottom: 28px;
+}
+
+.course-waypoint-list li.drop-before::before,
+.course-waypoint-list li.drop-after::after {
+  content: attr(data-drop-label);
+  position: absolute;
+  z-index: 1;
+  right: 2px;
+  left: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  border-top: 2px solid var(--color-primary);
+  color: var(--color-primary-strong);
+  background: var(--color-surface);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.course-waypoint-list li.drop-before::before {
+  top: -25px;
+}
+
+.course-waypoint-list li.drop-after::after {
+  bottom: -25px;
+}
+
+.course-waypoint-drag-handle {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 36px;
+  margin: -6px 0 -6px -6px;
+  touch-action: none;
+  color: var(--color-muted);
+  cursor: grab;
+}
+
+.course-waypoint-list li > span:nth-child(3) {
   display: grid;
   min-width: 0;
+}
+
+.course-waypoint-name {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: var(--color-heading);
+  background: transparent;
+  font: inherit;
+  font-weight: 680;
+}
+
+.course-waypoint-name:focus {
+  outline: 1px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.course-waypoint-name:disabled {
+  opacity: 1;
 }
 
 .course-waypoint-list small {
@@ -3836,9 +3922,36 @@ textarea {
   min-height: 620px;
 }
 
+.course-planner-map-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .course-planner-map-panel .course-map-frame,
 .course-planner-map-panel .route-map {
   min-height: 540px;
+}
+
+.course-planner-map-panel.course-planner-map-fullscreen {
+  position: fixed;
+  z-index: 2100;
+  inset: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
+  padding: calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 0;
+  background: var(--color-surface);
+  box-shadow: none;
+}
+
+.course-planner-map-panel.course-planner-map-fullscreen .course-map-frame,
+.course-planner-map-panel.course-planner-map-fullscreen .route-map {
+  height: 100%;
+  min-height: 0;
 }
 
 .course-planner-map .leaflet-container {
@@ -3875,6 +3988,56 @@ textarea {
   box-shadow: var(--shadow-marker-strong);
   font-size: 11px;
   font-weight: 800;
+}
+
+.course-waypoint-map-tooltip.leaflet-tooltip {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.course-waypoint-map-tooltip.leaflet-tooltip::before {
+  display: none;
+}
+
+.course-waypoint-map-label {
+  display: block;
+  max-width: 132px;
+  overflow: hidden;
+  padding: 4px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-heading);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  box-shadow: var(--shadow-marker);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-waypoint-map-label:hover,
+.course-waypoint-map-label:focus {
+  max-width: min(260px, calc(100vw - 32px));
+  overflow: visible;
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+@media (max-width: 720px) {
+  .course-waypoint-map-label {
+    max-width: 108px;
+  }
+
+  .course-waypoint-map-label:hover,
+  .course-waypoint-map-label:focus {
+    max-width: min(220px, calc(100vw - 24px));
+  }
 }
 
 .course-leg-panel,
@@ -3934,6 +4097,15 @@ textarea {
 }
 
 @media (max-width: 720px) {
+  .course-planner-map-heading {
+    align-items: flex-start;
+  }
+
+  .course-planner-map-actions {
+    align-items: flex-end;
+    flex-direction: column-reverse;
+  }
+
   .course-library-filters {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3955,12 +4127,19 @@ textarea {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .course-waypoint-list li,
+  .course-waypoint-list li {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .course-waypoint-actions {
+    grid-column: 3;
+    justify-self: start;
+  }
+
   .course-leg-row {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .course-waypoint-actions,
   .course-leg-row > button {
     grid-column: 2;
     justify-self: start;

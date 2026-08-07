@@ -15,7 +15,8 @@ func TestCoursePlanFinalizesGeometryAndMetrics(t *testing.T) {
 	}
 	course, err := courseFromPlan(CoursePlanInput{
 		Name: " River run ", SportType: CourseSportRun, Notes: "private",
-		Legs: []CourseLegInput{{Mode: CourseLegDirect, Points: points}},
+		Waypoints: []CourseWaypointInput{{Index: 0, Name: " Home "}, {Index: 1, Name: "Turnaround"}},
+		Legs:      []CourseLegInput{{Mode: CourseLegDirect, Points: points}},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +35,16 @@ func TestCoursePlanFinalizesGeometryAndMetrics(t *testing.T) {
 	}
 	if course.Waypoints[0].Latitude != points[0].Latitude || course.Waypoints[1].Latitude != points[2].Latitude {
 		t.Fatalf("waypoints = %#v", course.Waypoints)
+	}
+	if course.Waypoints[0].Name != "Home" || course.Waypoints[1].Name != "Turnaround" {
+		t.Fatalf("waypoint names = %#v", course.Waypoints)
+	}
+	course.Waypoints[0].ID = "waypoint-1"
+	if err := finalizeCourse(&course); err != nil {
+		t.Fatal(err)
+	}
+	if course.Waypoints[0].ID != "waypoint-1" || course.Waypoints[0].Name != "Home" {
+		t.Fatalf("waypoint metadata was not retained: %#v", course.Waypoints[0])
 	}
 }
 
@@ -138,6 +149,26 @@ func TestCourseValidationLimitsMetadata(t *testing.T) {
 	_, _, _, err = normalizeCourseDetails("ok", "Swim", "")
 	if !errorsIsCourseInvalid(err) {
 		t.Fatalf("sport error = %v", err)
+	}
+}
+
+func TestCourseWaypointNamesMustAlignWithGeometry(t *testing.T) {
+	leg := CourseLegInput{Mode: CourseLegDirect, Points: []CoursePoint{{Latitude: 53, Longitude: -6}, {Latitude: 53.01, Longitude: -6}}}
+	_, err := courseFromPlan(CoursePlanInput{
+		Name: "Named route", SportType: CourseSportRun,
+		Waypoints: []CourseWaypointInput{{Index: 0, Name: "Only one"}},
+		Legs:      []CourseLegInput{leg},
+	}, nil)
+	if !errorsIsCourseInvalid(err) {
+		t.Fatalf("misaligned waypoint error = %v", err)
+	}
+	_, err = courseFromPlan(CoursePlanInput{
+		Name: "Named route", SportType: CourseSportRun,
+		Waypoints: []CourseWaypointInput{{Index: 0}, {Index: 1, Name: strings.Repeat("n", maxCourseWaypointNameRunes+1)}},
+		Legs:      []CourseLegInput{leg},
+	}, nil)
+	if !errorsIsCourseInvalid(err) {
+		t.Fatalf("long waypoint name error = %v", err)
 	}
 }
 

@@ -11,6 +11,8 @@
 
 ### Features
 
+- Course-planner waypoints can now be reordered by mouse, touch, or pen dragging,
+  with a labeled insertion preview and arrow controls for keyboard use.
 - Added the PostGIS-backed, account-private course foundation with bounded
   geometry APIs, GPX preview/import/export, duplicate protection, and activity
   route snapshots.
@@ -30,6 +32,11 @@
 - New course plans can generate up to three distinct, editable closed-loop
   alternatives from one starting point and a sport-specific target distance,
   with explicit distance tolerances and repeatable new batches.
+- Course planner waypoints can now be given custom names that persist across
+  route edits and course duplication, with compact map labels that reveal the
+  full name on hover or keyboard focus.
+- Course planner maps can expand to the full viewport while selecting and
+  adjusting waypoints, with an explicit exit control and Escape-key support.
 - Matched completed activities now link directly to their source training sheet in both full and simple experiences.
 - Added an account-selectable `/simple` experience containing only a status-aware run queue and the complete training-sheet matching, preview, writeback, retry, and unmatch workflow.
 - Planned-run matching now shows color-coded match scores with date, duration, and workout-structure reasons, and avoids suggesting weak, ambiguous, or incompatible plans.
