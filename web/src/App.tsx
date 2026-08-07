@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, HeartPulse, LocateFixed, LogOut, Map as MapIcon, Menu, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, HeartPulse, LocateFixed, LogOut, Map as MapIcon, Maximize2, Menu, Minimize2, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
 import { divIcon } from "leaflet";
 import { Circle, MapContainer, Marker, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -5583,6 +5583,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [geometryDirty, setGeometryDirty] = useState(!editing);
   const [directLegIndexes, setDirectLegIndexes] = useState<number[]>([]);
   const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
+  const [mapFullscreen, setMapFullscreen] = useState(false);
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
   const previousCourse = useQuery({
     queryKey: ["courses", "planner-start"],
@@ -5613,6 +5614,20 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     setDirectLegIndexes(course.data.legs.filter((leg) => leg.mode === "direct").map((leg) => leg.index));
     setGeometryDirty(false);
   }, [course.data, id]);
+
+  useEffect(() => {
+    if (!mapFullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMapFullscreen(false);
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", exitOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", exitOnEscape);
+    };
+  }, [mapFullscreen]);
 
   const waypointKey = waypoints.map((point) => `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`).join(";");
   const directKey = directLegIndexes.slice().sort((a, b) => a - b).join(",");
@@ -5729,9 +5744,9 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
           </li>)}
         </ol>
       </aside>
-      <section className="panel course-planner-map-panel">
-        <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">Click to add; drag numbered waypoints to adjust.</span></div>{routed.isFetching && <span className="muted">Routing…</span>}</div>
-        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} onAdd={addWaypoint} onMove={moveWaypoint} />
+      <section className={`panel course-planner-map-panel${mapFullscreen ? " course-planner-map-fullscreen" : ""}`} aria-label="Course route map">
+        <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">Click to add; drag numbered waypoints to adjust.</span></div><div className="course-planner-map-actions">{routed.isFetching && <span className="muted">Routing…</span>}<button className="secondary-button small-button" type="button" aria-label={mapFullscreen ? "Exit fullscreen map" : "Enter fullscreen map"} aria-pressed={mapFullscreen} onClick={() => setMapFullscreen((current) => !current)}>{mapFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}{mapFullscreen ? "Exit fullscreen" : "Fullscreen"}</button></div></div>
+        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} fullscreen={mapFullscreen} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} onAdd={addWaypoint} onMove={moveWaypoint} />
       </section>
     </section>
     {plannerLegs.length > 0 && <section className="course-planner-elevation-preview">
@@ -5750,7 +5765,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   </Page>;
 }
 
-function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
+function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: Array<{ index: number; latitude: number; longitude: number }>; tileURL?: string; canEdit: boolean; fullscreen: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
   const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
   const waypointPoints = waypoints.map((point) => [point.latitude, point.longitude] as RoutePoint);
   const allPoints = pointsByLeg.flat();
@@ -5774,11 +5789,21 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, highlighted, onAd
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
       {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
       <FitMapContent points={fitPoints} />
+      <ResizeMapOnFullscreenChange fullscreen={fullscreen} />
     </MapContainer>
     <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>
     {locationError && <div className="row-error course-location-error">{locationError}</div>}
     {(!tileURL || tileURL.includes("tile.openstreetmap.org")) && <p className="muted map-privacy-warning">Map tiles are loaded from OpenStreetMap; your browser and approximate route location are visible to that provider.</p>}
   </div>;
+}
+
+function ResizeMapOnFullscreenChange({ fullscreen }: { fullscreen: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => map.invalidateSize({ pan: false }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [fullscreen, map]);
+  return null;
 }
 
 function plannerDirectLegs(waypoints: Array<{ latitude: number; longitude: number }>, warning: string): CourseRoutingLeg[] {

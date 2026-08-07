@@ -3697,9 +3697,36 @@ textarea {
   min-height: 620px;
 }
 
+.course-planner-map-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .course-planner-map-panel .course-map-frame,
 .course-planner-map-panel .route-map {
   min-height: 540px;
+}
+
+.course-planner-map-panel.course-planner-map-fullscreen {
+  position: fixed;
+  z-index: 2100;
+  inset: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
+  padding: calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+  border: 0;
+  border-radius: 0;
+  background: var(--color-surface);
+  box-shadow: none;
+}
+
+.course-planner-map-panel.course-planner-map-fullscreen .course-map-frame,
+.course-planner-map-panel.course-planner-map-fullscreen .route-map {
+  height: 100%;
+  min-height: 0;
 }
 
 .course-planner-map .leaflet-container {
@@ -3795,6 +3822,15 @@ textarea {
 }
 
 @media (max-width: 720px) {
+  .course-planner-map-heading {
+    align-items: flex-start;
+  }
+
+  .course-planner-map-actions {
+    align-items: flex-end;
+    flex-direction: column-reverse;
+  }
+
   .course-library-filters {
     grid-template-columns: minmax(0, 1fr);
   }
