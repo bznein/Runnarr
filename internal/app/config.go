@@ -53,7 +53,7 @@ func LoadConfig() (Config, error) {
 		SecretKey:          env("RUNNARR_SECRET_KEY", ""),
 		MapTileURL:         env("MAP_TILE_URL", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"),
 		RoutingEnabled:     envBool("RUNNARR_ROUTING_ENABLED", false),
-		RoutingURL:         strings.TrimRight(env("RUNNARR_ROUTING_URL", "http://valhalla:8002"), "/"),
+		RoutingURL:         strings.TrimRight(env("RUNNARR_ROUTING_URL", "http://graphhopper:8989"), "/"),
 		StaticDir:          env("RUNNARR_STATIC_DIR", "web/dist"),
 		MediaDir:           env("RUNNARR_MEDIA_DIR", "data/media"),
 		GarminBridgePython: env("RUNNARR_GARMIN_BRIDGE_PYTHON", "python3"),

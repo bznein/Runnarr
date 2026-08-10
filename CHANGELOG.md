@@ -20,10 +20,10 @@
   map and elevation-profile inspection, GPX review/import and export, activity
   route snapshots, metadata editing, duplication, permanent deletion, and an
   explicit one-shot current-location overlay.
-- Added a waypoint course planner with sport-aware self-hosted Valhalla
+- Added a waypoint course planner with sport-aware self-hosted GraphHopper
   routing, draggable ordered waypoints, per-leg direct overrides and isolated
   fallbacks, optimistic revision protection, an optional regional routing
-  Compose profile, and a single host-managed Valhalla graph that can be safely
+  Compose profile, and a single host-managed GraphHopper graph that can be safely
   attached and route-smoke-tested across isolated pull-request previews. The
   planner previews elevation, ascent, descent, and coverage before saving and
   can add a final routed leg back to the starting point with one action.
@@ -31,7 +31,8 @@
   saved course when one is available.
 - New course plans can generate up to three distinct, editable closed-loop
   alternatives from one starting point and a sport-specific target distance,
-  with explicit distance tolerances and repeatable new batches.
+  with explicit distance tolerances, repeatable new batches, native round-trip
+  routing, and Flat, Balanced, or Hilly generation biases.
 - Course planner waypoints can now be given custom names that persist across
   route edits and course duplication, with compact map labels that reveal the
   full name on hover or keyboard focus.
@@ -64,7 +65,7 @@
 - Course-planner metrics now lead with distance, while elevation coverage is
   shown only as an incomplete-data notice instead of occupying a primary card
   when coverage is complete.
-- New Valhalla-routed course legs now fetch regional elevation profiles and
+- New GraphHopper-routed course legs now include regional elevation profiles and
   calculate inspectable ascent and descent while preserving routes when the
   elevation service is unavailable.
 - GPX and activity course imports now keep source geometry intact while

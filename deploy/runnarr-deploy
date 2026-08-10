@@ -28,8 +28,8 @@ DEPLOY_DOMAIN="${RUNNARR_DEPLOY_BASE_DOMAIN:-}"
 NONPROD_NETWORK="${RUNNARR_NONPROD_INGRESS_NETWORK:-runnarr-nonprod-ingress}"
 NONPROD_GATEWAY="${RUNNARR_NONPROD_GATEWAY_CONTAINER:-runnarr-nonprod-gateway}"
 PREVIEW_ROUTING_ENABLED="${RUNNARR_PREVIEW_ROUTING_ENABLED:-false}"
-PREVIEW_ROUTING_CONTAINER="${RUNNARR_PREVIEW_ROUTING_CONTAINER:-runnarr-nonprod-valhalla}"
-PREVIEW_ROUTING_URL="http://valhalla:8002"
+PREVIEW_ROUTING_CONTAINER="${RUNNARR_PREVIEW_ROUTING_CONTAINER:-runnarr-nonprod-graphhopper}"
+PREVIEW_ROUTING_URL="http://graphhopper:8989"
 PREVIEW_ROUTING_SMOKE_FROM_LAT="${RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LAT:-53.3438}"
 PREVIEW_ROUTING_SMOKE_FROM_LON="${RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LON:--6.2546}"
 PREVIEW_ROUTING_SMOKE_TO_LAT="${RUNNARR_PREVIEW_ROUTING_SMOKE_TO_LAT:-53.3382}"
@@ -335,11 +335,11 @@ connect_preview_routing() {
     docker container inspect "${PREVIEW_ROUTING_CONTAINER}" \
       --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}'
   )"; then
-    log "shared preview Valhalla container ${PREVIEW_ROUTING_CONTAINER} is missing"
+    log "shared preview GraphHopper container ${PREVIEW_ROUTING_CONTAINER} is missing"
     return 1
   fi
   if [[ "${state}" != "running healthy" ]]; then
-    log "shared preview Valhalla container is not ready (${state})"
+    log "shared preview GraphHopper container is not ready (${state})"
     docker logs --tail=200 "${PREVIEW_ROUTING_CONTAINER}" >&2 || true
     return 1
   fi
@@ -352,7 +352,7 @@ connect_preview_routing() {
     jq -e --arg network "${network}" 'has($network)' >/dev/null; then
     docker network disconnect "${network}" "${PREVIEW_ROUTING_CONTAINER}"
   fi
-  docker network connect --alias valhalla "${network}" "${PREVIEW_ROUTING_CONTAINER}"
+  docker network connect --alias graphhopper "${network}" "${PREVIEW_ROUTING_CONTAINER}"
 }
 
 verify_preview_routing() {
@@ -368,51 +368,73 @@ import sys
 import urllib.request
 
 payload = {
-    "locations": [
-        {"lat": float(sys.argv[2]), "lon": float(sys.argv[3])},
-        {"lat": float(sys.argv[4]), "lon": float(sys.argv[5])},
+    "points": [
+        [float(sys.argv[3]), float(sys.argv[2])],
+        [float(sys.argv[5]), float(sys.argv[4])],
     ],
-    "costing": "pedestrian",
-    "units": "kilometers",
+    "profile": "foot",
+    "points_encoded": False,
+    "elevation": True,
+    "instructions": False,
 }
 request = urllib.request.Request(
     sys.argv[1] + "/route",
     data=json.dumps(payload).encode(),
     headers={"Content-Type": "application/json"},
 )
-response = json.load(urllib.request.urlopen(request, timeout=20))
-legs = response["trip"]["legs"]
-assert legs and legs[0]["shape"]
-isochrone_request = urllib.request.Request(
-    sys.argv[1] + "/isochrone",
+response = json.load(urllib.request.urlopen(request, timeout=25))
+coordinates = response["paths"][0]["points"]["coordinates"]
+assert len(coordinates) >= 2 and all(len(point) >= 3 for point in coordinates)
+round_trip_request = urllib.request.Request(
+    sys.argv[1] + "/route",
     data=json.dumps({
-        "locations": [{"lat": float(sys.argv[2]), "lon": float(sys.argv[3])}],
-        "costing": "pedestrian",
-        "contours": [{"distance": 0.5}],
-        "polygons": False,
+        "points": [[float(sys.argv[3]), float(sys.argv[2])]],
+        "profile": "foot",
+        "points_encoded": False,
+        "elevation": True,
+        "instructions": False,
+        "algorithm": "round_trip",
+        "round_trip": {"distance": 1000, "seed": 17},
+        "ch.disable": True,
     }).encode(),
     headers={"Content-Type": "application/json"},
 )
-isochrone_response = json.load(urllib.request.urlopen(isochrone_request, timeout=20))
-assert isochrone_response["features"]
-height_request = urllib.request.Request(
-    sys.argv[1] + "/height",
-    data=json.dumps({
-        "encoded_polyline": legs[0]["shape"],
-        "shape_format": "polyline6",
-        "height_precision": 1,
-    }).encode(),
-    headers={"Content-Type": "application/json"},
-)
-height_response = json.load(urllib.request.urlopen(height_request, timeout=20))
-heights = height_response["height"]
-assert heights and all(value is not None for value in heights)
+round_trip = json.load(urllib.request.urlopen(round_trip_request, timeout=25))
+assert len(round_trip["paths"][0]["points"]["coordinates"]) >= 3
 ' \
     "${PREVIEW_ROUTING_URL}" \
     "${PREVIEW_ROUTING_SMOKE_FROM_LAT}" \
     "${PREVIEW_ROUTING_SMOKE_FROM_LON}" \
     "${PREVIEW_ROUTING_SMOKE_TO_LAT}" \
     "${PREVIEW_ROUTING_SMOKE_TO_LON}"
+}
+
+wait_for_production_routing() {
+  local container status info route
+  container="$(compose production ps -q graphhopper)"
+  [[ -n "${container}" ]] || die "production GraphHopper container was not created"
+  for _attempt in $(seq 1 180); do
+    status="$(docker inspect "${container}" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}')"
+    [[ "${status}" != "healthy" ]] || break
+    [[ "${status}" != "unhealthy" ]] || break
+    sleep 5
+  done
+  if [[ "${status:-missing}" != "healthy" ]]; then
+    compose production logs --tail=200 graphhopper >&2 || true
+    die "production GraphHopper did not become healthy"
+  fi
+  info="$(docker exec "${container}" curl -fsS http://127.0.0.1:8989/info)"
+  jq -e '.elevation == true and any(.profiles[]; .name == "foot") and any(.profiles[]; .name == "bike")' <<< "${info}" >/dev/null ||
+    die "production GraphHopper is missing elevation-enabled foot or bike profiles"
+  route="$(docker exec "${container}" curl -fsS -G \
+    --data-urlencode 'point=53.3438,-6.2546' \
+    --data-urlencode 'point=53.3382,-6.2591' \
+    --data-urlencode 'profile=foot' \
+    --data-urlencode 'points_encoded=false' \
+    --data-urlencode 'elevation=true' \
+    http://127.0.0.1:8989/route)"
+  jq -e '.paths[0].points.coordinates | length >= 2 and all(.[]; length >= 3)' <<< "${route}" >/dev/null ||
+    die "production GraphHopper route smoke check did not return 3D geometry"
 }
 
 disconnect_preview_routing() {
@@ -870,6 +892,11 @@ production_promote() {
   metadata="$(pull_and_verify_image "${image}" "${commit}")"
   [[ "${metadata%%$'\t'*}" == "${migration_hash}" ]] || die "staging migration identity no longer matches the image"
 
+  # Import and validate the new graph while the current app and routing service
+  # are still available. The cutover does not begin until GraphHopper is ready.
+  compose production up --detach --no-build graphhopper
+  wait_for_production_routing
+
   local previous_id="" previous_image="" previous_commit="" previous_health_mode="commit"
   if [[ -f "${directory}/state.json" ]]; then
     previous_id="$(json_field "${directory}/state.json" '.id')"
@@ -939,7 +966,7 @@ production_promote() {
     else
       write_image_environment "${directory}/image.env" "${previous_image}" "production"
     fi
-    compose production up --detach --no-build --remove-orphans
+    RUNNARR_ROUTING_ENABLED=false compose production up --detach --no-build --remove-orphans
     if [[ "${previous_health_mode}" == "status-only" ]]; then
       wait_for_status_only_health production
       wait_for_external_status_only_health "${RUNNARR_PRODUCTION_URL:-}"
@@ -971,7 +998,7 @@ production_rollback() {
   pull_and_verify_image "${image}" "${commit}" >/dev/null
   assert_no_running_sync
   write_image_environment "${directory}/image.env" "${image}" "production"
-  compose production up --detach --no-build --remove-orphans
+  RUNNARR_ROUTING_ENABLED=false compose production up --detach --no-build --remove-orphans
   wait_for_health production "${commit}"
   wait_for_external_health "${RUNNARR_PRODUCTION_URL:-}" "${commit}"
   write_deployment_state "${directory}" "${target_id}" "production" "${image}" "${commit}" \

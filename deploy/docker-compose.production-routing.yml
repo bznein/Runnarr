@@ -1,38 +1,33 @@
 services:
   app:
-    depends_on:
-      valhalla:
-        condition: service_healthy
     environment:
-      RUNNARR_ROUTING_ENABLED: "true"
-      RUNNARR_ROUTING_URL: http://valhalla:8002
+      RUNNARR_ROUTING_ENABLED: ${RUNNARR_ROUTING_ENABLED:-true}
+      RUNNARR_ROUTING_URL: http://graphhopper:8989
 
-  valhalla:
-    image: ${RUNNARR_VALHALLA_IMAGE:-ghcr.io/valhalla/valhalla-scripted:3.6.3@sha256:e688a89f7a86880aabcc8b2eec9bcefdcb639d603ee90a928a6d3c7d92d58486}
+  graphhopper:
+    image: ${RUNNARR_GRAPHHOPPER_IMAGE:-israelhikingmap/graphhopper:11.0@sha256:e77e14e48ea69ea7bb0eb71ddc9d583e5ce85dd295475572371f72ed4880a1ff}
     restart: unless-stopped
+    entrypoint: ["/runnarr/graphhopper-entrypoint.sh"]
     environment:
-      tile_urls: ${VALHALLA_TILE_URL:?a regional Valhalla PBF URL is required}
-      build_elevation: ${VALHALLA_BUILD_ELEVATION:-True}
-      build_admins: ${VALHALLA_BUILD_ADMINS:-True}
-      build_time_zones: ${VALHALLA_BUILD_TIME_ZONES:-True}
-      server_threads: ${VALHALLA_SERVER_THREADS:-2}
+      GRAPHHOPPER_PBF_URL: ${GRAPHHOPPER_PBF_URL:?a regional GraphHopper PBF URL is required}
+      JAVA_OPTS: ${GRAPHHOPPER_JAVA_OPTS:--Xms1g -Xmx4g}
     volumes:
-      - valhalla-data:/custom_files
-    cpus: ${RUNNARR_VALHALLA_CPU_LIMIT:-2.0}
-    mem_limit: ${RUNNARR_VALHALLA_MEMORY_LIMIT:-6g}
-    pids_limit: ${RUNNARR_VALHALLA_PIDS_LIMIT:-512}
+      - graphhopper-data:/data
+      - ${RUNNARR_DEPLOY_ASSETS:-/opt/runnarr-deploy}/deploy/graphhopper.yml:/runnarr/graphhopper.yml:ro
+      - ${RUNNARR_DEPLOY_ASSETS:-/opt/runnarr-deploy}/deploy/graphhopper-entrypoint.sh:/runnarr/graphhopper-entrypoint.sh:ro
+    cpus: ${RUNNARR_GRAPHHOPPER_CPU_LIMIT:-2.0}
+    mem_limit: ${RUNNARR_GRAPHHOPPER_MEMORY_LIMIT:-6g}
+    pids_limit: ${RUNNARR_GRAPHHOPPER_PIDS_LIMIT:-512}
     labels:
       com.runnarr.managed: "true"
       com.runnarr.environment: production
-    security_opt:
-      - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/status >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8989/health >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 60
       start_period: 30s
 
 volumes:
-  valhalla-data:
-    name: runnarr-production-valhalla-data
+  graphhopper-data:
+    name: runnarr-production-graphhopper-data

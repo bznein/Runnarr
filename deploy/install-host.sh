@@ -79,6 +79,8 @@ install -m 0755 "${ROOT}/deploy/install-deploy-keys.sh" "${ASSET_ROOT}/deploy/in
 install -m 0644 "${ROOT}/deploy/lib.sh" "${ASSET_ROOT}/deploy/lib.sh"
 install -m 0644 "${ROOT}/deploy/docker-compose.ingress.yml" "${ASSET_ROOT}/docker-compose.ingress.yml"
 install -m 0644 "${ROOT}/deploy/docker-compose.routing.yml" "${ASSET_ROOT}/docker-compose.routing.yml"
+install -m 0644 "${ROOT}/deploy/graphhopper.yml" "${ASSET_ROOT}/deploy/graphhopper.yml"
+install -m 0755 "${ROOT}/deploy/graphhopper-entrypoint.sh" "${ASSET_ROOT}/deploy/graphhopper-entrypoint.sh"
 install -m 0755 "${ROOT}/deploy/configure-preview-routing.sh" "${ASSET_ROOT}/deploy/configure-preview-routing.sh"
 
 sed \
@@ -130,7 +132,7 @@ Still required before starting the ingress or enabling Actions:
   7. Configure Cloudflare Access and exact DNS records, including
      runnarr-deploy.${BASE_DOMAIN} for passwordless deployment SSH.
   8. Optionally run deploy/configure-preview-routing.sh to enable one shared
-     Valhalla graph for isolated pull-request previews.
+     GraphHopper graph for isolated pull-request previews.
 
 Start ingress only after those steps:
   docker compose --env-file ${CONFIG_ROOT}/ingress/.env \\

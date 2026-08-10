@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,16 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 )
 
-func TestCourseLoopGenerationValidatesSportDistanceAndAvailability(t *testing.T) {
-	valid := CourseLoopGenerationRequest{
-		SportType:       CourseSportRun,
-		Start:           CourseWaypoint{Latitude: 53.3498, Longitude: -6.2603},
-		TargetDistanceM: 10000,
-	}
+func TestCourseLoopGenerationValidatesDistanceHillinessAndAvailability(t *testing.T) {
+	valid := CourseLoopGenerationRequest{SportType: CourseSportRun, Start: CourseWaypoint{Latitude: 53.3498, Longitude: -6.2603}, TargetDistanceM: 10000}
 	if _, err := (&CourseRoutingService{}).GenerateLoops(context.Background(), valid); !errors.Is(err, ErrCourseRoutingDisabled) {
 		t.Fatalf("disabled error = %v", err)
 	}
@@ -31,138 +26,107 @@ func TestCourseLoopGenerationValidatesSportDistanceAndAvailability(t *testing.T)
 		t.Fatalf("short run error = %v", err)
 	}
 	invalid = valid
-	invalid.SportType = CourseSportCycling
-	invalid.TargetDistanceM = 4999
+	invalid.Hilliness = "mountainous"
 	if _, err := service.GenerateLoops(context.Background(), invalid); !errors.Is(err, ErrCourseInvalid) {
-		t.Fatalf("short ride error = %v", err)
-	}
-	invalid = valid
-	invalid.Variation = maxCourseLoopVariation + 1
-	if _, err := service.GenerateLoops(context.Background(), invalid); !errors.Is(err, ErrCourseInvalid) {
-		t.Fatalf("variation error = %v", err)
+		t.Fatalf("hilliness error = %v", err)
 	}
 }
 
-func TestCourseLoopGenerationReturnsDistinctEditableCandidates(t *testing.T) {
-	var isochroneCalls atomic.Int32
-	var routeCalls atomic.Int32
-	var heightCalls atomic.Int32
+func TestCourseLoopGenerationUsesNativeRoundTripsAndReturnsEditableCandidates(t *testing.T) {
+	var mutex sync.Mutex
+	requests := make([]graphHopperRouteRequest, 0)
 	client := &http.Client{Transport: courseRoutingRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		var response any
-		switch request.URL.Path {
-		case "/isochrone":
-			isochroneCalls.Add(1)
-			var body struct {
-				Costing  string `json:"costing"`
-				Contours []struct {
-					Distance float64 `json:"distance"`
-				} `json:"contours"`
-			}
-			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-				t.Fatal(err)
-			}
-			if body.Costing != "pedestrian" || len(body.Contours) != 3 {
-				t.Fatalf("isodistance body = %#v", body)
-			}
-			features := make([]map[string]any, 0, len(body.Contours))
-			for _, contour := range body.Contours {
-				coordinates := make([][]float64, 0, 24)
-				for bearing := 0.0; bearing < 360; bearing += 15 {
-					point := testCourseLoopPoint(53.3498, -6.2603, contour.Distance*1000, bearing)
-					coordinates = append(coordinates, []float64{point.Longitude, point.Latitude})
-				}
-				features = append(features, map[string]any{
-					"type":       "Feature",
-					"properties": map[string]any{"contour": contour.Distance},
-					"geometry":   map[string]any{"type": "LineString", "coordinates": coordinates},
-				})
-			}
-			response = map[string]any{"type": "FeatureCollection", "features": features}
-		case "/route":
-			routeCalls.Add(1)
-			var body struct {
-				Locations []struct {
-					Latitude  float64 `json:"lat"`
-					Longitude float64 `json:"lon"`
-				} `json:"locations"`
-			}
-			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-				t.Fatal(err)
-			}
-			if len(body.Locations) != 4 {
-				t.Fatalf("route locations = %#v", body.Locations)
-			}
-			legs := make([]map[string]string, 0, 3)
-			for index := 0; index < 3; index++ {
-				legs = append(legs, map[string]string{"shape": encodeCoursePolyline([]CoursePoint{
-					{Latitude: body.Locations[index].Latitude, Longitude: body.Locations[index].Longitude},
-					{Latitude: body.Locations[index+1].Latitude, Longitude: body.Locations[index+1].Longitude},
-				}, 6)})
-			}
-			response = map[string]any{"trip": map[string]any{"legs": legs}}
-		case "/height":
-			heightCalls.Add(1)
-			var body struct {
-				Polyline string `json:"encoded_polyline"`
-			}
-			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-				t.Fatal(err)
-			}
-			points, err := decodeCoursePolyline(body.Polyline, 6)
-			if err != nil {
-				t.Fatal(err)
-			}
-			heights := make([]float64, len(points))
-			for index := range heights {
-				heights[index] = float64(index)
-			}
-			response = map[string]any{"height": heights}
-		default:
-			t.Fatalf("request = %s", request.URL.Path)
+		var body graphHopperRouteRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
 		}
-		data, err := json.Marshal(response)
-		if err != nil {
-			return nil, err
-		}
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
+		mutex.Lock()
+		requests = append(requests, body)
+		requestIndex := len(requests)
+		mutex.Unlock()
+		angle := float64(body.RoundTrip.Seed%360) + float64(requestIndex)*17
+		coordinates := testGraphHopperLoop(53.3498, -6.2603, body.RoundTrip.DistanceM, angle, 30+float64(body.RoundTrip.Seed%5)*20)
+		return testGraphHopperResponse(http.StatusOK, coordinates), nil
 	})}
 	service := &CourseRoutingService{enabled: true, baseURL: "http://routing.test", client: client}
-	request := CourseLoopGenerationRequest{
-		SportType:       CourseSportRun,
-		Start:           CourseWaypoint{Latitude: 53.3498, Longitude: -6.2603},
-		TargetDistanceM: 10000,
-		Variation:       0,
+	input := CourseLoopGenerationRequest{
+		SportType: CourseSportRun, Start: CourseWaypoint{Latitude: 53.3498, Longitude: -6.2603},
+		TargetDistanceM: 10000, Variation: 4, Hilliness: CourseLoopHillinessHilly,
 	}
-	result, err := service.GenerateLoops(context.Background(), request)
+	result, err := service.GenerateLoops(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Candidates) < 2 || len(result.Candidates) > 3 {
-		t.Fatalf("candidate count = %d", len(result.Candidates))
+	if result.Hilliness != CourseLoopHillinessHilly || len(result.Candidates) == 0 || len(result.Candidates) > 3 {
+		t.Fatalf("result = %#v", result)
 	}
-	if isochroneCalls.Load() != 1 || routeCalls.Load() != maxCourseLoopCandidates || heightCalls.Load() != int32(len(result.Candidates)) {
-		t.Fatalf("calls = isodistance %d, route %d, height %d", isochroneCalls.Load(), routeCalls.Load(), heightCalls.Load())
+	if len(requests) != primaryCourseLoopCandidates {
+		t.Fatalf("request count = %d", len(requests))
+	}
+	for _, request := range requests {
+		if request.Algorithm != "round_trip" || request.RoundTrip == nil || request.Profile != "foot" || !request.CHDisabled || request.CustomModel == nil || len(request.CustomModel.Priority) != 2 {
+			t.Fatalf("GraphHopper request = %#v", request)
+		}
 	}
 	for index, candidate := range result.Candidates {
 		if candidate.ID != "route-"+string(rune('1'+index)) || len(candidate.Waypoints) != 4 || len(candidate.Legs) != 3 {
 			t.Fatalf("candidate = %#v", candidate)
 		}
-		first, last := candidate.Waypoints[0], candidate.Waypoints[len(candidate.Waypoints)-1]
-		if first.Latitude != last.Latitude || first.Longitude != last.Longitude {
-			t.Fatalf("open candidate = %#v", candidate.Waypoints)
-		}
-		if math.Abs(candidate.DistanceDeviationPct) > preferredCourseLoopDeviation || candidate.ElevationCoverage != 1 {
+		first, last := candidate.Waypoints[0], candidate.Waypoints[3]
+		if first.Latitude != last.Latitude || first.Longitude != last.Longitude || candidate.ElevationCoverage != 1 || candidate.ElevationGainM == nil {
 			t.Fatalf("candidate metrics = %#v", candidate)
 		}
 	}
-	secondRequest := request
-	secondRequest.Variation = 1
-	second, err := service.GenerateLoops(context.Background(), secondRequest)
+}
+
+func TestCourseLoopGenerationDefaultsToBalancedAndCapsCorrectionRequests(t *testing.T) {
+	var mutex sync.Mutex
+	requests := make([]graphHopperRouteRequest, 0)
+	client := &http.Client{Transport: courseRoutingRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body graphHopperRouteRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		mutex.Lock()
+		requests = append(requests, body)
+		mutex.Unlock()
+		// Overshoot every request enough to force the bounded correction pass.
+		return testGraphHopperResponse(http.StatusOK, testGraphHopperLoop(53.3498, -6.2603, body.RoundTrip.DistanceM*1.3, float64(body.RoundTrip.Seed%360), 50)), nil
+	})}
+	service := &CourseRoutingService{enabled: true, baseURL: "http://routing.test", client: client}
+	result, err := service.GenerateLoops(context.Background(), CourseLoopGenerationRequest{
+		SportType: CourseSportRun, Start: CourseWaypoint{Latitude: 53.3498, Longitude: -6.2603}, TargetDistanceM: 10000,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Candidates[0].Waypoints[1] == result.Candidates[0].Waypoints[1] {
-		t.Fatal("variation did not change generated headings")
+	if result.Hilliness != CourseLoopHillinessBalanced || len(requests) != primaryCourseLoopCandidates+correctedCourseLoopCandidates {
+		t.Fatalf("hilliness/calls = %s/%d", result.Hilliness, len(requests))
+	}
+	for _, request := range requests {
+		if request.CustomModel != nil {
+			t.Fatalf("balanced request has custom model: %#v", request.CustomModel)
+		}
+	}
+}
+
+func TestSelectCourseLoopCandidatesRanksHillinessAndPreservesFallback(t *testing.T) {
+	gain := func(value float64) *float64 { return &value }
+	cell := func(value int) map[courseLoopCell]struct{} { return map[courseLoopCell]struct{}{{latitude: value}: {}} }
+	candidates := []CourseLoopCandidate{
+		{CourseRoutingResponse: CourseRoutingResponse{DistanceM: 10000, ElevationGainM: gain(100), ElevationCoverage: 1}, DistanceDeviationPct: 1, retraceRatio: .1, geometryCells: cell(1)},
+		{CourseRoutingResponse: CourseRoutingResponse{DistanceM: 10000, ElevationGainM: gain(500), ElevationCoverage: 1}, DistanceDeviationPct: 2, retraceRatio: .1, geometryCells: cell(2)},
+		{CourseRoutingResponse: CourseRoutingResponse{DistanceM: 10000, ElevationGainM: gain(250), ElevationCoverage: 1}, DistanceDeviationPct: .5, retraceRatio: .1, geometryCells: cell(3)},
+	}
+	flat := selectCourseLoopCandidates(append([]CourseLoopCandidate(nil), candidates...), CourseLoopHillinessFlat)
+	hilly := selectCourseLoopCandidates(append([]CourseLoopCandidate(nil), candidates...), CourseLoopHillinessHilly)
+	balanced := selectCourseLoopCandidates(append([]CourseLoopCandidate(nil), candidates...), CourseLoopHillinessBalanced)
+	if *flat[0].ElevationGainM != 100 || *hilly[0].ElevationGainM != 500 || balanced[0].DistanceDeviationPct != .5 {
+		t.Fatalf("flat/hilly/balanced = %#v / %#v / %#v", flat, hilly, balanced)
+	}
+	fallback := selectCourseLoopCandidates([]CourseLoopCandidate{{DistanceDeviationPct: -17}, {DistanceDeviationPct: 25}}, CourseLoopHillinessBalanced)
+	if len(fallback) != 1 || !strings.Contains(fallback[0].Warning, "17% shorter") {
+		t.Fatalf("fallback = %#v", fallback)
 	}
 }
 
@@ -176,11 +140,8 @@ func TestCourseLoopGenerationHandlerReportsActionableStatuses(t *testing.T) {
 	}{
 		{name: "disabled", service: &CourseRoutingService{}, body: input, status: http.StatusServiceUnavailable},
 		{name: "invalid", service: &CourseRoutingService{enabled: true}, body: strings.Replace(input, "10000", "500", 1), status: http.StatusBadRequest},
-		{name: "no contours", service: &CourseRoutingService{enabled: true, baseURL: "http://routing.test", client: &http.Client{Transport: courseRoutingRoundTripFunc(func(_ *http.Request) (*http.Response, error) {
-			return testCourseLoopHTTPResponse(http.StatusOK, map[string]any{"type": "FeatureCollection", "features": []any{}}), nil
-		})}}, body: input, status: http.StatusUnprocessableEntity},
 		{name: "upstream", service: &CourseRoutingService{enabled: true, baseURL: "http://routing.test", client: &http.Client{Transport: courseRoutingRoundTripFunc(func(_ *http.Request) (*http.Response, error) {
-			return testCourseLoopHTTPResponse(http.StatusServiceUnavailable, map[string]any{"error": "unavailable"}), nil
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader("unavailable")), Header: make(http.Header)}, nil
 		})}}, body: input, status: http.StatusBadGateway},
 	}
 	for _, test := range tests {
@@ -196,31 +157,18 @@ func TestCourseLoopGenerationHandlerReportsActionableStatuses(t *testing.T) {
 	}
 }
 
-func TestSelectCourseLoopCandidatesUsesToleranceDiversityAndFallback(t *testing.T) {
-	cell := func(values ...int) map[courseLoopCell]struct{} {
-		result := make(map[courseLoopCell]struct{}, len(values))
-		for _, value := range values {
-			result[courseLoopCell{latitude: value}] = struct{}{}
-		}
-		return result
-	}
-	candidates := []CourseLoopCandidate{
-		{DistanceDeviationPct: 1, retraceRatio: 0.8, geometryCells: cell(1, 2, 3, 4)},
-		{DistanceDeviationPct: 5, retraceRatio: 0.1, geometryCells: cell(10, 11, 12, 13)},
-		{DistanceDeviationPct: 6, retraceRatio: 0.1, geometryCells: cell(10, 11, 12, 14)},
-		{DistanceDeviationPct: -8, retraceRatio: 0.2, geometryCells: cell(20, 21, 22, 23)},
-		{DistanceDeviationPct: 13, retraceRatio: 0, geometryCells: cell(30)},
-	}
-	selected := selectCourseLoopCandidates(candidates)
-	if len(selected) != 3 || selected[0].DistanceDeviationPct != 5 || selected[1].DistanceDeviationPct != -8 || selected[2].DistanceDeviationPct != 1 {
-		t.Fatalf("selected = %#v", selected)
-	}
-	fallback := selectCourseLoopCandidates([]CourseLoopCandidate{{DistanceDeviationPct: -17}, {DistanceDeviationPct: 25}})
-	if len(fallback) != 1 || !strings.Contains(fallback[0].Warning, "17% shorter") {
-		t.Fatalf("fallback = %#v", fallback)
-	}
-	if selected := selectCourseLoopCandidates([]CourseLoopCandidate{{DistanceDeviationPct: 21}}); selected != nil {
-		t.Fatalf("outside cutoff = %#v", selected)
+func testGraphHopperLoop(latitude, longitude, distanceM, heading, gainM float64) [][]any {
+	leg := distanceM / 4
+	p0 := CoursePoint{Latitude: latitude, Longitude: longitude}
+	p1 := testCourseLoopPoint(p0.Latitude, p0.Longitude, leg, heading)
+	p2 := testCourseLoopPoint(p1.Latitude, p1.Longitude, leg, heading+90)
+	p3 := testCourseLoopPoint(p2.Latitude, p2.Longitude, leg, heading+180)
+	return [][]any{
+		{p0.Longitude, p0.Latitude, 10.0},
+		{p1.Longitude, p1.Latitude, 10.0 + gainM},
+		{p2.Longitude, p2.Latitude, 10.0},
+		{p3.Longitude, p3.Latitude, 10.0 + gainM/2},
+		{p0.Longitude, p0.Latitude, 10.0},
 	}
 }
 
@@ -233,9 +181,4 @@ func testCourseLoopPoint(latitude, longitude, distanceM, bearingDegrees float64)
 	endLatitude := math.Asin(math.Sin(startLatitude)*math.Cos(angularDistance) + math.Cos(startLatitude)*math.Sin(angularDistance)*math.Cos(bearing))
 	endLongitude := startLongitude + math.Atan2(math.Sin(bearing)*math.Sin(angularDistance)*math.Cos(startLatitude), math.Cos(angularDistance)-math.Sin(startLatitude)*math.Sin(endLatitude))
 	return CoursePoint{Latitude: endLatitude * 180 / math.Pi, Longitude: endLongitude * 180 / math.Pi}
-}
-
-func testCourseLoopHTTPResponse(status int, payload any) *http.Response {
-	data, _ := json.Marshal(payload)
-	return &http.Response{StatusCode: status, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}
 }

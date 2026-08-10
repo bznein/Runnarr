@@ -63,12 +63,12 @@ func TestLoadConfigValidatesEnabledRoutingOrigin(t *testing.T) {
 	if _, err := LoadConfig(); err == nil {
 		t.Fatal("non-http routing URL should be rejected")
 	}
-	t.Setenv("RUNNARR_ROUTING_URL", "http://valhalla:8002")
+	t.Setenv("RUNNARR_ROUTING_URL", "http://graphhopper:8989")
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.RoutingEnabled || cfg.RoutingURL != "http://valhalla:8002" {
+	if !cfg.RoutingEnabled || cfg.RoutingURL != "http://graphhopper:8989" {
 		t.Fatalf("routing config = %#v", cfg)
 	}
 }

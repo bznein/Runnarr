@@ -12,7 +12,7 @@ services:
       # preview host can enable routing before the course branches reach main,
       # without replacing production's installed base Compose asset.
       RUNNARR_ROUTING_ENABLED: ${RUNNARR_ROUTING_ENABLED:-false}
-      RUNNARR_ROUTING_URL: ${RUNNARR_ROUTING_URL:-http://valhalla:8002}
+      RUNNARR_ROUTING_URL: ${RUNNARR_ROUTING_URL:-http://graphhopper:8989}
     networks:
       runnarr:
         aliases:

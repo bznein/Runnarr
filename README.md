@@ -6,7 +6,7 @@ The v1 scope covers the existing private activity, health, calendar, gear, tools
 planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
 Course support provides private per-account storage, a searchable/favorite
 library, GPX review/import/export, course inspection, activity route snapshots,
-and waypoint planning with optional self-hosted Valhalla routing. Printable
+and waypoint planning with optional self-hosted GraphHopper routing. Printable
 pace bands, basic/expert mode, Garmin write-back, and encrypted support mode
 remain post-v1 work. Maintainers can optionally
 provision isolated PR previews, persistent staging, and manually approved
@@ -58,12 +58,13 @@ deletion, GPX export, and a one-shot current-location overlay. Location is
 requested only after pressing the control and is not stored separately by
 Runnarr. When a saved course is available, its starting point seeds the next
 new course draft. With routing enabled, a new draft can also generate up to
-three distinct closed-loop alternatives from that start and a target distance;
-the selected result remains fully editable before it is saved.
+three distinct closed-loop alternatives from that start, a target distance,
+and a Flat, Balanced, or Hilly generation bias; the selected result remains
+fully editable before it is saved.
 
 The waypoint planner can keep individual legs direct, route them through an
-optional backend-connected Valhalla service, or use Valhalla isodistance data
-to propose generated loops. The normal stack leaves this heavier regional
+optional backend-connected GraphHopper service, or use GraphHopper's native
+round-trip routing to propose generated loops. The normal stack leaves this heavier regional
 service off. See the [course-routing guide](docs/course-routing.md) for graph
 sizing, Compose startup, privacy boundaries, and external-service configuration.
 

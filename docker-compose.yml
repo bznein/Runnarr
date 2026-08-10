@@ -48,7 +48,7 @@ services:
       RUNNARR_SECRET_KEY_FILE: ${RUNNARR_SECRET_KEY_FILE:-}
       MAP_TILE_URL: ${MAP_TILE_URL:-https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png}
       RUNNARR_ROUTING_ENABLED: ${RUNNARR_ROUTING_ENABLED:-false}
-      RUNNARR_ROUTING_URL: ${RUNNARR_ROUTING_URL:-http://valhalla:8002}
+      RUNNARR_ROUTING_URL: ${RUNNARR_ROUTING_URL:-http://graphhopper:8989}
       RUNNARR_MEDIA_DIR: ${RUNNARR_MEDIA_DIR:-/app/data/media}
       RUNNARR_GARMIN_BRIDGE_PYTHON: ${RUNNARR_GARMIN_BRIDGE_PYTHON:-python3}
       RUNNARR_GARMIN_BRIDGE_SCRIPT: ${RUNNARR_GARMIN_BRIDGE_SCRIPT:-/app/garmin_bridge.py}
@@ -84,24 +84,35 @@ services:
     networks:
       - runnarr
 
-  valhalla:
+  graphhopper:
     profiles: ["routing"]
-    image: ghcr.io/valhalla/valhalla-scripted:3.6.3
+    image: ${RUNNARR_GRAPHHOPPER_IMAGE:-israelhikingmap/graphhopper:11.0@sha256:e77e14e48ea69ea7bb0eb71ddc9d583e5ce85dd295475572371f72ed4880a1ff}
+    entrypoint: ["/runnarr/graphhopper-entrypoint.sh"]
     environment:
-      tile_urls: ${VALHALLA_TILE_URL:-https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf}
-      build_elevation: ${VALHALLA_BUILD_ELEVATION:-True}
-      build_admins: ${VALHALLA_BUILD_ADMINS:-True}
-      build_time_zones: ${VALHALLA_BUILD_TIME_ZONES:-True}
-      server_threads: ${VALHALLA_SERVER_THREADS:-2}
+      GRAPHHOPPER_PBF_URL: ${GRAPHHOPPER_PBF_URL:-https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf}
+      JAVA_OPTS: ${GRAPHHOPPER_JAVA_OPTS:--Xms1g -Xmx4g}
     volumes:
-      - valhalla-data:/custom_files
+      - graphhopper-data:/data
+      - ./deploy/graphhopper.yml:/runnarr/graphhopper.yml:ro
+      - ./deploy/graphhopper-entrypoint.sh:/runnarr/graphhopper-entrypoint.sh:ro
+    cpus: ${RUNNARR_GRAPHHOPPER_CPU_LIMIT:-2.0}
+    mem_limit: ${RUNNARR_GRAPHHOPPER_MEMORY_LIMIT:-6g}
+    pids_limit: ${RUNNARR_GRAPHHOPPER_PIDS_LIMIT:-512}
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8989/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
     networks:
       - runnarr
 
 volumes:
   postgres-data:
   app-data:
-  valhalla-data:
+  graphhopper-data:
 
 networks:
   runnarr:

@@ -193,4 +193,33 @@ describe("shared backend API contract", () => {
       directLegIndexes: [0]
     });
   });
+
+  it("sends the selected hilliness when generating course loops", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      targetDistanceM: 10000,
+      variation: 2,
+      hilliness: "hilly",
+      candidates: []
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.generateCourseLoops({
+      sportType: "Run",
+      start: { index: 0, latitude: 53.3, longitude: -6.2 },
+      targetDistanceM: 10000,
+      variation: 2,
+      hilliness: "hilly"
+    });
+
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/course-routing/loops");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({
+      sportType: "Run",
+      start: { index: 0, latitude: 53.3, longitude: -6.2 },
+      targetDistanceM: 10000,
+      variation: 2,
+      hilliness: "hilly"
+    });
+  });
 });

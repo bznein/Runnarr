@@ -74,7 +74,7 @@ is a separate integration concern and must not expand the reusable core.
 - [Issue #102](https://github.com/bznein/Runnarr/issues/102)
 - Add private saved courses from GPS activities and reviewed GPX imports.
 - Add a dense course library, route/elevation inspection, GPX export, and a
-  waypoint planner backed by optional self-hosted Valhalla routing.
+  waypoint planner backed by optional self-hosted GraphHopper routing.
 
 ### 9. Garmin sync and writeback
 

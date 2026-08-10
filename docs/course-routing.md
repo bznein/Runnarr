@@ -1,134 +1,119 @@
 # Course routing
 
-Runnarr's course planner can connect adjacent waypoints through a self-hosted
-Valhalla routing service and generate closed-loop alternatives from a starting
-point and target distance. The browser sends planner coordinates only to
-Runnarr; Runnarr calls Valhalla from the backend. If routing is disabled or a
-particular manually planned leg cannot be routed, that leg remains visible as
-a dashed direct line and can still be saved after confirmation.
+Runnarr's course planner routes waypoints and generates closed-loop alternatives
+through a self-hosted GraphHopper 11 service. Browser planner coordinates are
+sent only to Runnarr; the backend calls GraphHopper. A failed manually planned
+leg falls back independently to an inspectable dashed direct line.
 
-Loop generation requires exactly one draft waypoint. It accepts 1–100 km for
-Run, Walk, and Hike, and 5–300 km for Cycling. Runnarr evaluates a bounded set
-of `/isochrone` isodistance control points and `/route` results, then returns up
-to three distinct alternatives within 10% of the target. If none qualify, the
-closest result within 20% is returned with a distance warning. Selecting a
-result only populates the normal editable planner; it does not save a course.
+Loop generation requires one draft waypoint and accepts 1–100 km for Run,
+Walk, and Hike or 5–300 km for Cycling. GraphHopper's native round-trip
+algorithm generates a bounded set of alternatives. Runnarr prefers routes
+within 10% of the requested distance, permits a closest-result fallback within
+20%, rejects excessive retracing and overlap, and returns at most three.
+
+The generator offers Flat, Balanced, and Hilly biases. Flat penalizes sustained
+gradients, Balanced uses the normal sport profile, and Hilly favors meaningful
+gradients. Candidates show ascent and ascent per kilometre. Hilliness is a
+generation hint only: it is not saved on the course, and later waypoint edits
+use normal foot or bike routing.
 
 ## Bundled optional service
 
-The normal Compose stack does not start Valhalla. Routing graphs are regional,
-take time and memory to build, and can consume several gigabytes on disk. Pick
-the smallest Geofabrik extract that covers the area where you plan courses.
-The example environment defaults to the Ireland and Northern Ireland extract.
+The normal stack does not start GraphHopper because a regional graph can take
+minutes to import and several gigabytes of disk and memory. Select the smallest
+Geofabrik extract that covers the courses you plan. The example defaults to
+Ireland and Northern Ireland.
 
-Set these values in `.env`:
+Set `.env`:
 
 ```dotenv
 RUNNARR_ROUTING_ENABLED=true
-RUNNARR_ROUTING_URL=http://valhalla:8002
-VALHALLA_TILE_URL=https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf
-VALHALLA_BUILD_ELEVATION=True
-VALHALLA_SERVER_THREADS=2
+RUNNARR_ROUTING_URL=http://graphhopper:8989
+GRAPHHOPPER_PBF_URL=https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf
+GRAPHHOPPER_JAVA_OPTS=-Xms1g -Xmx4g
 ```
 
-Then explicitly start the routing profile:
+Start the application and optional routing profile:
 
 ```sh
 docker compose --profile routing up --build -d
+docker compose --profile routing logs -f graphhopper
 ```
 
-The first start downloads the configured OpenStreetMap extract and builds a
-graph and regional elevation tiles in the `valhalla-data` volume. Elevation
-downloads increase the first build's time and disk use. Watch progress with:
+The first start downloads the PBF, imports foot and bike landmark profiles, and
+downloads SRTM elevation tiles into `graphhopper-data`. Subsequent starts reuse
+that volume. Check readiness and available profiles:
 
 ```sh
-docker compose --profile routing logs -f valhalla
+docker compose --profile routing ps
+docker compose --profile routing exec graphhopper \
+  curl -fsS http://127.0.0.1:8989/info
 ```
 
-Changing `VALHALLA_TILE_URL` may trigger a graph rebuild. Back up or remove the
-dedicated volume only when you intentionally want to replace its graph; course
-records themselves remain in PostgreSQL.
+Stop routing while retaining its reusable graph:
 
-## Managed production
+```sh
+docker compose --profile routing stop graphhopper
+docker compose --profile routing rm -f graphhopper
+```
 
-The deployment pipeline uses the same bundled Valhalla service for production.
-Set `VALHALLA_TILE_URL` (and any desired `VALHALLA_BUILD_*` or resource values)
-in the root-owned production `base.env`. Production promotions always activate
-the routing profile, force the app to use `http://valhalla:8002`, and retain the
-`runnarr-production-valhalla-data` graph volume while replacing only the app
-image.
+To remove the local graph permanently, first run the two commands above, then
+inspect and remove only the exact project volume reported by Compose:
 
-## Automated pull-request previews
+```sh
+docker compose --profile routing config --volumes
+docker volume ls --filter label=com.docker.compose.project --filter name=graphhopper-data
+# Replace PROJECT with the verified Compose project name from your host.
+docker volume rm PROJECT_graphhopper-data
+```
 
-Do not start the `routing` profile inside every automated preview. That would
-duplicate the regional graph, disk use, and Valhalla process for every open
-pull request. The deployment host instead runs one immutable, resource-limited
-`runnarr-nonprod-valhalla` container and attaches that trusted container to each
-preview's isolated network with the alias `valhalla`.
+Changing `GRAPHHOPPER_PBF_URL` or the repository routing configuration does not
+silently overwrite an existing graph. Startup fails with an actionable message
+so an operator can deliberately create a fresh volume. Saved courses remain in
+PostgreSQL and are unaffected. Legacy `runnarr-*-valhalla-data` volumes are
+also left untouched during migration and may be removed manually after the new
+service has been validated.
 
-From the reviewed revision that contains the course planner, enable the shared
-service with the smallest regional extract needed for preview testing:
+## Existing GraphHopper service
+
+Set `RUNNARR_ROUTING_URL` to a GraphHopper 11-compatible HTTP(S) origin, enable
+routing, and leave the bundled profile off. It must provide `foot` and `bike`
+profiles, unencoded GeoJSON route responses, flexible round-trip routing,
+custom models using `average_slope`, and elevation data. Run, Walk, and Hike
+use `foot`; Cycling uses `bike`.
+
+The configured URL is trusted deployment configuration. Keep external services
+on a private network when route privacy matters because they receive waypoint
+coordinates. Map tiles remain a separate browser-side boundary controlled by
+`MAP_TILE_URL`.
+
+## Managed production and previews
+
+Production uses the pinned GraphHopper 11 image and its own persistent
+`runnarr-production-graphhopper-data` volume. Put `GRAPHHOPPER_PBF_URL` and any
+resource overrides in the root-owned production `base.env`. Promotion starts
+and smoke-tests GraphHopper before cutting the app over. If cutover fails, a
+legacy app is restored with routing disabled instead of being pointed at an
+incompatible provider.
+
+Automated previews share one host-managed `runnarr-nonprod-graphhopper`
+container rather than importing a graph per PR. From a reviewed checkout:
 
 ```sh
 sudo deploy/configure-preview-routing.sh \
   https://download.geofabrik.de/europe/ireland-and-northern-ireland-latest.osm.pbf
 ```
 
-The helper holds the deployment lock, backs up the installed non-production
-assets, starts the shared service, and activates routing only for subsequent
-preview deployments. It does not restart existing preview or production
-containers. Watch the first graph build and wait for a healthy result:
-
-The default smoke leg is in central Dublin. For another regional extract, pass
-four covered coordinates after the PBF URL (`FROM_LAT FROM_LON TO_LAT TO_LON`)
-so deployment acceptance tests that graph rather than Ireland.
-
-```sh
-docker compose \
-  --project-name runnarr-preview-routing \
-  --env-file /etc/runnarr/preview-routing.env \
-  --file /opt/runnarr-deploy/docker-compose.routing.yml \
-  logs --follow valhalla
-
-docker inspect runnarr-nonprod-valhalla \
-  --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}'
-```
-
-Rerun each candidate deployment after Valhalla is healthy. The deployer writes
-`RUNNARR_ROUTING_ENABLED=true` and `RUNNARR_ROUTING_URL=http://valhalla:8002`,
-attaches the shared service, and verifies both a real pedestrian route and its
-elevation profile through the preview app container before accepting the
-deployment. Preview teardown detaches Valhalla before removing the isolated
-network. Production is not connected to this service.
-
-## Existing Valhalla service
-
-To use an existing deployment, set `RUNNARR_ROUTING_URL` to its HTTP(S) origin,
-enable routing, and leave the bundled profile off. Manual planning calls
-`/route` for adjacent waypoints and `/height` for the returned geometry. Loop
-generation additionally calls `/isochrone`, evaluates multi-location `/route`
-responses, and enriches only the selected alternatives through `/height`. It
-uses Valhalla's `pedestrian` costing for Run, Walk, and Hike courses and
-`bicycle` costing for Cycling. The service must have regional elevation data;
-otherwise the routed geometry remains usable and the affected leg explicitly
-reports that elevation is unavailable.
-
-The URL is trusted deployment configuration. Keep a self-hosted endpoint on a
-private network when route privacy matters. An external endpoint receives each
-waypoint pair and the resulting route geometry used for elevation lookup. Map
-tiles remain a separate browser-side privacy boundary controlled by
-`MAP_TILE_URL`.
+For another region, append covered `FROM_LAT FROM_LON TO_LAT TO_LON` smoke
+coordinates. The helper backs up installed assets, imports and verifies the
+graph, tests 3D foot routing, and activates routing only for future preview
+deployments. It does not restart existing previews or production.
 
 ## Limitations
 
 - The planner stores route geometry, not turn-by-turn directions.
-- Existing saved courses are not silently enriched or recalculated when the
-  configured routing/elevation graph changes.
-  [Issue #245](https://github.com/bznein/Runnarr/issues/245) tracks explicit
-  whole-course preview and recalculation.
-- Valhalla coverage ends at the boundaries of the configured graph. Uncovered
-  or disconnected legs fall back independently instead of discarding the
-  course draft.
-- Generated loops are best-effort route proposals. Sparse or constrained path
-  networks may yield fewer than three distinct alternatives or no result within
-  the 20% hard distance limit.
+- Existing courses are never silently recalculated when the graph changes.
+- Graph coverage ends at the configured extract boundary; uncovered manual
+  legs fall back to direct geometry.
+- Native round trips remain best-effort. Sparse networks can return fewer than
+  three alternatives or no route inside the 20% distance limit.

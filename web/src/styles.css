@@ -3594,7 +3594,7 @@ textarea {
 
 .course-loop-generator-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) auto;
   align-items: end;
   gap: 8px;
 }

@@ -1,0 +1,40 @@
+graphhopper:
+  datareader.file: ""
+  graph.location: /data/graph-cache
+  graph.encoded_values: foot_access,foot_priority,foot_average_speed,foot_road_access,hike_rating,mtb_rating,bike_access,bike_priority,bike_average_speed,bike_road_access,bike_network,ferry_speed,roundabout,country,road_class,average_slope
+  graph.elevation.provider: srtm
+  graph.elevation.cache_dir: /data/srtm
+  graph.elevation.interpolate: bilinear
+  graph.elevation.edge_smoothing: moving_average
+  graph.elevation.edge_smoothing.moving_average.window_size: 100
+  graph.elevation.long_edge_sampling_distance: 50
+  graph.elevation.way_point_max_distance: 10
+  import.osm.ignored_highways: motorway,trunk
+  profiles:
+    - name: foot
+      custom_model_files: [foot.json, foot_elevation.json]
+    - name: bike
+      custom_model_files: [bike.json, bike_elevation.json]
+  profiles_ch: []
+  profiles_lm:
+    - profile: foot
+    - profile: bike
+  routing.timeout_ms: 25000
+  routing.max_visited_nodes: 1000000
+  routing.non_ch.max_waypoint_distance: 350000
+
+server:
+  application_connectors:
+    - type: http
+      port: 8989
+      bind_host: 0.0.0.0
+  admin_connectors:
+    - type: http
+      port: 8990
+      bind_host: 127.0.0.1
+
+logging:
+  appenders:
+    - type: console
+      time_zone: UTC
+      log_format: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"

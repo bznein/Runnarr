@@ -22,12 +22,12 @@ not authorize a production cutover by itself.
   Deployment jobs do not check out or execute PR scripts.
 - Preview, staging, and production use different Compose projects, databases,
   volumes, state, credentials, and networks. Production's managed Compose
-  project includes one persistent, resource-limited Valhalla graph.
+  project includes one persistent, resource-limited GraphHopper graph.
 - Each non-production app owns its unique ingress alias on its isolated
   network. The shared gateway joins that network without owning the alias.
-- Automated previews can share one trusted, host-managed Valhalla container.
+- Automated previews can share one trusted, host-managed GraphHopper container.
   The deployer attaches it independently to each preview network under the
-  `valhalla` alias, verifies an actual route, and detaches it before teardown;
+  `graphhopper` alias, verifies an actual route, and detaches it before teardown;
   preview application containers never share a common routing network.
 - The Cloudflare Tunnel reaches the non-production gateway and the host SSH
   listener used by the restricted deployment account. It cannot reach
@@ -100,7 +100,7 @@ Use the examples under `deploy/examples/`. The production `base.env` should be
 a reviewed copy of the existing deployment `.env`; retain production OIDC,
 database, provider, encryption, proxy, and resource settings. Do not copy those
 values into preview or staging. Ensure bcrypt hashes containing `$` are
-single-quoted in Compose environment files. Set `VALHALLA_TILE_URL` to an
+single-quoted in Compose environment files. Set `GRAPHHOPPER_PBF_URL` to an
 HTTPS Geofabrik `.osm.pbf` extract that covers production users; the managed
 production Compose path enables the bundled routing profile and points the app
 at it on every promotion.
@@ -151,7 +151,7 @@ sudo deploy/configure-preview-routing.sh \
 The helper installs only the non-production overlay, restricted deployer, and
 standalone routing Compose asset. It records the previous installed assets
 under `/srv/runnarr/backups`, writes non-secret configuration to
-`/etc/runnarr/preview-routing.env`, and starts `runnarr-nonprod-valhalla`
+`/etc/runnarr/preview-routing.env`, and starts `runnarr-nonprod-graphhopper`
 without restarting any existing Runnarr container. Wait for the graph build to
 finish before rerunning previews. The image is pinned by digest, has no host
 port, and receives explicit CPU, memory, and PID limits.
@@ -161,11 +161,11 @@ different regional extract, provide four covered coordinates after the PBF URL
 so preview acceptance exercises the selected graph.
 
 When preview routing is active, newly deployed previews receive only the
-internal `http://valhalla:8002` endpoint. The shared container is connected to
+internal `http://graphhopper:8989` endpoint. The shared container is connected to
 each isolated preview network and must pass a real Dublin pedestrian route,
-isodistance contour, and elevation profile before that preview can be accepted.
+3D route and native round trip before that preview can be accepted.
 Staging remains unchanged.
-Production uses its own bundled Valhalla graph; preview routing remains a
+Production uses its own bundled GraphHopper graph; preview routing remains a
 separate shared non-production service.
 
 ## Cloudflare configuration
@@ -318,7 +318,7 @@ Provider credentials are absent. Closing the PR removes its stack, volumes,
 network state, and DNS. Hourly reconciliation repairs missed cleanup.
 
 When shared preview routing is configured, the generated preview environment
-also enables Runnarr routing. Deployment fails closed if Valhalla is missing,
+also enables Runnarr routing. Deployment fails closed if GraphHopper is missing,
 unhealthy, cannot join the isolated network, or cannot calculate the routing
 smoke leg.
 
@@ -355,12 +355,13 @@ while approval is pending, the promotion fails and must be restarted.
 The host then:
 
 1. verifies the image digest, commit, and migration identity;
-2. verifies there are no running sync jobs;
-3. checks backup disk capacity and stops the app for a brief maintenance
+2. starts or reuses the production GraphHopper graph and validates its profiles,
+   elevation, and real route before touching the current app;
+3. verifies there are no running sync jobs;
+4. checks backup disk capacity and stops the app for a brief maintenance
    window;
-4. creates and validates encrypted PostgreSQL and `/app/data` snapshots;
-5. starts the accepted digest without building;
-6. starts or reuses the production Valhalla graph and waits for its health;
+5. creates and validates encrypted PostgreSQL and `/app/data` snapshots;
+6. starts the accepted digest without building;
 7. verifies the internal and external health commit;
 8. records deployment and backup state. The promotion updates only
    `image.env`; the production routing overlay and named graph volume are

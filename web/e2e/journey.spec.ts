@@ -566,20 +566,20 @@ test.describe("local product journey", () => {
   test("uses the course library, saves an activity route, and reviews a GPX import", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
-    const loopVariations: number[] = [];
+    const loopRequests: Array<{ variation: number; hilliness: string }> = [];
     await page.route(/\/api\/config$/, async (route) => {
       const response = await route.fetch();
       const config = await response.json() as Record<string, unknown>;
       await route.fulfill({ response, json: { ...config, courseRoutingEnabled: true } });
     });
     await page.route("**/api/course-routing/loops", async (route) => {
-      const input = route.request().postDataJSON() as { start: { latitude: number; longitude: number }; targetDistanceM: number; variation: number };
-      loopVariations.push(input.variation);
+      const input = route.request().postDataJSON() as { start: { latitude: number; longitude: number }; targetDistanceM: number; variation: number; hilliness: string };
+      loopRequests.push({ variation: input.variation, hilliness: input.hilliness });
       const start: E2ERoutePoint = [input.start.latitude, input.start.longitude];
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ targetDistanceM: input.targetDistanceM, variation: input.variation, candidates: [1, 2, 3].map((index) => e2eCourseLoopCandidate(index, start)) })
+        body: JSON.stringify({ targetDistanceM: input.targetDistanceM, variation: input.variation, hilliness: input.hilliness, candidates: [1, 2, 3].map((index) => e2eCourseLoopCandidate(index, start)) })
       });
     });
     await login(page, mobile);
@@ -649,12 +649,15 @@ test.describe("local product journey", () => {
     await expect(waypointRows).toHaveCount(1);
     await expect(waypointRows.first().locator("small")).toHaveText(`${latitude.toFixed(5)}, -6.31000`);
     await expect(page.getByText("Starting location", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("Hilliness")).toHaveValue("balanced");
+    await page.getByLabel("Hilliness").selectOption("hilly");
     await page.getByRole("button", { name: "Generate loops", exact: true }).click();
     await expect(page.getByRole("radio", { name: /Route 1/ })).toBeVisible();
     await expect(page.getByRole("radio", { name: /Route 2/ })).toContainText("10.3 km");
+    await expect(page.getByRole("radio", { name: /Route 2/ })).toContainText("m/km");
     await expect(page.getByRole("button", { name: "Generate again", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Generate again", exact: true }).click();
-    await expect.poll(() => loopVariations).toEqual([0, 1]);
+    await expect.poll(() => loopRequests).toEqual([{ variation: 0, hilliness: "hilly" }, { variation: 1, hilliness: "hilly" }]);
     await page.getByRole("radio", { name: /Route 2/ }).click();
     await expect(page.getByRole("radio", { name: /Route 2/ })).toHaveAttribute("aria-checked", "true");
     await page.getByRole("button", { name: "Use selected route", exact: true }).click();
@@ -719,12 +722,12 @@ test.describe("local product journey", () => {
         await route.fulfill({ response, json: { ...config, courseRoutingEnabled: true } });
       });
       await page.route("**/api/course-routing/loops", async (route) => {
-        const input = route.request().postDataJSON() as { start: { latitude: number; longitude: number }; targetDistanceM: number; variation: number };
+        const input = route.request().postDataJSON() as { start: { latitude: number; longitude: number }; targetDistanceM: number; variation: number; hilliness: string };
         const start: E2ERoutePoint = [input.start.latitude, input.start.longitude];
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ targetDistanceM: input.targetDistanceM, variation: input.variation, candidates: [1, 2, 3].map((index) => e2eCourseLoopCandidate(index, start)) })
+          body: JSON.stringify({ targetDistanceM: input.targetDistanceM, variation: input.variation, hilliness: input.hilliness, candidates: [1, 2, 3].map((index) => e2eCourseLoopCandidate(index, start)) })
         });
       });
     }

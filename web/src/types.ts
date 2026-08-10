@@ -100,6 +100,7 @@ export type AppConfig = {
 };
 
 export type CourseSport = "Run" | "Walk" | "Hike" | "Cycling";
+export type CourseLoopHilliness = "flat" | "balanced" | "hilly";
 
 export type CourseLegMode = "preserved" | "routed" | "direct";
 
@@ -233,6 +234,7 @@ export type CourseLoopCandidate = CourseRoutingResponse & {
 export type CourseLoopGenerationResponse = {
   targetDistanceM: number;
   variation: number;
+  hilliness: CourseLoopHilliness;
   candidates: CourseLoopCandidate[];
 };
 

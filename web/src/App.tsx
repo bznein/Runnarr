@@ -48,6 +48,7 @@ import type {
   CourseImportSelection,
   CourseLeg,
   CourseLoopCandidate,
+  CourseLoopHilliness,
   CourseProfilePoint,
   CourseRoutingLeg,
   CourseSport,
@@ -5589,6 +5590,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [generatedCandidate, setGeneratedCandidate] = useState<CourseLoopCandidate>();
   const [loopTargetKM, setLoopTargetKM] = useState("10");
   const [loopVariation, setLoopVariation] = useState(0);
+  const [loopHilliness, setLoopHilliness] = useState<CourseLoopHilliness>("balanced");
   const [loopCandidates, setLoopCandidates] = useState<CourseLoopCandidate[]>([]);
   const [activeLoopID, setActiveLoopID] = useState("");
   const [draggedWaypointIndex, setDraggedWaypointIndex] = useState<number>();
@@ -5647,7 +5649,8 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
       sportType,
       start: waypoints[0],
       targetDistanceM: loopDistanceKM! * 1000,
-      variation
+      variation,
+      hilliness: loopHilliness
     }),
     onSuccess: (result) => {
       setLoopCandidates(result.candidates);
@@ -5791,7 +5794,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
 
   return <Page title={editing ? "Edit course route" : "Plan a course"} eyebrow={editing ? course.data?.name : "Waypoint planner"} actions={<><Link className="secondary-button" to={editing ? `/courses/${encodeURIComponent(id!)}` : "/courses"}>Cancel</Link><button className="primary-button" type="button" disabled={!canSave || save.isPending} onClick={submit}>{save.isPending ? "Saving…" : editing ? "Save changes" : "Save course"}</button></>}>
     {!canWrite && <div className="error">The planner is disabled in read-only support mode.</div>}
-    {!routingEnabled && <div className="course-routing-notice"><strong>Routing is not enabled.</strong> Waypoints are connected with direct dashed legs. Configure the optional Valhalla service to follow paths and roads.</div>}
+    {!routingEnabled && <div className="course-routing-notice"><strong>Routing is not enabled.</strong> Waypoints are connected with direct dashed legs. Configure the optional GraphHopper service to follow paths and roads.</div>}
     {save.error && <div className="error">{save.error instanceof ApiError && save.error.status === 409 ? "This course changed after you opened it. Reload the latest version before saving." : courseMutationMessage(save.error)}</div>}
     <section className="course-planner-layout">
       <aside className="panel course-planner-sidebar">
@@ -5801,6 +5804,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
           <div><strong id="course-loop-generator-title">Generate a loop</strong><small>Choose one starting waypoint and a target distance.</small></div>
           <div className="course-loop-generator-controls">
             <label className="field"><span>Target distance</span><span className="course-loop-distance-input"><input type="number" min={sportType === "Cycling" ? 5 : 1} max={sportType === "Cycling" ? 300 : 100} step="0.1" inputMode="decimal" value={loopTargetKM} onChange={(event) => { setLoopTargetKM(event.target.value); setLoopCandidates([]); setActiveLoopID(""); setLoopVariation(0); generateLoops.reset(); }} /><span>km</span></span><small>{courseLoopDistanceHint(sportType)}</small></label>
+            <label className="field"><span>Hilliness</span><select value={loopHilliness} onChange={(event) => { setLoopHilliness(event.target.value as CourseLoopHilliness); setLoopCandidates([]); setActiveLoopID(""); setLoopVariation(0); generateLoops.reset(); }}><option value="flat">Flat</option><option value="balanced">Balanced</option><option value="hilly">Hilly</option></select><small>Biases generated routes</small></label>
             <button className="secondary-button" type="button" disabled={!canWrite || !routingEnabled || waypoints.length !== 1 || loopDistanceKM === undefined || generateLoops.isPending} onClick={generateLoopBatch}>{generateLoops.isPending ? "Generating…" : loopCandidates.length > 0 ? "Generate again" : "Generate loops"}</button>
           </div>
           {waypoints.length === 0 && <small className="muted">Click the map to set the starting point.</small>}
@@ -5810,7 +5814,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
           {loopCandidates.length > 0 && <div className="course-loop-alternatives" role="radiogroup" aria-label="Generated loop alternatives">
             {loopCandidates.map((candidate, index) => <button className={`course-loop-alternative ${candidate.id === activeLoop?.id ? "active" : ""}`} type="button" role="radio" aria-checked={candidate.id === activeLoop?.id} key={candidate.id} onClick={() => setActiveLoopID(candidate.id)} onMouseEnter={() => setActiveLoopID(candidate.id)}>
               <span className={`course-loop-swatch course-loop-swatch-${index + 1}`} aria-hidden="true" />
-              <span><strong>Route {index + 1}</strong><small>{formatDistance(candidate.distanceM)} · {courseLoopDeviationLabel(candidate.distanceDeviationPct)}</small>{candidate.warning && <small className="warning-text">{candidate.warning}</small>}</span>
+              <span><strong>Route {index + 1}</strong><small>{formatDistance(candidate.distanceM)} · {courseLoopDeviationLabel(candidate.distanceDeviationPct)}</small>{candidate.elevationGainM !== undefined && <small>{Math.round(candidate.elevationGainM).toLocaleString()} m ascent · {(candidate.elevationGainM / (candidate.distanceM / 1000)).toFixed(1)} m/km</small>}{candidate.warning && <small className="warning-text">{candidate.warning}</small>}</span>
             </button>)}
             <button className="primary-button" type="button" disabled={!activeLoop} onClick={() => activeLoop && useGeneratedLoop(activeLoop)}>Use selected route</button>
           </div>}
