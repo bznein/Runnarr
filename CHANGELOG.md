@@ -27,12 +27,15 @@
   attached and route-smoke-tested across isolated pull-request previews. The
   planner previews elevation, ascent, descent, and coverage before saving and
   can add a final routed leg back to the starting point with one action.
-- New course plans now begin at the starting point of the most recently updated
-  saved course when one is available.
-- New course plans can generate up to three distinct, editable closed-loop
+- New course creation now starts with a clear Automatic or Manual choice and
+  never silently copies a point from another course. Automatic planning uses a
+  focused start, distance, and hilliness flow before handing the selected route
+  to the full manual editor for review.
+- Automatic course plans can generate up to three distinct, editable route
   alternatives from one starting point and a sport-specific target distance,
-  with explicit distance tolerances, repeatable new batches, native round-trip
-  routing, and Flat, Balanced, or Hilly generation biases.
+  with explicit distance tolerances, repeatable new batches, conventional loops
+  and practical shared out-and-back sections, plus Flat, Balanced, or Hilly
+  generation biases.
 - Course planner waypoints can now be given custom names that persist across
   route edits and course duplication, with compact map labels that reveal the
   full name on hover or keyboard focus.

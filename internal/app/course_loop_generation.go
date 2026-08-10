@@ -20,7 +20,7 @@ const (
 	maxCourseLoopDuration          = 30 * time.Second
 	preferredCourseLoopDeviation   = 10.0
 	maximumCourseLoopDeviation     = 20.0
-	preferredCourseLoopRetracing   = 0.35
+	sharedCourseLoopRetracing      = 0.12
 	maximumCourseLoopResultOverlap = 0.70
 	courseLoopSampleSpacingM       = 25.0
 )
@@ -52,8 +52,11 @@ type CourseLoopCandidate struct {
 	CourseRoutingResponse
 	Waypoints            []CourseWaypoint `json:"waypoints"`
 	DistanceDeviationPct float64          `json:"distanceDeviationPct"`
+	SharedSections       bool             `json:"sharedSections"`
 	Warning              string           `json:"warning,omitempty"`
 	seed                 int64
+	strategy             courseLoopStrategy
+	bearingDegrees       float64
 	retraceRatio         float64
 	geometryCells        map[courseLoopCell]struct{}
 }
@@ -66,9 +69,18 @@ type CourseLoopGenerationResponse struct {
 }
 
 type courseLoopRequestSpec struct {
-	seed      int64
-	distanceM float64
+	seed           int64
+	distanceM      float64
+	strategy       courseLoopStrategy
+	bearingDegrees float64
 }
+
+type courseLoopStrategy string
+
+const (
+	courseLoopStrategyRoundTrip  courseLoopStrategy = "round_trip"
+	courseLoopStrategySharedPath courseLoopStrategy = "shared_path"
+)
 
 type courseLoopCell struct {
 	latitude  int
@@ -90,9 +102,17 @@ func (service *CourseRoutingService) GenerateLoops(ctx context.Context, input Co
 	defer cancel()
 	primary := make([]courseLoopRequestSpec, primaryCourseLoopCandidates)
 	for index := range primary {
+		strategy := courseLoopStrategyRoundTrip
+		bearingDegrees := 0.0
+		if index >= primaryCourseLoopCandidates/2 {
+			strategy = courseLoopStrategySharedPath
+			bearingDegrees = math.Mod(float64(index-primaryCourseLoopCandidates/2)*90+float64(input.Variation)*37, 360)
+		}
 		primary[index] = courseLoopRequestSpec{
-			seed:      int64(input.Variation)*1_000_003 + int64(index)*104_729 + 17,
-			distanceM: input.TargetDistanceM,
+			seed:           int64(input.Variation)*1_000_003 + int64(index)*104_729 + 17,
+			distanceM:      input.TargetDistanceM,
+			strategy:       strategy,
+			bearingDegrees: bearingDegrees,
 		}
 	}
 	candidates, upstreamErr := service.generateCourseLoopBatch(routingContext, input, primary)
@@ -121,8 +141,10 @@ func (service *CourseRoutingService) GenerateLoops(ctx context.Context, input Co
 			}
 			factor := math.Max(0.5, math.Min(1.5, input.TargetDistanceM/actualDistance))
 			corrections = append(corrections, courseLoopRequestSpec{
-				seed:      candidates[index].seed,
-				distanceM: input.TargetDistanceM * factor,
+				seed:           candidates[index].seed,
+				distanceM:      input.TargetDistanceM * factor,
+				strategy:       candidates[index].strategy,
+				bearingDegrees: candidates[index].bearingDegrees,
 			})
 		}
 		corrected, correctionErr := service.generateCourseLoopBatch(routingContext, input, corrections)
@@ -214,18 +236,27 @@ func (service *CourseRoutingService) generateCourseLoopBatch(ctx context.Context
 }
 
 func (service *CourseRoutingService) routeCourseLoop(ctx context.Context, input CourseLoopGenerationRequest, spec courseLoopRequestSpec) (CourseLoopCandidate, error) {
-	roundTrip := &graphHopperRoundTrip{DistanceM: spec.distanceM, Seed: spec.seed}
-	points, _, err := service.graphHopperRoute(ctx, graphHopperRouteRequest{
-		Points:        [][]float64{{input.Start.Longitude, input.Start.Latitude}},
+	request := graphHopperRouteRequest{
 		Profile:       courseRoutingProfile(input.SportType),
 		PointsEncoded: false,
 		Elevation:     true,
 		Instructions:  false,
-		Algorithm:     "round_trip",
-		RoundTrip:     roundTrip,
 		CHDisabled:    true,
 		CustomModel:   courseLoopCustomModel(input.Hilliness),
-	})
+	}
+	if spec.strategy == courseLoopStrategySharedPath {
+		turnaround := courseLoopDestination(input.Start, spec.distanceM/2, spec.bearingDegrees)
+		request.Points = [][]float64{
+			{input.Start.Longitude, input.Start.Latitude},
+			{turnaround.Longitude, turnaround.Latitude},
+			{input.Start.Longitude, input.Start.Latitude},
+		}
+	} else {
+		request.Points = [][]float64{{input.Start.Longitude, input.Start.Latitude}}
+		request.Algorithm = "round_trip"
+		request.RoundTrip = &graphHopperRoundTrip{DistanceM: spec.distanceM, Seed: spec.seed}
+	}
+	points, _, err := service.graphHopperRoute(ctx, request)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return CourseLoopCandidate{}, err
@@ -238,7 +269,20 @@ func (service *CourseRoutingService) routeCourseLoop(ctx context.Context, input 
 	}
 	candidate, err := buildCourseLoopCandidate(points, input.Start, input.TargetDistanceM)
 	candidate.seed = spec.seed
+	candidate.strategy = spec.strategy
+	candidate.bearingDegrees = spec.bearingDegrees
 	return candidate, err
+}
+
+func courseLoopDestination(start CourseWaypoint, distanceM, bearingDegrees float64) CourseWaypoint {
+	const earthRadiusM = 6371000.0
+	bearing := bearingDegrees * math.Pi / 180
+	angularDistance := distanceM / earthRadiusM
+	startLatitude := start.Latitude * math.Pi / 180
+	startLongitude := start.Longitude * math.Pi / 180
+	latitude := math.Asin(math.Sin(startLatitude)*math.Cos(angularDistance) + math.Cos(startLatitude)*math.Sin(angularDistance)*math.Cos(bearing))
+	longitude := startLongitude + math.Atan2(math.Sin(bearing)*math.Sin(angularDistance)*math.Cos(startLatitude), math.Cos(angularDistance)-math.Sin(startLatitude)*math.Sin(latitude))
+	return CourseWaypoint{Latitude: latitude * 180 / math.Pi, Longitude: longitude * 180 / math.Pi}
 }
 
 func courseLoopCustomModel(hilliness CourseLoopHilliness) *graphHopperCustomModel {
@@ -305,6 +349,7 @@ func buildCourseLoopCandidate(points []CoursePoint, start CourseWaypoint, target
 		CourseRoutingResponse: routing,
 		Waypoints:             waypoints,
 		DistanceDeviationPct:  (routing.DistanceM - targetDistanceM) / targetDistanceM * 100,
+		SharedSections:        retracing >= sharedCourseLoopRetracing,
 		Warning:               warning,
 		retraceRatio:          retracing,
 		geometryCells:         cells,
@@ -404,11 +449,6 @@ func selectCourseLoopCandidates(candidates []CourseLoopCandidate, hilliness Cour
 		return []CourseLoopCandidate{fallback}
 	}
 	sort.SliceStable(preferred, func(left, right int) bool {
-		leftLoop := preferred[left].retraceRatio < preferredCourseLoopRetracing
-		rightLoop := preferred[right].retraceRatio < preferredCourseLoopRetracing
-		if leftLoop != rightLoop {
-			return leftLoop
-		}
 		leftIntensity, leftKnown := courseLoopElevationIntensity(preferred[left])
 		rightIntensity, rightKnown := courseLoopElevationIntensity(preferred[right])
 		if hilliness != CourseLoopHillinessBalanced && leftKnown != rightKnown {
@@ -433,7 +473,29 @@ func selectCourseLoopCandidates(candidates []CourseLoopCandidate, hilliness Cour
 		return preferred[left].seed < preferred[right].seed
 	})
 	selected := make([]CourseLoopCandidate, 0, maxCourseLoopResults)
+	if len(preferred) > 0 {
+		selected = append(selected, preferred[0])
+		// A route that reuses an access path is often the only practical option from
+		// a home, trailhead, or cul-de-sac. Keep both route shapes visible when the
+		// generated batch contains them instead of treating retracing as a defect.
+		for _, candidate := range preferred[1:] {
+			if candidate.SharedSections != selected[0].SharedSections {
+				selected = append(selected, candidate)
+				break
+			}
+		}
+	}
 	for _, candidate := range preferred {
+		alreadySelected := false
+		for _, other := range selected {
+			if candidate.seed == other.seed && candidate.strategy == other.strategy && candidate.DistanceDeviationPct == other.DistanceDeviationPct {
+				alreadySelected = true
+				break
+			}
+		}
+		if alreadySelected {
+			continue
+		}
 		if courseLoopOverlapsSelected(candidate, selected) {
 			continue
 		}

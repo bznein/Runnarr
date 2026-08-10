@@ -44,8 +44,18 @@ func TestCourseLoopGenerationUsesNativeRoundTripsAndReturnsEditableCandidates(t 
 		requests = append(requests, body)
 		requestIndex := len(requests)
 		mutex.Unlock()
-		angle := float64(body.RoundTrip.Seed%360) + float64(requestIndex)*17
-		coordinates := testGraphHopperLoop(53.3498, -6.2603, body.RoundTrip.DistanceM, angle, 30+float64(body.RoundTrip.Seed%5)*20)
+		var coordinates [][]any
+		if body.RoundTrip != nil {
+			angle := float64(body.RoundTrip.Seed%360) + float64(requestIndex)*17
+			coordinates = testGraphHopperLoop(53.3498, -6.2603, body.RoundTrip.DistanceM, angle, 30+float64(body.RoundTrip.Seed%5)*20)
+		} else {
+			start, end := body.Points[0], body.Points[1]
+			middle := []float64{(start[0] + end[0]) / 2, (start[1] + end[1]) / 2}
+			coordinates = [][]any{
+				{start[0], start[1], 10.0}, {middle[0], middle[1], 35.0}, {end[0], end[1], 55.0},
+				{middle[0], middle[1], 35.0}, {start[0], start[1], 10.0},
+			}
+		}
 		return testGraphHopperResponse(http.StatusOK, coordinates), nil
 	})}
 	service := &CourseRoutingService{enabled: true, baseURL: "http://routing.test", client: client}
@@ -63,10 +73,21 @@ func TestCourseLoopGenerationUsesNativeRoundTripsAndReturnsEditableCandidates(t 
 	if len(requests) != primaryCourseLoopCandidates {
 		t.Fatalf("request count = %d", len(requests))
 	}
+	roundTrips, sharedPaths := 0, 0
 	for _, request := range requests {
-		if request.Algorithm != "round_trip" || request.RoundTrip == nil || request.Profile != "foot" || !request.CHDisabled || request.CustomModel == nil || len(request.CustomModel.Priority) != 2 {
+		if request.Profile != "foot" || !request.CHDisabled || request.CustomModel == nil || len(request.CustomModel.Priority) != 2 {
 			t.Fatalf("GraphHopper request = %#v", request)
 		}
+		if request.RoundTrip != nil && request.Algorithm == "round_trip" && len(request.Points) == 1 {
+			roundTrips++
+		} else if request.RoundTrip == nil && request.Algorithm == "" && len(request.Points) == 3 && request.Points[0][0] == request.Points[2][0] && request.Points[0][1] == request.Points[2][1] {
+			sharedPaths++
+		} else {
+			t.Fatalf("unexpected GraphHopper strategy request = %#v", request)
+		}
+	}
+	if roundTrips != 4 || sharedPaths != 4 {
+		t.Fatalf("round trips/shared paths = %d/%d", roundTrips, sharedPaths)
 	}
 	for index, candidate := range result.Candidates {
 		if candidate.ID != "route-"+string(rune('1'+index)) || len(candidate.Waypoints) != 4 || len(candidate.Legs) != 3 {
@@ -76,6 +97,13 @@ func TestCourseLoopGenerationUsesNativeRoundTripsAndReturnsEditableCandidates(t 
 		if first.Latitude != last.Latitude || first.Longitude != last.Longitude || candidate.ElevationCoverage != 1 || candidate.ElevationGainM == nil {
 			t.Fatalf("candidate metrics = %#v", candidate)
 		}
+	}
+	sharedCandidate := false
+	for _, candidate := range result.Candidates {
+		sharedCandidate = sharedCandidate || candidate.SharedSections
+	}
+	if !sharedCandidate {
+		t.Fatalf("generated candidates did not retain a route with shared sections: %#v", result.Candidates)
 	}
 }
 
@@ -91,7 +119,13 @@ func TestCourseLoopGenerationDefaultsToBalancedAndCapsCorrectionRequests(t *test
 		requests = append(requests, body)
 		mutex.Unlock()
 		// Overshoot every request enough to force the bounded correction pass.
-		return testGraphHopperResponse(http.StatusOK, testGraphHopperLoop(53.3498, -6.2603, body.RoundTrip.DistanceM*1.3, float64(body.RoundTrip.Seed%360), 50)), nil
+		distanceM, seed := 0.0, int64(0)
+		if body.RoundTrip != nil {
+			distanceM, seed = body.RoundTrip.DistanceM, body.RoundTrip.Seed
+		} else {
+			distanceM = 2 * haversine(body.Points[0][1], body.Points[0][0], body.Points[1][1], body.Points[1][0])
+		}
+		return testGraphHopperResponse(http.StatusOK, testGraphHopperLoop(53.3498, -6.2603, distanceM*1.3, float64(seed%360), 50)), nil
 	})}
 	service := &CourseRoutingService{enabled: true, baseURL: "http://routing.test", client: client}
 	result, err := service.GenerateLoops(context.Background(), CourseLoopGenerationRequest{
@@ -128,6 +162,26 @@ func TestSelectCourseLoopCandidatesRanksHillinessAndPreservesFallback(t *testing
 	if len(fallback) != 1 || !strings.Contains(fallback[0].Warning, "17% shorter") {
 		t.Fatalf("fallback = %#v", fallback)
 	}
+}
+
+func TestSelectCourseLoopCandidatesKeepsSharedSectionOption(t *testing.T) {
+	cell := func(value int) map[courseLoopCell]struct{} { return map[courseLoopCell]struct{}{{latitude: value}: {}} }
+	candidates := []CourseLoopCandidate{
+		{DistanceDeviationPct: 0, seed: 1, geometryCells: cell(1)},
+		{DistanceDeviationPct: 1, seed: 2, geometryCells: cell(2)},
+		{DistanceDeviationPct: 2, seed: 3, geometryCells: cell(3)},
+		{DistanceDeviationPct: 3, SharedSections: true, retraceRatio: .45, seed: 4, strategy: courseLoopStrategySharedPath, geometryCells: cell(4)},
+	}
+	selected := selectCourseLoopCandidates(candidates, CourseLoopHillinessBalanced)
+	if len(selected) != maxCourseLoopResults {
+		t.Fatalf("selected candidates = %#v", selected)
+	}
+	for _, candidate := range selected {
+		if candidate.SharedSections {
+			return
+		}
+	}
+	t.Fatalf("shared-section route was omitted: %#v", selected)
 }
 
 func TestCourseLoopGenerationHandlerReportsActionableStatuses(t *testing.T) {

@@ -56,15 +56,16 @@ discarded GPX data, route geometry, and available elevation before committing.
 Course detail supports local metadata, favorites, duplication, permanent
 deletion, GPX export, and a one-shot current-location overlay. Location is
 requested only after pressing the control and is not stored separately by
-Runnarr. When a saved course is available, its starting point seeds the next
-new course draft. With routing enabled, a new draft can also generate up to
-three distinct closed-loop alternatives from that start, a target distance,
-and a Flat, Balanced, or Hilly generation bias; the selected result remains
-fully editable before it is saved.
+Runnarr. New course creation starts by choosing Automatic or Manual and never
+imports a point from another course. With routing enabled, Automatic can
+generate up to three alternatives from an explicitly selected start, target
+distance, and Flat, Balanced, or Hilly bias. Results include conventional loops
+and practical routes that reuse out-and-back sections; the selected result
+remains fully editable before it is saved.
 
 The waypoint planner can keep individual legs direct, route them through an
-optional backend-connected GraphHopper service, or use GraphHopper's native
-round-trip routing to propose generated loops. The normal stack leaves this heavier regional
+optional backend-connected GraphHopper service, or use GraphHopper's bounded
+round-trip and shared-path strategies to propose generated routes. The normal stack leaves this heavier regional
 service off. See the [course-routing guide](docs/course-routing.md) for graph
 sizing, Compose startup, privacy boundaries, and external-service configuration.
 

@@ -228,6 +228,7 @@ export type CourseLoopCandidate = CourseRoutingResponse & {
   id: string;
   waypoints: CourseWaypoint[];
   distanceDeviationPct: number;
+  sharedSections: boolean;
   warning?: string;
 };
 

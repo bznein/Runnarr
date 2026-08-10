@@ -5,11 +5,13 @@ through a self-hosted GraphHopper 11 service. Browser planner coordinates are
 sent only to Runnarr; the backend calls GraphHopper. A failed manually planned
 leg falls back independently to an inspectable dashed direct line.
 
-Loop generation requires one draft waypoint and accepts 1–100 km for Run,
-Walk, and Hike or 5–300 km for Cycling. GraphHopper's native round-trip
-algorithm generates a bounded set of alternatives. Runnarr prefers routes
-within 10% of the requested distance, permits a closest-result fallback within
-20%, rejects excessive retracing and overlap, and returns at most three.
+Automatic generation requires one explicitly selected start and accepts
+1–100 km for Run, Walk, and Hike or 5–300 km for Cycling. A bounded request mix
+uses GraphHopper's native round-trip algorithm for conventional loops and
+directional start-to-turnaround routing for practical routes that reuse an
+access path. Runnarr prefers routes within 10% of the requested distance,
+permits a closest-result fallback within 20%, keeps both route shapes available
+when possible, removes near-duplicate results, and returns at most three.
 
 The generator offers Flat, Balanced, and Hilly biases. Flat penalizes sustained
 gradients, Balanced uses the normal sport profile, and Hilly favors meaningful
@@ -115,5 +117,5 @@ deployments. It does not restart existing previews or production.
 - Existing courses are never silently recalculated when the graph changes.
 - Graph coverage ends at the configured extract boundary; uncovered manual
   legs fall back to direct geometry.
-- Native round trips remain best-effort. Sparse networks can return fewer than
+- Generated routes remain best-effort. Sparse networks can return fewer than
   three alternatives or no route inside the 20% distance limit.

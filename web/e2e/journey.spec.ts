@@ -67,6 +67,7 @@ function e2eCourseLoopCandidate(index: number, start: E2ERoutePoint) {
     })),
     distanceM,
     distanceDeviationPct: [-2, 3, 8][index - 1],
+    sharedSections: index === 2,
     elevationGainM: 42 + index,
     elevationLossM: 39 + index,
     elevationCoverage: 1,
@@ -642,25 +643,40 @@ test.describe("local product journey", () => {
 
     await navigateTo(page, "Courses", mobile);
     await page.getByRole("link", { name: "New course", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+    const waypointRows = page.locator(".course-waypoint-list li");
+    if (visualBaseline) {
+      await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+      await expect(waypointRows).toHaveCount(1);
+      await expect(waypointRows.first().locator("small")).toHaveText(`${latitude.toFixed(5)}, -6.31000`);
+    } else {
+      await expect(page.getByRole("heading", { name: "Create a course", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Automatic/ })).toBeVisible();
+      await expect(page.getByRole("button", { name: /Manual/ })).toBeVisible();
+      await expect(waypointRows).toHaveCount(0);
+      await expect(page.getByText(`${latitude.toFixed(5)}, -6.31000`, { exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: /Automatic/ }).click();
+      await expect(page.getByRole("heading", { name: "Create automatically", exact: true })).toBeVisible();
+    }
     await expect(page.getByText("Routing is not enabled.", { exact: true })).toHaveCount(0);
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
-    const waypointRows = page.locator(".course-waypoint-list li");
-    await expect(waypointRows).toHaveCount(1);
-    await expect(waypointRows.first().locator("small")).toHaveText(`${latitude.toFixed(5)}, -6.31000`);
-    await expect(page.getByText("Starting location", { exact: true })).toHaveCount(0);
+    if (!visualBaseline) {
+      await plannerMap.click({ position: { x: 220, y: 190 } });
+      await expect(page.locator(".course-auto-start")).toBeVisible();
+    }
     await expect(page.getByLabel("Hilliness")).toHaveValue("balanced");
     await page.getByLabel("Hilliness").selectOption("hilly");
-    await page.getByRole("button", { name: "Generate loops", exact: true }).click();
+    await page.getByRole("button", { name: visualBaseline ? "Generate loops" : "Find routes", exact: true }).click();
     await expect(page.getByRole("radio", { name: /Route 1/ })).toBeVisible();
     await expect(page.getByRole("radio", { name: /Route 2/ })).toContainText("10.3 km");
     await expect(page.getByRole("radio", { name: /Route 2/ })).toContainText("m/km");
-    await expect(page.getByRole("button", { name: "Generate again", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Generate again", exact: true }).click();
+    if (!visualBaseline) await expect(page.getByRole("radio", { name: /Route 2/ })).toContainText("shared out-and-back sections");
+    const regenerateLabel = visualBaseline ? "Generate again" : "Find different routes";
+    await expect(page.getByRole("button", { name: regenerateLabel, exact: true })).toBeVisible();
+    await page.getByRole("button", { name: regenerateLabel, exact: true }).click();
     await expect.poll(() => loopRequests).toEqual([{ variation: 0, hilliness: "hilly" }, { variation: 1, hilliness: "hilly" }]);
     await page.getByRole("radio", { name: /Route 2/ }).click();
     await expect(page.getByRole("radio", { name: /Route 2/ })).toHaveAttribute("aria-checked", "true");
-    await page.getByRole("button", { name: "Use selected route", exact: true }).click();
+    await page.getByRole("button", { name: visualBaseline ? "Use selected route" : "Use and review route", exact: true }).click();
     await expect(waypointRows).toHaveCount(4);
     const waypointName = "Canal turn beside the old stone bridge";
     if (!visualBaseline) {
@@ -734,15 +750,24 @@ test.describe("local product journey", () => {
     await login(page, mobile);
     await navigateTo(page, "Courses", mobile);
     await page.getByRole("link", { name: "New course", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+    if (visualBaseline) {
+      await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByRole("heading", { name: "Create a course", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: /Automatic/ }).click();
+      await expect(page.getByRole("heading", { name: "Create automatically", exact: true })).toBeVisible();
+    }
 
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
     const waypointRows = page.locator(".course-waypoint-list li");
-    await expect(waypointRows).toHaveCount(1);
     if (!visualBaseline) {
-      await page.getByRole("button", { name: "Generate loops", exact: true }).click();
+      await expect(waypointRows).toHaveCount(0);
+      await plannerMap.click({ position: { x: 180, y: 160 } });
+      await page.getByRole("button", { name: "Find routes", exact: true }).click();
       await expect(page.getByRole("radio", { name: /Route 1/ })).toBeVisible();
       await expect(page.getByRole("radio", { name: /Route 3/ })).toBeVisible();
+    } else {
+      await expect(waypointRows).toHaveCount(1);
     }
     await page.getByRole("button", { name: "Enter fullscreen map", exact: true }).click();
     const fullscreenPanel = page.getByRole("region", { name: "Course route map" });
