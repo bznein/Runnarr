@@ -8,6 +8,8 @@
   preview aliases to their app containers instead of back to itself.
 - Fixed GitHub-hosted deployment SSH to use the checksum-pinned native
   `cloudflared` client instead of a Docker-wrapped proxy command.
+- Future preview and staging deployments now detach the retained legacy
+  Valhalla container from their application network before attaching GraphHopper.
 
 ### Features
 

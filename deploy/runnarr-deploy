@@ -29,6 +29,7 @@ NONPROD_NETWORK="${RUNNARR_NONPROD_INGRESS_NETWORK:-runnarr-nonprod-ingress}"
 NONPROD_GATEWAY="${RUNNARR_NONPROD_GATEWAY_CONTAINER:-runnarr-nonprod-gateway}"
 PREVIEW_ROUTING_ENABLED="${RUNNARR_PREVIEW_ROUTING_ENABLED:-false}"
 PREVIEW_ROUTING_CONTAINER="${RUNNARR_PREVIEW_ROUTING_CONTAINER:-runnarr-nonprod-graphhopper}"
+LEGACY_PREVIEW_ROUTING_CONTAINER="${RUNNARR_LEGACY_PREVIEW_ROUTING_CONTAINER:-runnarr-nonprod-valhalla}"
 PREVIEW_ROUTING_URL="http://graphhopper:8989"
 PREVIEW_ROUTING_SMOKE_FROM_LAT="${RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LAT:-53.3438}"
 PREVIEW_ROUTING_SMOKE_FROM_LON="${RUNNARR_PREVIEW_ROUTING_SMOKE_FROM_LON:--6.2546}"
@@ -45,6 +46,8 @@ LOCK_FILE="${DEPLOY_ROOT}/deploy.lock"
   die "RUNNARR_PREVIEW_ROUTING_ENABLED must be true or false"
 [[ "${PREVIEW_ROUTING_CONTAINER}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] ||
   die "RUNNARR_PREVIEW_ROUTING_CONTAINER is invalid"
+[[ "${LEGACY_PREVIEW_ROUTING_CONTAINER}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] ||
+  die "RUNNARR_LEGACY_PREVIEW_ROUTING_CONTAINER is invalid"
 for coordinate in \
   "${PREVIEW_ROUTING_SMOKE_FROM_LAT}" \
   "${PREVIEW_ROUTING_SMOKE_FROM_LON}" \
@@ -326,8 +329,23 @@ preview_routing_enabled() {
   [[ "${PREVIEW_ROUTING_ENABLED}" == "true" ]]
 }
 
+disconnect_legacy_preview_routing() {
+  local environment="$1"
+  local directory project network
+  directory="$(environment_directory "${environment}")"
+  project="$(json_field "${directory}/runtime.json" '.project')"
+  network="${project}_runnarr"
+  if docker container inspect "${LEGACY_PREVIEW_ROUTING_CONTAINER}" \
+    --format '{{json .NetworkSettings.Networks}}' 2>/dev/null |
+    jq -e --arg network "${network}" 'has($network)' >/dev/null; then
+    log "detaching legacy Valhalla container from ${environment}"
+    docker network disconnect "${network}" "${LEGACY_PREVIEW_ROUTING_CONTAINER}"
+  fi
+}
+
 connect_preview_routing() {
   local environment="$1"
+  disconnect_legacy_preview_routing "${environment}"
   preview_routing_enabled || return 0
 
   local state directory project network

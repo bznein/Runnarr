@@ -110,6 +110,10 @@ For another region, append covered `FROM_LAT FROM_LON TO_LAT TO_LON` smoke
 coordinates. The helper backs up installed assets, imports and verifies the
 graph, tests 3D foot routing, and activates routing only for future preview
 deployments. It does not restart existing previews or production.
+Each subsequent preview or staging deployment also detaches the retained legacy
+Valhalla container from that environment's network before attaching GraphHopper.
+The old Valhalla graph and container remain available for deliberate cleanup,
+but new application containers cannot resolve or call it.
 
 ## Limitations
 

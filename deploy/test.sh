@@ -159,6 +159,12 @@ grep -Fq 'docker network connect "${network}" "${NONPROD_GATEWAY}"' \
 grep -Fq 'docker network connect --alias graphhopper "${network}" "${PREVIEW_ROUTING_CONTAINER}"' \
   "${ROOT}/deploy/runnarr-deploy" ||
   fail "the shared GraphHopper alias is not attached to preview networks"
+grep -Fq 'disconnect_legacy_preview_routing "${environment}"' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "candidate deployment does not detach legacy Valhalla from its network"
+grep -Fq 'docker network disconnect "${network}" "${LEGACY_PREVIEW_ROUTING_CONTAINER}"' \
+  "${ROOT}/deploy/runnarr-deploy" ||
+  fail "the legacy Valhalla network detachment is missing"
 grep -Fq 'disconnect_preview_routing "previews/${pr}"' \
   "${ROOT}/deploy/runnarr-deploy" ||
   fail "preview teardown does not detach shared GraphHopper"
