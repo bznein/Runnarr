@@ -32,9 +32,14 @@ LABEL org.opencontainers.image.source="https://github.com/bznein/Runnarr" \
   com.runnarr.migrations="${RUNNARR_MIGRATION_HASH}"
 WORKDIR /app
 RUN apt-get update \
+  && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends ca-certificates tzdata \
   && rm -rf /var/lib/apt/lists/* \
-  && pip install --no-cache-dir 'garminconnect[workout]==0.3.8'
+  && pip install --no-cache-dir \
+    'garminconnect[workout]==0.3.8' \
+    'msgpack==1.2.1' \
+  && pip uninstall -y pip setuptools \
+  && rm -rf /usr/local/lib/python3.13/ensurepip
 COPY --from=api-build /out/runnarr /app/runnarr
 COPY --from=web-build /src/web/dist /app/web/dist
 COPY internal/app/garmin_bridge.py /app/garmin_bridge.py

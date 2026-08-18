@@ -48,6 +48,9 @@
 
 ### Fixes
 
+- Runtime images now install current Debian security updates and patched
+  Python dependencies, then remove unused package-installation tooling before
+  candidate vulnerability scans.
 - Training-sheet and manual prescriptions such as `45mins w/surges` now create
   five-minute blocks with a 4:30 steady run and 30-second surge, retaining any
   leftover duration as a final run step.
