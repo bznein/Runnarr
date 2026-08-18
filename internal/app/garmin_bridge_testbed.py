@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline Garmin bridge for the persistent Runnarr testbed only."""
 
+import base64
 import json
 import os
 import sys
@@ -15,6 +16,7 @@ def initial_state():
     return {
         "nextWorkoutId": 10001,
         "nextScheduleId": 20001,
+        "nextCourseId": 30001,
         "workouts": {
             "9001": {
                 "workoutId": "9001",
@@ -31,6 +33,7 @@ def initial_state():
                 "date": date.today().isoformat(),
             }
         },
+        "courses": {},
     }
 
 
@@ -41,6 +44,14 @@ def load_state(token_store):
             state = json.load(handle)
     except (FileNotFoundError, json.JSONDecodeError):
         state = initial_state()
+        save_state(path, state)
+    defaults = initial_state()
+    changed = False
+    for key in ("nextWorkoutId", "nextScheduleId", "nextCourseId", "workouts", "scheduled", "courses"):
+        if key not in state:
+            state[key] = defaults[key]
+            changed = True
+    if changed:
         save_state(path, state)
     return path, state
 
@@ -73,6 +84,17 @@ def normalized_schedule(payload):
         "id": str(payload.get("workoutScheduleId") or ""),
         "workoutId": str(payload.get("workoutId") or ""),
         "date": str(payload.get("date") or ""),
+        "raw": payload,
+    }
+
+
+def normalized_course(payload):
+    course_id = str(payload.get("courseId") or "")
+    return {
+        "id": course_id,
+        "name": str(payload.get("courseName") or ""),
+        "description": str(payload.get("description") or ""),
+        "url": f"https://connect.garmin.com/modern/course/{course_id}" if course_id else "",
         "raw": payload,
     }
 
@@ -137,6 +159,34 @@ def main():
         state["workouts"][workout_id] = stored
         save_state(path, state)
         print(json.dumps(normalized_workout(stored)))
+        return
+    if action == "upload-course":
+        content = required(request, "contentBase64")
+        try:
+            decoded = base64.b64decode(content, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("invalid course GPX content") from exc
+        if b"<gpx" not in decoded:
+            raise RuntimeError("testbed course is not GPX")
+        course_id = str(state["nextCourseId"])
+        state["nextCourseId"] += 1
+        stored = {
+            "courseId": course_id,
+            "courseName": required(request, "name"),
+            "description": required(request, "description"),
+            "activityType": required(request, "sport"),
+            "fixture": "testbed",
+        }
+        state["courses"][course_id] = stored
+        save_state(path, state)
+        print(json.dumps(normalized_course(stored)))
+        return
+    if action == "course":
+        course_id = required(request, "courseId")
+        payload = state["courses"].get(course_id)
+        if payload is None:
+            raise NotFoundException("testbed course not found")
+        print(json.dumps(normalized_course(payload)))
         return
     if action == "delete-workout":
         workout_id = required(request, "workoutId")

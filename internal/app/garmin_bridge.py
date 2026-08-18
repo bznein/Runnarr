@@ -747,6 +747,151 @@ def health_day_response(client, cdate):
     }
 
 
+COURSE_ACTIVITY_TYPE_IDS = {
+    "Run": 1,
+    "Cycling": 2,
+    "Hike": 3,
+    "Walk": 9,
+}
+
+
+def course_distance_m(first, second):
+    earth_radius_m = 6371000.0
+    lat1, lon1 = math.radians(first["latitude"]), math.radians(first["longitude"])
+    lat2, lon2 = math.radians(second["latitude"]), math.radians(second["longitude"])
+    delta_latitude = lat2 - lat1
+    delta_longitude = lon2 - lon1
+    value = (
+        math.sin(delta_latitude / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin(delta_longitude / 2) ** 2
+    )
+    return 2 * earth_radius_m * math.asin(math.sqrt(value))
+
+
+def course_bearing(first, last):
+    latitude1 = math.radians(first["latitude"])
+    latitude2 = math.radians(last["latitude"])
+    delta_longitude = math.radians(last["longitude"] - first["longitude"])
+    x = math.sin(delta_longitude) * math.cos(latitude2)
+    y = (
+        math.cos(latitude1) * math.sin(latitude2)
+        - math.sin(latitude1) * math.cos(latitude2) * math.cos(delta_longitude)
+    )
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
+
+
+def build_course_payload(parsed, name, sport, description):
+    points = parsed.get("geoPoints") if isinstance(parsed, dict) else None
+    if not isinstance(points, list) or len(points) < 2:
+        raise RuntimeError("Garmin parsed fewer than two course points")
+    points = [dict(point) for point in points]
+    total_distance = 0.0
+    for index, point in enumerate(points):
+        if index > 0:
+            total_distance += course_distance_m(points[index - 1], point)
+        point["distance"] = total_distance
+        if point.get("elevation") is None:
+            point["elevation"] = 0.0
+
+    latitudes = [point["latitude"] for point in points]
+    longitudes = [point["longitude"] for point in points]
+    bounding_box = {
+        "center": {
+            "latitude": (min(latitudes) + max(latitudes)) / 2,
+            "longitude": (min(longitudes) + max(longitudes)) / 2,
+        },
+        "lowerLeft": {"latitude": min(latitudes), "longitude": min(longitudes)},
+        "upperRight": {"latitude": max(latitudes), "longitude": max(longitudes)},
+        "lowerLeftLatIsSet": True,
+        "lowerLeftLongIsSet": True,
+        "upperRightLatIsSet": True,
+        "upperRightLongIsSet": True,
+    }
+    first = points[0]
+    return {
+        "courseName": name,
+        "description": description,
+        "openStreetMap": False,
+        "matchedToSegments": False,
+        "userProfilePk": None,
+        "userGroupPk": None,
+        "rulePK": 2,
+        "geoRoutePk": None,
+        "sourceTypeId": 3,
+        "sourcePk": None,
+        "distanceMeter": total_distance,
+        "elevationGainMeter": 0.0,
+        "elevationLossMeter": 0.0,
+        "startPoint": {
+            "latitude": first["latitude"],
+            "longitude": first["longitude"],
+            "elevation": first.get("elevation") or 0.0,
+            "distance": None,
+            "timestamp": None,
+        },
+        "coursePoints": [],
+        "boundingBox": bounding_box,
+        "hasShareableEvent": False,
+        "hasTurnDetectionDisabled": False,
+        "activityTypePk": COURSE_ACTIVITY_TYPE_IDS[sport],
+        "virtualPartnerId": None,
+        "includeLaps": False,
+        "elapsedSeconds": None,
+        "speedMeterPerSecond": None,
+        "courseLines": [{
+            "courseId": None,
+            "sortOrder": 1,
+            "numberOfPoints": len(points),
+            "distanceInMeters": total_distance,
+            "bearing": course_bearing(points[0], points[-1]),
+            "points": points,
+            "coordinateSystem": "WGS84",
+            "originalCoordinateSystem": "WGS84",
+        }],
+        "coordinateSystem": "WGS84",
+        "targetCoordinateSystem": "WGS84",
+        "originalCoordinateSystem": "WGS84",
+        "consumer": None,
+        "elevationSource": 3,
+        "hasPaceBand": False,
+        "hasPowerGuide": False,
+        "favorite": False,
+        "startNote": None,
+        "finishNote": None,
+        "cutoffDuration": None,
+        "geoPoints": points,
+    }
+
+
+def upload_course_response(client, filename, content, name, sport, description):
+    if sport not in COURSE_ACTIVITY_TYPE_IDS:
+        raise RuntimeError(f"unsupported Garmin course sport: {sport}")
+    parsed = client.client.post(
+        "connectapi",
+        "/course-service/course/import",
+        files={"file": (filename, content, "application/gpx+xml")},
+        api=True,
+    )
+    payload = build_course_payload(parsed, name, sport, description)
+    saved = client.client.post(
+        "connectapi", "/course-service/course", json=payload, api=True
+    )
+    if not isinstance(saved, dict):
+        raise RuntimeError("Garmin returned an invalid course response")
+    return normalize_course(saved, name)
+
+
+def normalize_course(saved, fallback_name=""):
+    course_id = str(saved.get("courseId") or "")
+    return {
+        "id": course_id,
+        "name": str(saved.get("courseName") or fallback_name),
+        "description": str(saved.get("description") or ""),
+        "url": f"https://connect.garmin.com/modern/course/{course_id}" if course_id else "",
+        "raw": saved,
+    }
+
+
 def main():
     request = json.load(sys.stdin)
     action = request.get("action")
@@ -835,6 +980,31 @@ def main():
         if not isinstance(workout, dict):
             raise RuntimeError("missing workout")
         print(json.dumps(normalize_managed_workout(client.upload_workout(workout))))
+        return
+
+    if action == "upload-course":
+        filename = str(request.get("filename") or "course.gpx").strip()
+        name = str(request.get("name") or "").strip()
+        sport = str(request.get("sport") or "").strip()
+        description = str(request.get("description") or "").strip()
+        content_base64 = str(request.get("contentBase64") or "")
+        if not name or not content_base64:
+            raise RuntimeError("missing course name or GPX content")
+        try:
+            content = base64.b64decode(content_base64, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("invalid course GPX content") from exc
+        print(json.dumps(upload_course_response(client, filename, content, name, sport, description)))
+        return
+
+    if action == "course":
+        course_id = str(request.get("courseId") or "").strip()
+        if not course_id:
+            raise RuntimeError("missing courseId")
+        payload = client.client.connectapi(f"/course-service/course/{course_id}")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Garmin returned an invalid course response")
+        print(json.dumps(normalize_course(payload)))
         return
 
     if action == "delete-workout":

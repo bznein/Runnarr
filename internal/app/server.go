@@ -186,6 +186,8 @@ func (s *Server) Routes() http.Handler {
 			r.Put("/courses/{id}/plan", s.handleUpdateCoursePlan)
 			r.Put("/courses/{id}/favorite", s.handleSetCourseFavorite)
 			r.Post("/courses/{id}/duplicate", s.handleDuplicateCourse)
+			r.Get("/courses/{id}/garmin", s.handleGetCourseGarminStatus)
+			r.Post("/courses/{id}/garmin", s.handleSendCourseToGarmin)
 			r.Delete("/courses/{id}", s.handleDeleteCourse)
 			r.Get("/courses/{id}/gpx", s.handleExportCourseGPX)
 			r.Post("/course-imports/preview", s.handlePreviewCourseImport)
@@ -1100,6 +1102,9 @@ func (s *Server) handleCancelSyncJob(w http.ResponseWriter, r *http.Request) {
 func (s *Server) StartBackgroundSync(ctx context.Context) {
 	if err := s.store.ReconcileRunningSyncJobs(context.Background()); err != nil {
 		s.logger.Error("reconcile sync jobs after startup", "error", err)
+	}
+	if err := s.store.ReconcileRunningCourseGarminExports(context.Background()); err != nil {
+		s.logger.Error("reconcile Garmin course sends after startup", "error", err)
 	}
 	go s.runGarminScheduledSync(ctx)
 	go s.runGarminWorkoutScheduledSync(ctx)

@@ -16,6 +16,7 @@ import type {
   AppConfig,
   ClimbDetectionSettingsUpdate,
   Course,
+  CourseGarminStatus,
   CourseImportPreview,
   CourseImportResult,
   CourseImportSelection,
@@ -285,6 +286,8 @@ export const api = {
     return request<CourseListPage>(`/api/courses${params.size ? `?${params}` : ""}`);
   },
   course: (id: string) => request<Course>(`/api/courses/${encodeURIComponent(id)}`),
+  courseGarminStatus: (id: string) => request<CourseGarminStatus>(`/api/courses/${encodeURIComponent(id)}/garmin`),
+  sendCourseToGarmin: (id: string) => request<CourseGarminStatus>(`/api/courses/${encodeURIComponent(id)}/garmin`, { method: "POST" }),
   createCourse: (body: CoursePlanInput) => request<Course>("/api/courses", { method: "POST", body: JSON.stringify(body) }),
   updateCoursePlan: (id: string, body: CoursePlanInput & { revision: number }) =>
     request<Course>(`/api/courses/${encodeURIComponent(id)}/plan`, { method: "PUT", body: JSON.stringify(body) }),

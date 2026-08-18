@@ -153,6 +153,18 @@ export type Course = CourseSummary & {
   bounds?: { south: number; west: number; north: number; east: number };
 };
 
+export type CourseGarminStatus = {
+  connected: boolean;
+  current: boolean;
+  courseRevision?: number;
+  status: "not_sent" | "sending" | "sent" | "attention";
+  providerCourseId?: string;
+  providerUrl?: string;
+  error?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type CourseListPage = {
   courses: CourseSummary[];
   limit: number;
