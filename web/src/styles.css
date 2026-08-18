@@ -3399,6 +3399,28 @@ textarea {
   box-shadow: var(--shadow-marker);
 }
 
+.course-kilometre-marker {
+  display: grid;
+  place-items: center;
+  width: max-content;
+  min-width: 30px;
+  height: 20px;
+  padding: 0 5px;
+  border: 2px solid #d85c41;
+  border-radius: 10px;
+  color: var(--color-heading);
+  background: color-mix(in srgb, var(--color-surface) 95%, transparent);
+  box-shadow: var(--shadow-marker);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.course-kilometre-marker-icon {
+  pointer-events: none;
+}
+
 .course-profile-chart {
   height: 310px;
 }

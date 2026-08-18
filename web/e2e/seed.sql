@@ -266,7 +266,7 @@ insert into courses(
 )
 select '00000000-0000-4000-8000-000000000180'::uuid, id,
     'E2E Riverside Loop', 'Run', 'Synthetic course for library and map inspection.',
-    true, 1, 'e2e-riverside-loop-v1', 4210, 38, 35, 1, 5, 1, 0,
+    true, 1, 'e2e-riverside-loop-v2', 5363, 38, 35, 1, 5, 1, 0,
     '{"fixture":"e2e"}'::jsonb, :'e2e_now'::timestamptz - interval '2 days', :'e2e_now'::timestamptz - interval '1 day'
 from users
 where username = :'e2e_username'

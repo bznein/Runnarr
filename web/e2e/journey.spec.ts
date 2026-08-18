@@ -522,6 +522,12 @@ test.describe("local product journey", () => {
     await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
     await expect(page.locator(".course-elevation-coverage-notice")).toHaveCount(0);
     await expect(page.locator(".course-map-frame .leaflet-container")).toBeVisible();
+    if (!visualBaseline) {
+      const kilometreMarkers = page.locator(".course-map-panel .course-kilometre-marker-icon");
+      await expect(kilometreMarkers).toHaveCount(5);
+      await expect(kilometreMarkers.first()).toContainText("1 km");
+      await expect(kilometreMarkers.last()).toContainText("5 km");
+    }
     await expect(page.getByRole("link", { name: "GPX", exact: true })).toHaveAttribute("href", "/api/courses/00000000-0000-4000-8000-000000000180/gpx");
 
     const activityCourseName = `E2E ${testInfo.project.name} Activity Course`;
@@ -619,6 +625,7 @@ test.describe("local product journey", () => {
     await expect(plannerMetrics).toHaveCount(3);
     await expect(plannerMetrics.first()).toContainText("Distance");
     await expect(page.getByText("Elevation covers 0% of this route", { exact: false })).toBeVisible();
+    if (!visualBaseline && !mobile) await expect(page.locator(".course-planner-map .course-kilometre-marker-icon").first()).toBeVisible();
     await page.context().grantPermissions(["geolocation"], { origin: new URL(page.url()).origin });
     await page.context().setGeolocation({ latitude: 53.2707, longitude: -9.0568, accuracy: 12 });
     await page.getByRole("button", { name: "Current location", exact: true }).click();

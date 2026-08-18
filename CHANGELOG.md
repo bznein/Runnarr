@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Course maps now show zoom-aware kilometre markers while planning and when
+  inspecting a saved course, with wider clean intervals when zoomed out.
 - Fixed the initial production rollback-compatibility check to include
   staging's generated HTTPS and deployment environment settings.
 - Fixed non-production ingress routing so the gateway resolves staging and
