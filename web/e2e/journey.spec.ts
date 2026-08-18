@@ -524,7 +524,7 @@ test.describe("local product journey", () => {
     await expect(page.locator(".course-map-frame .leaflet-container")).toBeVisible();
     await expect(page.getByRole("link", { name: "GPX", exact: true })).toHaveAttribute("href", "/api/courses/00000000-0000-4000-8000-000000000180/gpx");
     if (!visualBaseline) {
-      const sendToGarmin = page.getByRole("button", { name: /Send.*Garmin/i });
+      const sendToGarmin = page.getByRole("button", { name: /(?:Send|Sent).*Garmin/i });
       await expect(sendToGarmin).toBeVisible();
       if (await sendToGarmin.isEnabled()) {
         page.once("dialog", (dialog) => void dialog.accept());
