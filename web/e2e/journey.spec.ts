@@ -652,6 +652,18 @@ test.describe("local product journey", () => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     const waypointName = "Canal turn beside the old stone bridge";
+    await page.route("**/api/config", async (route) => {
+      const response = await route.fetch();
+      const config = await response.json();
+      await route.fulfill({ response, json: { ...config, courseSearchEnabled: true } });
+    });
+    await page.route("**/api/course-geocoding/search?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ results: [{ name: "Phoenix Park", displayName: "Phoenix Park, Dublin, Ireland", latitude: 53.356, longitude: -6.329 }] })
+      });
+    });
     await login(page, mobile);
     await navigateTo(page, "Courses", mobile);
     await page.getByRole("link", { name: "New course", exact: true }).click();
@@ -660,7 +672,12 @@ test.describe("local product journey", () => {
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
     const waypointRows = page.locator(".course-waypoint-list li");
     await expect(waypointRows).toHaveCount(1);
-    if (!visualBaseline) await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
+    if (!visualBaseline) {
+      await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
+      await page.getByLabel("Find a place").fill("Phoenix Park");
+      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Show Phoenix Park, Dublin, Ireland on map", exact: true })).toBeVisible();
+    }
     await page.getByRole("button", { name: "Enter fullscreen map", exact: true }).click();
     const fullscreenPanel = page.getByRole("region", { name: "Course route map" });
     await expect(page.getByRole("button", { name: "Exit fullscreen map", exact: true })).toBeVisible();
@@ -717,7 +734,7 @@ test.describe("local product journey", () => {
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
-  test("searches for a place while planning a course", { tag: "@visual-courses" }, async ({ page }, testInfo) => {
+  test("searches for a place while planning a course", async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     await page.route("**/api/config", async (route) => {

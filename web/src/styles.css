@@ -3924,6 +3924,10 @@ textarea {
   box-shadow: none;
 }
 
+.course-planner-map-panel.course-planner-map-fullscreen:has(.course-place-search) {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .course-planner-map-panel.course-planner-map-fullscreen .course-map-frame,
 .course-planner-map-panel.course-planner-map-fullscreen .route-map {
   height: 100%;
