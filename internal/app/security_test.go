@@ -73,6 +73,28 @@ func TestLoadConfigValidatesEnabledRoutingOrigin(t *testing.T) {
 	}
 }
 
+func TestLoadConfigValidatesEnabledGeocodingOrigin(t *testing.T) {
+	for _, key := range []string{"RUNNARR_PUBLIC_MODE", "RUNNARR_GEOCODING_ENABLED", "RUNNARR_GEOCODING_URL", "DATABASE_URL", "RUNNARR_ADMIN_PASSWORD", "RUNNARR_ADMIN_PASSWORD_HASH", "RUNNARR_SECRET_KEY"} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("DATABASE_URL", "postgres://localhost/runnarr")
+	t.Setenv("RUNNARR_ADMIN_PASSWORD", "local-password")
+	t.Setenv("RUNNARR_SECRET_KEY", "local-secret")
+	t.Setenv("RUNNARR_GEOCODING_ENABLED", "true")
+	t.Setenv("RUNNARR_GEOCODING_URL", "file:///tmp/geocoder")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("non-http geocoding URL should be rejected")
+	}
+	t.Setenv("RUNNARR_GEOCODING_URL", "http://nominatim:8080")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.GeocodingEnabled || cfg.GeocodingURL != "http://nominatim:8080" {
+		t.Fatalf("geocoding config = %#v", cfg)
+	}
+}
+
 func TestSessionCookieMode(t *testing.T) {
 	local := &Server{cfg: Config{BaseURL: "http://localhost:8080"}}
 	cookie := local.sessionCookie("id", time.Hour)

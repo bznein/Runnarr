@@ -13,6 +13,8 @@ services:
       # without replacing production's installed base Compose asset.
       RUNNARR_ROUTING_ENABLED: ${RUNNARR_ROUTING_ENABLED:-false}
       RUNNARR_ROUTING_URL: ${RUNNARR_ROUTING_URL:-http://valhalla:8002}
+      RUNNARR_GEOCODING_ENABLED: ${RUNNARR_GEOCODING_ENABLED:-false}
+      RUNNARR_GEOCODING_URL: ${RUNNARR_GEOCODING_URL:-https://nominatim.openstreetmap.org}
     networks:
       runnarr:
         aliases:

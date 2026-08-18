@@ -11,6 +11,9 @@
 
 ### Features
 
+- Added explicit-submit place search to the course planner through an optional
+  backend-proxied Nominatim-compatible geocoder, with map centering and direct
+  waypoint creation from bounded results.
 - Course-planner waypoints can now be reordered by mouse, touch, or pen dragging,
   with a labeled insertion preview and arrow controls for keyboard use.
 - Added the PostGIS-backed, account-private course foundation with bounded

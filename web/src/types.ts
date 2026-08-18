@@ -96,7 +96,15 @@ export type AppConfig = {
   mapTileURL: string;
   baseURL: string;
   courseRoutingEnabled: boolean;
+  courseSearchEnabled: boolean;
   climbDetection: ClimbDetectionConfig;
+};
+
+export type CoursePlaceResult = {
+  name: string;
+  displayName: string;
+  latitude: number;
+  longitude: number;
 };
 
 export type CourseSport = "Run" | "Walk" | "Hike" | "Cycling";

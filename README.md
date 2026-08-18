@@ -65,6 +65,12 @@ heavier regional service off. See the [course-routing guide](docs/course-routing
 for graph sizing, Compose startup, privacy boundaries, and external-service
 configuration.
 
+The planner can also search for a town, landmark, or address through an
+optional backend-connected Nominatim-compatible geocoder. Search is disabled
+until an operator chooses a public or self-hosted endpoint. See the
+[course place-search guide](docs/course-place-search.md) for setup, provider
+policy, and privacy boundaries.
+
 If that port is already used on your host, change `RUNNARR_PORT` and `RUNNARR_BASE_URL` in `.env`.
 
 For an HTTPS deployment behind Nginx Proxy Manager, see

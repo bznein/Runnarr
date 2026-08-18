@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
-import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, GripVertical, HeartPulse, LocateFixed, LogOut, Map as MapIcon, Maximize2, Menu, Minimize2, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
+import { Activity as ActivityIcon, ArrowDown, ArrowUp, ArrowUpDown, BarChart3, CalendarDays, Calculator, ChevronDown, ChevronLeft, ChevronRight, Cloud, Columns3, Copy, Database, Download, ExternalLink, FileUp, Filter, Flame, Footprints, GripVertical, HeartPulse, LocateFixed, LogOut, Map as MapIcon, MapPin, Maximize2, Menu, Minimize2, Moon, MoreHorizontal, MoreVertical, Pencil, RefreshCw, Route as RouteIcon, Scale, Search, Mountain, Star, Timer, Settings as SettingsIcon, Square, StickyNote, Trash2, Upload, X, BatteryCharging, RotateCcw } from "lucide-react";
 import { divIcon } from "leaflet";
 import { Circle, MapContainer, Marker, Polyline, TileLayer, Tooltip as LeafletTooltip, useMap, useMapEvents } from "react-leaflet";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -46,6 +46,7 @@ import type {
   CourseImportPreview,
   CourseImportSelection,
   CourseLeg,
+  CoursePlaceResult,
   CourseProfilePoint,
   CourseRoutingLeg,
   CourseSport,
@@ -496,10 +497,10 @@ function AuthenticatedApp({
           <Route path="/workouts/new" element={<WorkoutEditorPage />} />
           <Route path="/workouts/:id" element={<WorkoutEditorPage />} />
           <Route path="/courses" element={<CoursesPage canWrite={session?.canWrite !== false} />} />
-          <Route path="/courses/new" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
+          <Route path="/courses/new" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} searchEnabled={config.data?.courseSearchEnabled === true} />} />
           <Route path="/courses/import" element={<CourseImportPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/courses/imports/:id" element={<CourseImportResultPage />} />
-          <Route path="/courses/:id/plan" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} />} />
+          <Route path="/courses/:id/plan" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} searchEnabled={config.data?.courseSearchEnabled === true} />} />
           <Route path="/courses/:id" element={<CourseDetailPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/notifications" element={<NotificationsPage canWrite={session?.canWrite !== false} />} />
           <Route path="/health" element={<HealthPage />} />
@@ -5569,7 +5570,7 @@ function CourseDetailsFields({ name, sportType, notes, onName, onSport, onNotes 
   </>;
 }
 
-function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite: boolean; mapTileURL?: string; routingEnabled: boolean }) {
+function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled, searchEnabled }: { canWrite: boolean; mapTileURL?: string; routingEnabled: boolean; searchEnabled: boolean }) {
   const { id } = useParams();
   const editing = Boolean(id);
   const navigate = useNavigate();
@@ -5587,6 +5588,7 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   const [draggedWaypointIndex, setDraggedWaypointIndex] = useState<number>();
   const [waypointDropIndex, setWaypointDropIndex] = useState<number>();
   const [mapFullscreen, setMapFullscreen] = useState(false);
+  const [searchedPlace, setSearchedPlace] = useState<CoursePlaceResult>();
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: editing });
   const previousCourse = useQuery({
     queryKey: ["courses", "planner-start"],
@@ -5678,9 +5680,9 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
     save.reset();
   };
   const reindexWaypoints = (items: typeof waypoints) => items.map((point, index) => ({ ...point, index }));
-  const addWaypoint = (point: RoutePoint) => {
+  const addWaypoint = (point: RoutePoint, waypointName?: string) => {
     if (!canWrite || waypoints.length >= 100) return;
-    setWaypoints((current) => reindexWaypoints([...current, { index: current.length, latitude: point[0], longitude: point[1] }]));
+    setWaypoints((current) => reindexWaypoints([...current, { index: current.length, name: waypointName?.slice(0, 160), latitude: point[0], longitude: point[1] }]));
     markGeometryDirty();
   };
   const moveWaypoint = (index: number, point: RoutePoint) => {
@@ -5830,7 +5832,8 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
       </aside>
       <section className={`panel course-planner-map-panel${mapFullscreen ? " course-planner-map-fullscreen" : ""}`} aria-label="Course route map">
         <div className="course-planner-map-heading"><div><div className="panel-heading">Route</div><span className="muted">Click to add; drag numbered waypoints to adjust.</span></div><div className="course-planner-map-actions">{routed.isFetching && <span className="muted">Routing…</span>}<button className="secondary-button small-button" type="button" aria-label={mapFullscreen ? "Exit fullscreen map" : "Enter fullscreen map"} aria-pressed={mapFullscreen} onClick={() => setMapFullscreen((current) => !current)}>{mapFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}{mapFullscreen ? "Exit fullscreen" : "Fullscreen"}</button></div></div>
-        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} fullscreen={mapFullscreen} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} onAdd={addWaypoint} onMove={moveWaypoint} />
+        {searchEnabled && <CoursePlaceSearch canAdd={canWrite && waypoints.length < 100} onSelect={setSearchedPlace} onAdd={(result) => { setSearchedPlace(result); addWaypoint([result.latitude, result.longitude], result.name); }} />}
+        <CoursePlannerMap legs={plannerLegs} waypoints={waypoints} tileURL={mapTileURL} canEdit={canWrite} fullscreen={mapFullscreen} highlighted={highlighted ? [highlighted.latitude, highlighted.longitude] : undefined} searchedPlace={searchedPlace} onAdd={addWaypoint} onMove={moveWaypoint} />
       </section>
     </section>
     {plannerLegs.length > 0 && <section className="course-planner-elevation-preview">
@@ -5849,7 +5852,31 @@ function CoursePlannerPage({ canWrite, mapTileURL, routingEnabled }: { canWrite:
   </Page>;
 }
 
-function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highlighted, onAdd, onMove }: { legs: CourseLeg[]; waypoints: CourseWaypoint[]; tileURL?: string; canEdit: boolean; fullscreen: boolean; highlighted?: RoutePoint; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
+function CoursePlaceSearch({ canAdd, onSelect, onAdd }: { canAdd: boolean; onSelect: (result: CoursePlaceResult) => void; onAdd: (result: CoursePlaceResult) => void }) {
+  const [query, setQuery] = useState("");
+  const search = useMutation({
+    mutationFn: () => api.searchCoursePlaces(query.trim()),
+    onSuccess: (response) => {
+      if (response.results[0]) onSelect(response.results[0]);
+    }
+  });
+  const results = search.data?.results ?? [];
+  return <div className="course-place-search">
+    <form onSubmit={(event) => { event.preventDefault(); if (query.trim().length >= 2) search.mutate(); }}>
+      <label className="field"><span>Find a place</span><span className="course-place-search-input"><Search size={15} aria-hidden="true" /><input type="search" maxLength={200} placeholder="Town, landmark, or address" value={query} onChange={(event) => { setQuery(event.target.value); search.reset(); }} /></span></label>
+      <button className="secondary-button small-button" type="submit" disabled={query.trim().length < 2 || search.isPending}>{search.isPending ? "Searching…" : "Search"}</button>
+    </form>
+    {search.error && <div className="row-error">{search.error instanceof Error ? search.error.message : "Place search is unavailable."}</div>}
+    {!search.isPending && search.data && results.length === 0 && <div className="muted">No matching places found.</div>}
+    {results.length > 0 && <ul className="course-place-results" aria-label="Place search results">{results.map((result) => <li key={`${result.latitude},${result.longitude},${result.displayName}`}>
+      <button className="course-place-result" type="button" onClick={() => onSelect(result)} aria-label={`Show ${result.displayName} on map`}><MapPin size={15} aria-hidden="true" /><span><strong>{result.name}</strong><small>{result.displayName}</small></span></button>
+      <button className="secondary-button small-button" type="button" disabled={!canAdd} onClick={() => onAdd(result)}>Add waypoint</button>
+    </li>)}</ul>}
+    <small className="muted">Search text is sent by Runnarr to the configured geocoder. Do not enter personal or confidential information.{results.length > 0 && <> Search data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>.</>}</small>
+  </div>;
+}
+
+function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highlighted, searchedPlace, onAdd, onMove }: { legs: CourseLeg[]; waypoints: CourseWaypoint[]; tileURL?: string; canEdit: boolean; fullscreen: boolean; highlighted?: RoutePoint; searchedPlace?: CoursePlaceResult; onAdd: (point: RoutePoint) => void; onMove: (index: number, point: RoutePoint) => void }) {
   const pointsByLeg = legs.map((leg) => decodeCoursePolyline(leg.encodedPolyline));
   const waypointPoints = waypoints.map((point) => [point.latitude, point.longitude] as RoutePoint);
   const allPoints = pointsByLeg.flat();
@@ -5877,6 +5904,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highl
       })}
       {canEdit && <MapLocationPicker onSelect={onAdd} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
+      {searchedPlace && <><CenterMapOnPoint point={[searchedPlace.latitude, searchedPlace.longitude]} /><Marker position={[searchedPlace.latitude, searchedPlace.longitude]} icon={courseSearchIcon()} title={searchedPlace.displayName} zIndexOffset={900} /></>}
       {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
       <FitMapContent points={fitPoints} />
       <ResizeMapOnFullscreenChange fullscreen={fullscreen} />
@@ -6133,6 +6161,10 @@ function decodeCoursePolyline(encoded: string): RoutePoint[] {
 
 function courseLocationIcon() {
   return divIcon({ className: "course-location-marker-icon", html: '<span class="course-location-marker"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
+}
+
+function courseSearchIcon() {
+  return divIcon({ className: "course-search-marker-icon", html: '<span class="course-search-marker"></span>', iconSize: [22, 22], iconAnchor: [11, 22] });
 }
 
 function formatCourseElevation(value?: number) {
