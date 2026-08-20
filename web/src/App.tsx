@@ -28,6 +28,7 @@ import { fullPathForSimplePath, normalizeSimpleMatchFilter, shouldRedirectToSimp
 import type { SimpleMatchFilter } from "./simpleMode";
 import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
 import { trainingSheetSourceURL } from "./trainingSheetLink";
+import { courseDistanceMarkers, kilometreMarkerStride, routePointDistanceM } from "./courseDistanceMarkers";
 import type {
   Activity,
   ActivityClimb,
@@ -5868,6 +5869,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highl
     <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
+      <CourseKilometreMarkers polylines={pointsByLeg} />
       {waypoints.map((waypoint, index) => {
         const customName = waypoint.name?.trim();
         const markerName = customName || defaultCourseWaypointName(index, waypoints.length);
@@ -5952,11 +5954,7 @@ function courseLegDistance(legs: Array<Pick<CourseLeg, "encodedPolyline">>) {
 }
 
 function routePointDistance(start: RoutePoint, end: RoutePoint) {
-  const radians = (value: number) => value * Math.PI / 180;
-  const latitude = radians(end[0] - start[0]);
-  const longitude = radians(end[1] - start[1]);
-  const value = Math.sin(latitude / 2) ** 2 + Math.cos(radians(start[0])) * Math.cos(radians(end[0])) * Math.sin(longitude / 2) ** 2;
-  return 6371000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+  return routePointDistanceM(start, end);
 }
 
 function courseWaypointIcon(number: number) {
@@ -6093,6 +6091,7 @@ function CourseMap({ legs, tileURL, highlighted, allowLocation = false }: { legs
     <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={legs[index].id ?? index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
+      <CourseKilometreMarkers polylines={pointsByLeg} />
       {allPoints[0] && <Marker position={allPoints[0]} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
       {allPoints.length > 1 && <Marker position={allPoints[allPoints.length - 1]} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
@@ -6133,6 +6132,24 @@ function decodeCoursePolyline(encoded: string): RoutePoint[] {
 
 function courseLocationIcon() {
   return divIcon({ className: "course-location-marker-icon", html: '<span class="course-location-marker"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
+}
+
+function CourseKilometreMarkers({ polylines }: { polylines: RoutePoint[][] }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+  const markers = courseDistanceMarkers(polylines);
+  const routeLatitude = polylines.find((points) => points.length > 0)?.[0]?.[0] ?? map.getCenter().lat;
+  const stride = kilometreMarkerStride(zoom, routeLatitude);
+
+  return <>{markers.filter((marker) => marker.kilometre % stride === 0).map((marker) => {
+    const label = `${marker.kilometre} km`;
+    return <Marker key={marker.kilometre} position={marker.point} icon={courseKilometreIcon(label)} interactive={false} keyboard={false} title={`${label} along course`} zIndexOffset={-200} />;
+  })}</>;
+}
+
+function courseKilometreIcon(label: string) {
+  return divIcon({ className: "course-kilometre-marker-icon", html: `<span class="course-kilometre-marker">${label}</span>`, iconSize: [42, 20], iconAnchor: [21, 10] });
 }
 
 function formatCourseElevation(value?: number) {

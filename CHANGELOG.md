@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Course maps now show zoom-aware kilometre markers while planning and when
+  inspecting a saved course, with wider clean intervals when zoomed out.
 - Keep the course planner map at the user's chosen position and zoom while waypoints and route geometry are adjusted.
 
 - Fixed the initial production rollback-compatibility check to include
