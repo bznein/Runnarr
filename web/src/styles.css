@@ -2848,6 +2848,14 @@ textarea {
   cursor: not-allowed;
 }
 
+.activity-copy-feedback {
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-primary-text);
+  background: var(--color-success-soft);
+}
+
 .rename-dialog {
   width: min(100%, 460px);
 }

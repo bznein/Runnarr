@@ -29,6 +29,8 @@ import type { SimpleMatchFilter } from "./simpleMode";
 import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
 import { trainingSheetSourceURL } from "./trainingSheetLink";
 import { courseDistanceMarkers, kilometreMarkerStride, routePointDistanceM } from "./courseDistanceMarkers";
+import { formatActivityForAI } from "./activityAI";
+import { copyTextToClipboard } from "./clipboard";
 import type {
   Activity,
   ActivityClimb,
@@ -3220,6 +3222,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
   const [selectedMediaId, setSelectedMediaId] = useState<string>();
   const [pinningMediaId, setPinningMediaId] = useState<string>();
   const [analysisTab, setAnalysisTab] = useState<ActivityAnalysisTab>("stats");
+  const [copyFeedback, setCopyFeedback] = useState<{ kind: "success" | "error"; message: string }>();
   const [climbSensitivityDraft, setClimbSensitivityDraft] = useState(defaultClimbSensitivity);
   const [climbSensitivityPreview, setClimbSensitivityPreview] = useState(defaultClimbSensitivity);
   const saveAsCourse = useMutation({
@@ -3265,6 +3268,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
     setSelectedMediaId(undefined);
     setPinningMediaId(undefined);
     setAnalysisTab("stats");
+    setCopyFeedback(undefined);
     updateActivityNotes.reset();
     previewPlannedActivity.reset();
     applyPlannedActivity.reset();
@@ -3395,6 +3399,16 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
 
   const handleSelectClimb = (climb: ActivityClimb) => {
     setSelectedClimbIndex((current) => current === climb.index ? undefined : climb.index);
+  };
+  const handleCopyForAI = async () => {
+    setActionsOpen(false);
+    setCopyFeedback(undefined);
+    try {
+      await copyTextToClipboard(formatActivityForAI(confirmedItem));
+      setCopyFeedback({ kind: "success", message: "Activity copied for AI." });
+    } catch {
+      setCopyFeedback({ kind: "error", message: "Could not copy the activity. Check clipboard permissions and try again." });
+    }
   };
   const handleDelete = () => {
     setActionsOpen(false);
@@ -3679,6 +3693,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
               setNotesOpen(true);
               setActionsOpen(false);
             }}
+            onCopyForAI={() => void handleCopyForAI()}
             onExportGPX={() => {
               setExportOpen(true);
               setActionsOpen(false);
@@ -3699,6 +3714,15 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
         </>
       }
     >
+      {copyFeedback && (
+        <div
+          className={copyFeedback.kind === "error" ? "error" : "activity-copy-feedback"}
+          role={copyFeedback.kind === "error" ? "alert" : "status"}
+          aria-live={copyFeedback.kind === "error" ? "assertive" : "polite"}
+        >
+          {copyFeedback.message}
+        </div>
+      )}
       {deleteActivity.error && <div className="error">{deleteActivity.error instanceof Error ? deleteActivity.error.message : "Delete failed"}</div>}
       {renameOpen && (
         <ActivityRenameDialog
@@ -5057,6 +5081,7 @@ function ActivityDetailActions({
   onToggle,
   onRename,
   onNotes,
+  onCopyForAI,
   onExportGPX,
   onSaveCourse,
   onCheckIn,
@@ -5075,6 +5100,7 @@ function ActivityDetailActions({
   onToggle: () => void;
   onRename: () => void;
   onNotes: () => void;
+  onCopyForAI: () => void;
   onExportGPX: () => void;
   onSaveCourse: () => void;
   onCheckIn: () => void;
@@ -5102,6 +5128,10 @@ function ActivityDetailActions({
               {feedbackAvailable ? "RPE & feedback" : "RPE"}
             </button>
           )}
+          <button className="action-menu-item" type="button" role="menuitem" onClick={onCopyForAI}>
+            <Copy size={16} />
+            Copy for AI
+          </button>
           <button className="action-menu-item" type="button" role="menuitem" disabled={!canExportGPX} onClick={onExportGPX}>
             <Download size={16} />
             Export GPX
