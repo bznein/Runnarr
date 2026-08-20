@@ -15,6 +15,9 @@
 
 ### Features
 
+- Added explicit-submit place search to the course planner through an optional
+  backend-proxied Nominatim-compatible geocoder, with map centering and direct
+  waypoint creation from bounded results.
 - Saved courses can now be sent to a connected Garmin account as private Garmin
   Connect courses, with per-revision duplicate protection, durable success or
   attention states, and an offline fake-Garmin testbed flow.

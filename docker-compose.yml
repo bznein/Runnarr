@@ -49,6 +49,8 @@ services:
       MAP_TILE_URL: ${MAP_TILE_URL:-https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png}
       RUNNARR_ROUTING_ENABLED: ${RUNNARR_ROUTING_ENABLED:-false}
       RUNNARR_ROUTING_URL: ${RUNNARR_ROUTING_URL:-http://valhalla:8002}
+      RUNNARR_GEOCODING_ENABLED: ${RUNNARR_GEOCODING_ENABLED:-false}
+      RUNNARR_GEOCODING_URL: ${RUNNARR_GEOCODING_URL:-https://nominatim.openstreetmap.org}
       RUNNARR_MEDIA_DIR: ${RUNNARR_MEDIA_DIR:-/app/data/media}
       RUNNARR_GARMIN_BRIDGE_PYTHON: ${RUNNARR_GARMIN_BRIDGE_PYTHON:-python3}
       RUNNARR_GARMIN_BRIDGE_SCRIPT: ${RUNNARR_GARMIN_BRIDGE_SCRIPT:-/app/garmin_bridge.py}

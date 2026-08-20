@@ -38,6 +38,7 @@ type Server struct {
 	garmin           *GarminService
 	media            *MediaService
 	courseRouting    *CourseRoutingService
+	courseGeocoding  *CourseGeocodingService
 	logger           *slog.Logger
 	syncCancelsMu    sync.Mutex
 	syncCancels      map[string]context.CancelFunc
@@ -87,6 +88,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		garmin:           garmin,
 		media:            NewMediaService(cfg, store),
 		courseRouting:    NewCourseRoutingService(cfg, logger),
+		courseGeocoding:  NewCourseGeocodingService(cfg),
 		logger:           logger,
 		syncCancels:      make(map[string]context.CancelFunc),
 		writebackRetries: make(map[string]struct{}),
@@ -181,6 +183,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/courses", s.handleListCourses)
 			r.Post("/courses", s.handleCreateCourse)
 			r.Post("/course-routing/legs", s.handleRouteCourseLegs)
+			r.Get("/course-geocoding/search", s.handleSearchCoursePlaces)
 			r.Get("/courses/{id}", s.handleGetCourse)
 			r.Patch("/courses/{id}/details", s.handleUpdateCourseDetails)
 			r.Put("/courses/{id}/plan", s.handleUpdateCoursePlan)
@@ -239,6 +242,7 @@ type climbDetectionPayload struct {
 	MapTileURL           string               `json:"mapTileURL"`
 	BaseURL              string               `json:"baseURL"`
 	CourseRoutingEnabled bool                 `json:"courseRoutingEnabled"`
+	CourseSearchEnabled  bool                 `json:"courseSearchEnabled"`
 	ClimbDetection       ClimbDetectionConfig `json:"climbDetection"`
 }
 
@@ -471,6 +475,7 @@ func (s *Server) climbDetectionPayload(ctx context.Context) (climbDetectionPaylo
 		MapTileURL:           s.cfg.MapTileURL,
 		BaseURL:              s.cfg.BaseURL,
 		CourseRoutingEnabled: s.cfg.RoutingEnabled,
+		CourseSearchEnabled:  s.cfg.GeocodingEnabled,
 		ClimbDetection:       climbDetection,
 	}, nil
 }

@@ -194,6 +194,18 @@ describe("shared backend API contract", () => {
     });
   });
 
+  it("encodes place searches through the Runnarr backend", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.searchCoursePlaces("St Stephen's Green & lake");
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/course-geocoding/search?q=St%20Stephen's%20Green%20%26%20lake");
+  });
+
   it("sends a course revision to Garmin with CSRF protection", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       connected: true, current: true, status: "sent", providerCourseId: "321"

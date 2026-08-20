@@ -23,6 +23,8 @@ type Config struct {
 	MapTileURL         string
 	RoutingEnabled     bool
 	RoutingURL         string
+	GeocodingEnabled   bool
+	GeocodingURL       string
 	StaticDir          string
 	MediaDir           string
 	GarminBridgePython string
@@ -54,6 +56,8 @@ func LoadConfig() (Config, error) {
 		MapTileURL:         env("MAP_TILE_URL", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"),
 		RoutingEnabled:     envBool("RUNNARR_ROUTING_ENABLED", false),
 		RoutingURL:         strings.TrimRight(env("RUNNARR_ROUTING_URL", "http://valhalla:8002"), "/"),
+		GeocodingEnabled:   envBool("RUNNARR_GEOCODING_ENABLED", false),
+		GeocodingURL:       strings.TrimRight(env("RUNNARR_GEOCODING_URL", "https://nominatim.openstreetmap.org"), "/"),
 		StaticDir:          env("RUNNARR_STATIC_DIR", "web/dist"),
 		MediaDir:           env("RUNNARR_MEDIA_DIR", "data/media"),
 		GarminBridgePython: env("RUNNARR_GARMIN_BRIDGE_PYTHON", "python3"),
@@ -88,6 +92,12 @@ func LoadConfig() (Config, error) {
 		routingURL, err := url.Parse(cfg.RoutingURL)
 		if err != nil || (routingURL.Scheme != "http" && routingURL.Scheme != "https") || routingURL.Host == "" || routingURL.User != nil || routingURL.RawQuery != "" || routingURL.Fragment != "" {
 			return cfg, errors.New("RUNNARR_ROUTING_URL must be an http(s) origin when routing is enabled")
+		}
+	}
+	if cfg.GeocodingEnabled {
+		geocodingURL, err := url.Parse(cfg.GeocodingURL)
+		if err != nil || (geocodingURL.Scheme != "http" && geocodingURL.Scheme != "https") || geocodingURL.Host == "" || geocodingURL.User != nil || geocodingURL.RawQuery != "" || geocodingURL.Fragment != "" {
+			return cfg, errors.New("RUNNARR_GEOCODING_URL must be an http(s) origin when geocoding is enabled")
 		}
 	}
 	if cfg.PublicMode {

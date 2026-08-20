@@ -673,6 +673,18 @@ test.describe("local product journey", () => {
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     const waypointName = "Canal turn beside the old stone bridge";
+    await page.route("**/api/config", async (route) => {
+      const response = await route.fetch();
+      const config = await response.json();
+      await route.fulfill({ response, json: { ...config, courseSearchEnabled: true } });
+    });
+    await page.route("**/api/course-geocoding/search?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ results: [{ name: "Phoenix Park", displayName: "Phoenix Park, Dublin, Ireland", latitude: 53.356, longitude: -6.329 }] })
+      });
+    });
     await login(page, mobile);
     await navigateTo(page, "Courses", mobile);
     await page.getByRole("link", { name: "New course", exact: true }).click();
@@ -681,7 +693,22 @@ test.describe("local product journey", () => {
     const plannerMap = page.locator(".course-planner-map .leaflet-container");
     const waypointRows = page.locator(".course-waypoint-list li");
     await expect(waypointRows).toHaveCount(1);
-    if (!visualBaseline) await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
+    if (!visualBaseline) {
+      await waypointRows.first().getByLabel("Waypoint 1 name").fill(waypointName);
+      await page.getByLabel("Find a place").fill("Phoenix Park");
+      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Show Phoenix Park, Dublin, Ireland on map", exact: true })).toBeVisible();
+      const searchMarker = page.locator(".course-planner-map .course-search-marker-icon");
+      await expect(searchMarker).toBeVisible();
+      await expect.poll(async () => {
+        const mapBounds = await plannerMap.boundingBox();
+        const markerBounds = await searchMarker.boundingBox();
+        if (!mapBounds || !markerBounds) return Number.POSITIVE_INFINITY;
+        const horizontalOffset = Math.abs(markerBounds.x + markerBounds.width / 2 - (mapBounds.x + mapBounds.width / 2));
+        const verticalOffset = Math.abs(markerBounds.y + markerBounds.height - (mapBounds.y + mapBounds.height / 2));
+        return Math.max(horizontalOffset, verticalOffset);
+      }).toBeLessThan(8);
+    }
     await page.getByRole("button", { name: "Enter fullscreen map", exact: true }).click();
     const fullscreenPanel = page.getByRole("region", { name: "Course route map" });
     await expect(page.getByRole("button", { name: "Exit fullscreen map", exact: true })).toBeVisible();
@@ -747,6 +774,40 @@ test.describe("local product journey", () => {
       await expect(waypointRows.nth(1).locator("small")).toHaveText(firstCoordinates);
       if (!visualBaseline) await expect(page.getByLabel(`Waypoint 2: ${waypointName}`, { exact: true })).toBeVisible();
     }
+    if (mobile) await expectNoHorizontalOverflow(page);
+  });
+
+  test("searches for a place while planning a course", async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
+    await page.route("**/api/config", async (route) => {
+      const response = await route.fetch();
+      const config = await response.json();
+      await route.fulfill({ response, json: { ...config, courseSearchEnabled: true } });
+    });
+    await page.route("**/api/course-geocoding/search?*", async (route) => {
+      const requestURL = new URL(route.request().url());
+      expect(requestURL.searchParams.get("q")).toBe("Phoenix Park");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ results: [{ name: "Phoenix Park", displayName: "Phoenix Park, Dublin, Ireland", latitude: 53.356, longitude: -6.329 }] })
+      });
+    });
+    await login(page, mobile);
+    await navigateTo(page, "Courses", mobile);
+    await page.getByRole("link", { name: "New course", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Plan a course", exact: true })).toBeVisible();
+    if (visualBaseline) return;
+
+    await page.getByLabel("Find a place").fill("Phoenix Park");
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Show Phoenix Park, Dublin, Ireland on map", exact: true })).toBeVisible();
+    await expect(page.locator(".course-search-marker-icon")).toBeVisible();
+    await page.getByRole("button", { name: "Add waypoint", exact: true }).click();
+    const waypointRows = page.locator(".course-waypoint-list li");
+    await expect(waypointRows).toHaveCount(2);
+    await expect(waypointRows.nth(1).getByLabel("Waypoint 2 name")).toHaveValue("Phoenix Park");
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
