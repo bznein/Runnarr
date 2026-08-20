@@ -3430,6 +3430,48 @@ textarea {
   white-space: pre-wrap;
 }
 
+.course-garmin-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 6px;
+  color: var(--color-muted-strong);
+  background: var(--color-surface-muted);
+  font-size: 13px;
+}
+
+.course-garmin-status.success {
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+  background: var(--color-success-soft);
+}
+
+.course-garmin-status.stale {
+  border-color: var(--color-warning-bright);
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.course-garmin-status.attention {
+  display: grid;
+  border-color: var(--color-danger-border-soft);
+  color: var(--color-danger-strong);
+  background: var(--color-danger-soft);
+}
+
+.course-garmin-status a {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: inherit;
+  font-weight: 700;
+}
+
 .course-diagnostics summary {
   display: flex;
   align-items: center;

@@ -15,6 +15,9 @@
 
 ### Features
 
+- Saved courses can now be sent to a connected Garmin account as private Garmin
+  Connect courses, with per-revision duplicate protection, durable success or
+  attention states, and an offline fake-Garmin testbed flow.
 - Course-planner waypoints can now be reordered by mouse, touch, or pen dragging,
   with a labeled insertion preview and arrow controls for keyboard use.
 - Added the PostGIS-backed, account-private course foundation with bounded

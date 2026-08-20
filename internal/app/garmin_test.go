@@ -239,6 +239,7 @@ func TestGarminBridgeNotFoundClassificationPreservesOtherErrors(t *testing.T) {
 
 type stubGarminBridge struct {
 	gearActivityPages map[int][]GarminBridgeGearActivity
+	uploadedCourse    GarminBridgeCourse
 }
 
 func (b stubGarminBridge) Connect(context.Context, string, string, string, string) (GarminBridgeProfile, error) {
@@ -283,6 +284,14 @@ func (b stubGarminBridge) GetWorkout(context.Context, string, string) (GarminBri
 
 func (b stubGarminBridge) UploadWorkout(context.Context, string, map[string]any) (GarminBridgeWorkout, error) {
 	return GarminBridgeWorkout{}, nil
+}
+
+func (b stubGarminBridge) UploadCourse(context.Context, string, string, []byte, string, CourseSport, string) (GarminBridgeCourse, error) {
+	return b.uploadedCourse, nil
+}
+
+func (b stubGarminBridge) GetCourse(context.Context, string, string) (GarminBridgeCourse, error) {
+	return b.uploadedCourse, nil
 }
 
 func (b stubGarminBridge) DeleteWorkout(context.Context, string, string) error {

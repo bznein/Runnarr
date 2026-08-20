@@ -529,6 +529,20 @@ test.describe("local product journey", () => {
       await expect(kilometreMarkers.last()).toContainText("5 km");
     }
     await expect(page.getByRole("link", { name: "GPX", exact: true })).toHaveAttribute("href", "/api/courses/00000000-0000-4000-8000-000000000180/gpx");
+    if (!visualBaseline) {
+      const sendToGarmin = page.getByRole("button", { name: /(?:Send|Sent).*Garmin/i });
+      await expect(sendToGarmin).toBeVisible();
+      if (await sendToGarmin.isEnabled()) {
+        page.once("dialog", (dialog) => void dialog.accept());
+        await Promise.all([
+          page.waitForResponse((response) => response.url().endsWith("/api/courses/00000000-0000-4000-8000-000000000180/garmin") && response.request().method() === "POST" && [200, 201].includes(response.status())),
+          sendToGarmin.click()
+        ]);
+      }
+      await expect(page.getByText("This revision is in Garmin Connect.", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sent to Garmin", exact: true })).toBeDisabled();
+      await expect(page.getByRole("link", { name: /Open in Garmin/ })).toHaveAttribute("href", /connect\.garmin\.com\/modern\/course\/\d+$/);
+    }
 
     const activityCourseName = `E2E ${testInfo.project.name} Activity Course`;
     await ensureActivityImported(page, testInfo.project.name, mobile);

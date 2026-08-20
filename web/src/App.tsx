@@ -5455,6 +5455,7 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: Boolean(id) });
+  const garminCourse = useQuery({ queryKey: ["course-garmin", id], queryFn: () => api.courseGarminStatus(id!), enabled: Boolean(id) });
   const favorite = useMutation({
     mutationFn: (value: boolean) => api.setCourseFavorite(id!, value),
     onSuccess: async () => {
@@ -5482,11 +5483,31 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
       navigate("/courses");
     }
   });
+  const sendToGarmin = useMutation({
+    mutationFn: () => api.sendCourseToGarmin(id!),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["course-garmin", id] });
+    }
+  });
 
   if (course.isLoading) return <Page title="Course"><LoadingRow /></Page>;
   if (!course.data) return <Page title="Course"><EmptyState title="Course not found" /></Page>;
   const item = course.data;
   const diagnostics = Object.entries(item.diagnostics ?? {});
+  const garminSend = garminCourse.data;
+  const garminSendCurrent = garminSend?.status !== "not_sent" && garminSend?.courseRevision === item.revision;
+  const garminSendLocked = garminSendCurrent && Boolean(garminSend && ["sending", "sent", "attention"].includes(garminSend.status));
+  const garminSendLabel = sendToGarmin.isPending
+    ? "Sending…"
+    : garminSendCurrent && garminSend?.status === "sent"
+      ? "Sent to Garmin"
+      : garminSendCurrent && garminSend?.status === "attention"
+        ? "Garmin needs attention"
+        : garminSendCurrent && garminSend?.status === "sending"
+          ? "Sending to Garmin"
+          : garminSend?.status === "sent"
+            ? "Send update to Garmin"
+            : "Send to Garmin";
 
   return (
     <Page
@@ -5498,10 +5519,20 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
         {canWrite && <Link className="secondary-button small-button" to={`/courses/${encodeURIComponent(item.id)}/plan`}><RouteIcon size={15} />Edit route</Link>}
         {canWrite && <button className="secondary-button small-button" type="button" onClick={() => { duplicate.reset(); setDuplicateOpen(true); }}><Copy size={15} />Duplicate</button>}
         <a className="secondary-button small-button" href={courseGPXURL(item.id)}><Download size={15} />GPX</a>
+        {canWrite && garminSend?.connected && <button className="secondary-button small-button" type="button" disabled={sendToGarmin.isPending || garminSendLocked} onClick={() => { if (window.confirm("Create this course in Garmin Connect? Runnarr will not replace or delete the Garmin copy.")) sendToGarmin.mutate(); }}><Upload size={15} />{garminSendLabel}</button>}
+        {canWrite && garminSend && !garminSend.connected && <Link className="secondary-button small-button" to="/settings">Connect Garmin</Link>}
         {canWrite && <button className="danger-button small-button" type="button" disabled={remove.isPending} onClick={() => { if (window.confirm(`Permanently delete “${item.name}”? This cannot be undone.`)) remove.mutate(); }}><Trash2 size={15} />Delete</button>}
       </>}
     >
-      {(favorite.error || update.error || duplicate.error || remove.error) && <div className="error">{courseMutationMessage(favorite.error ?? update.error ?? duplicate.error ?? remove.error)}</div>}
+      {(favorite.error || update.error || duplicate.error || remove.error || garminCourse.error || sendToGarmin.error) && <div className="error">{courseMutationMessage(favorite.error ?? update.error ?? duplicate.error ?? remove.error ?? garminCourse.error ?? sendToGarmin.error)}</div>}
+      {garminSend?.status === "sent" && (
+        <div className={`course-garmin-status ${garminSendCurrent ? "success" : "stale"}`}>
+          <span>{garminSendCurrent ? "This revision is in Garmin Connect." : `Garmin has revision ${garminSend.courseRevision}; send again to create a new copy of the current revision.`}</span>
+          {garminSend.providerUrl && <a href={garminSend.providerUrl} target="_blank" rel="noreferrer">Open in Garmin <ExternalLink size={13} /></a>}
+        </div>
+      )}
+      {garminSendCurrent && garminSend?.status === "attention" && <div className="course-garmin-status attention"><strong>Garmin send needs attention.</strong><span>{garminSend.error}</span>{garminSend.providerUrl && <a href={garminSend.providerUrl} target="_blank" rel="noreferrer">Inspect possible Garmin copy <ExternalLink size={13} /></a>}</div>}
+      {garminSendCurrent && garminSend?.status === "sending" && <div className="course-garmin-status"><span>Runnarr has an in-progress Garmin send record. It will not start another upload for this revision.</span></div>}
       {editOpen && <CourseDetailsDialog course={item} saving={update.isPending} error={update.error} onSave={(input) => update.mutate(input)} onClose={() => setEditOpen(false)} />}
       {duplicateOpen && <CourseDuplicateDialog course={item} saving={duplicate.isPending} error={duplicate.error} onSave={(input) => duplicate.mutate(input)} onClose={() => setDuplicateOpen(false)} />}
       <section className="metric-grid course-metric-grid">

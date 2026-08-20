@@ -166,6 +166,108 @@ func (s *Server) handleExportCourseGPX(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+func (s *Server) handleGetCourseGarminStatus(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	course, err := s.store.GetCourse(r.Context(), id)
+	if writeCourseStoreError(w, err, "could not load course") {
+		return
+	}
+	_, connected, err := s.garmin.Status(r.Context())
+	if err != nil {
+		s.logger.Error("load Garmin status for course", "course_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load Garmin course status")
+		return
+	}
+	export, err := s.store.GetLatestCourseGarminExport(r.Context(), id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusOK, CourseGarminStatus{Connected: connected, CourseGarminExport: CourseGarminExport{Status: "not_sent"}})
+		return
+	}
+	if err != nil {
+		s.logger.Error("load course Garmin send", "course_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load Garmin course status")
+		return
+	}
+	writeJSON(w, http.StatusOK, CourseGarminStatus{Connected: connected, Current: export.CourseRevision == course.Revision, CourseGarminExport: export})
+}
+
+func (s *Server) handleSendCourseToGarmin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	course, err := s.store.GetCourse(r.Context(), id)
+	if writeCourseStoreError(w, err, "could not load course") {
+		return
+	}
+	_, connected, err := s.garmin.Status(r.Context())
+	if err != nil {
+		s.logger.Error("load Garmin status before course send", "course_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not load Garmin connection")
+		return
+	}
+	if !connected {
+		writeError(w, http.StatusBadRequest, "connect Garmin before sending a course")
+		return
+	}
+	ownerToken, err := s.store.GarminCourseOwnerToken(r.Context())
+	if err != nil {
+		s.logger.Error("load Garmin course owner token", "course_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not prepare Garmin course ownership")
+		return
+	}
+	marker, err := garminCourseOwnershipMarker(ownerToken, course)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	export, created, err := s.store.CreateCourseGarminExport(r.Context(), course, marker)
+	if err != nil {
+		s.logger.Error("begin Garmin course send", "course_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "could not start Garmin course send")
+		return
+	}
+	if !created {
+		if export.CourseRevision == course.Revision && export.Status == "sent" {
+			writeJSON(w, http.StatusOK, CourseGarminStatus{Connected: true, Current: true, CourseGarminExport: export})
+			return
+		}
+		writeError(w, http.StatusConflict, "this course revision already has a Garmin send record; Runnarr will not retry it automatically to avoid creating a duplicate")
+		return
+	}
+	remote, err := s.garmin.SendCourse(r.Context(), course, marker)
+	if err != nil {
+		message := "Garmin course upload did not complete conclusively; Runnarr will not retry this course revision automatically to avoid creating a duplicate: " + err.Error()
+		if markErr := s.store.MarkCourseGarminExportAttention(r.Context(), export.ID, message, GarminBridgeCourse{}); markErr != nil {
+			s.logger.Error("record Garmin course send failure", "course_id", id, "error", markErr)
+		}
+		writeError(w, http.StatusBadGateway, message)
+		return
+	}
+	if err := verifyGarminCourseUpload(remote, marker); err != nil {
+		if remote.ID != "" {
+			if checked, checkErr := s.garmin.GetCourse(r.Context(), remote.ID); checkErr == nil {
+				remote = checked
+			}
+		}
+	}
+	if err := verifyGarminCourseUpload(remote, marker); err != nil {
+		message := err.Error() + "; it was left on Garmin and Runnarr will not retry this course revision automatically"
+		if markErr := s.store.MarkCourseGarminExportAttention(r.Context(), export.ID, message, remote); markErr != nil {
+			s.logger.Error("record unverifiable Garmin course send", "course_id", id, "error", markErr)
+		}
+		writeError(w, http.StatusBadGateway, message)
+		return
+	}
+	if err := s.store.MarkCourseGarminExportSent(r.Context(), export.ID, remote); err != nil {
+		s.logger.Error("record completed Garmin course send", "course_id", id, "provider_course_id", remote.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "course was created on Garmin, but Runnarr could not record the result; it will not retry automatically")
+		return
+	}
+	export.Status = "sent"
+	export.ProviderCourseID = remote.ID
+	export.ProviderURL = remote.URL
+	export.Error = ""
+	writeJSON(w, http.StatusCreated, CourseGarminStatus{Connected: true, Current: true, CourseGarminExport: export})
+}
+
 func (s *Server) handlePreviewCourseImport(w http.ResponseWriter, r *http.Request) {
 	filename, data, err := readCourseGPXUpload(r)
 	if err != nil {
