@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the course planner map at the user's chosen position and zoom while waypoints and route geometry are adjusted.
+
 - Fixed the initial production rollback-compatibility check to include
   staging's generated HTTPS and deployment environment settings.
 - Fixed non-production ingress routing so the gateway resolves staging and
