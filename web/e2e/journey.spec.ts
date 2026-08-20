@@ -299,7 +299,9 @@ test.describe("local product journey", () => {
   });
 
   test("imports and inspects an activity, media, and export", { tag: "@visual-activity-inspection" }, async ({ page }, testInfo) => {
+    testInfo.setTimeout(60_000);
     const mobile = isMobileProject(testInfo.project.name);
+    const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     await login(page, mobile);
     const projectName = testInfo.project.name;
     const name = activityName(projectName);
@@ -307,6 +309,17 @@ test.describe("local product journey", () => {
 
     await visibleActivityLink(page, name, mobile).click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
+
+    if (!visualBaseline) {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+      await page.getByRole("button", { name: "Activity actions" }).click();
+      await page.getByRole("menuitem", { name: "Copy for AI" }).click();
+      await expect(page.getByRole("status")).toHaveText("Activity copied for AI.");
+      const copiedActivity = await page.evaluate(() => navigator.clipboard.readText());
+      expect(copiedActivity).toContain(`# Activity: ${name}`);
+      expect(copiedActivity).toContain("## Overview");
+      expect(copiedActivity).not.toMatch(/latitude|longitude|sourceId|summaryPolyline/);
+    }
 
     await page.getByRole("button", { name: "Match", exact: true }).click();
     const plannedMatchDialog = page.getByRole("dialog", { name: "Match planned run" });
@@ -419,6 +432,18 @@ test.describe("local product journey", () => {
 
     await previousActivity.click();
     await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
+    if (!visualBaseline) {
+      await page.getByRole("button", { name: "Activity actions" }).click();
+      await page.getByRole("menuitem", { name: "Copy for AI" }).click();
+      await expect(page.getByRole("status")).toHaveText("Activity copied for AI.");
+      const copiedCyclingActivity = await page.evaluate(() => navigator.clipboard.readText());
+      expect(copiedCyclingActivity).toContain("# Activity: E2E Cycling Activity");
+      expect(copiedCyclingActivity).toContain("## Workout");
+      expect(copiedCyclingActivity).toContain("- Name: E2E Structured Ride");
+      expect(copiedCyclingActivity).toContain("## Intervals");
+      expect(copiedCyclingActivity).toContain("| Step | Laps | Time | Cumulative | Distance | Avg pace |");
+      expect(copiedCyclingActivity).toContain("| Active |  | 15:00 | 15:00 | 6.00 km | 2:30 /km |");
+    }
     const cyclingIntervalsTab = page.getByRole("tab", { name: "Intervals" });
     await expect(cyclingIntervalsTab).toBeVisible();
     await cyclingIntervalsTab.click();
