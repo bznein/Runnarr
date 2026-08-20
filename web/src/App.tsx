@@ -3404,7 +3404,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
     setActionsOpen(false);
     setCopyFeedback(undefined);
     try {
-      await copyTextToClipboard(formatActivityForAI(confirmedItem));
+      await copyTextToClipboard(formatActivityForAI(displayItem));
       setCopyFeedback({ kind: "success", message: "Activity copied for AI." });
     } catch {
       setCopyFeedback({ kind: "error", message: "Could not copy the activity. Check clipboard permissions and try again." });

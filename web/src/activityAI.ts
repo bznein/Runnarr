@@ -1,9 +1,28 @@
-import type { Activity, ActivityClimb, ActivityInterval, ActivityLap } from "./types";
+import { speedToPaceSPKM } from "./paceDisplay";
+import type { Activity, ActivityClimb, ActivityInterval, ActivityLap, ActivitySample, ActivityWorkoutStep } from "./types";
 
 type MarkdownColumn<T> = {
   heading: string;
   value: (item: T) => string | undefined;
   always?: boolean;
+};
+
+type IntervalExportRow = {
+  step: string;
+  target?: string;
+  laps: string;
+  timeS: number;
+  cumulativeS: number;
+  distanceM: number;
+  avgPaceSPKM?: number;
+  avgGradeAdjustedPaceSPKM?: number;
+  avgHeartRate?: number;
+  maxHeartRate?: number;
+  elevationGainM?: number;
+  elevationLossM?: number;
+  avgRunCadence?: number;
+  avgGroundContactTimeMS?: number;
+  avgPower?: number;
 };
 
 export function formatActivityForAI(activity: Activity) {
@@ -40,9 +59,9 @@ export function formatActivityForAI(activity: Activity) {
   }
 
   if ((activity.intervals?.length ?? 0) > 0) {
-    lines.push("", "## Intervals", "", ...intervalTable(activity.intervals!));
+    lines.push("", "## Intervals", "", ...intervalTable(activity));
   } else if ((activity.laps?.length ?? 0) > 0) {
-    lines.push("", "## Laps", "", ...lapTable(activity.laps!));
+    lines.push("", "## Laps", "", ...lapTable(activity));
   }
 
   if ((activity.climbs?.length ?? 0) > 0) {
@@ -59,47 +78,83 @@ function appendFields(lines: string[], fields: Array<[string, string | undefined
   }
 }
 
-function intervalTable(intervals: ActivityInterval[]) {
-  return markdownTable(intervals, [
-    { heading: "Step", value: (item) => String(item.index + 1), always: true },
-    { heading: "Type", value: (item) => humanize(item.category), always: true },
-    { heading: "Laps", value: (item) => formatIndexes(item.lapIndexes) },
-    { heading: "Repeat", value: (item) => item.workoutRepeatIndex === undefined ? undefined : String(item.workoutRepeatIndex) },
-    { heading: "Time", value: (item) => formatDuration(preferredDuration(item)), always: true },
+function intervalTable(activity: Activity) {
+  const intervals = activity.intervals ?? [];
+  const laps = activity.laps ?? [];
+  const samples = activity.samples ?? [];
+  const lapsByIndex = new Map(laps.map((lap) => [lap.index, lap]));
+  const rows = intervals.flatMap<IntervalExportRow>((interval) => {
+    const lapIndexes = intervalLapIndexesForDisplay(interval, intervals, laps);
+    const intervalRows: IntervalExportRow[] = [{
+      step: intervalStepLabel(interval, activity.sportType),
+      target: intervalTargetLabel(activity.workout, interval),
+      laps: formatLapRange(lapIndexes),
+      timeS: intervalDisplayTimeS(interval),
+      cumulativeS: intervalCumulativeTime(interval, intervals),
+      distanceM: interval.distanceM,
+      avgPaceSPKM: interval.avgPaceSPKM,
+      avgGradeAdjustedPaceSPKM: interval.avgGradeAdjustedPaceSPKM,
+      avgHeartRate: interval.avgHeartRate,
+      maxHeartRate: interval.maxHeartRate,
+      elevationGainM: interval.elevationGainM,
+      elevationLossM: interval.elevationLossM,
+      avgRunCadence: interval.avgRunCadence,
+      avgGroundContactTimeMS: interval.avgGroundContactTimeMS,
+      avgPower: interval.avgPower
+    }];
+    for (const lapIndex of lapIndexes) {
+      const lap = lapsByIndex.get(lapIndex);
+      if (!lap) continue;
+      intervalRows.push({
+        step: `Lap ${lap.index + 1}`,
+        laps: String(lap.index + 1),
+        timeS: lapDisplayTimeS(lap, samples),
+        cumulativeS: lapCumulativeTime(lap, laps, samples),
+        distanceM: lap.distanceM,
+        avgPaceSPKM: lapPaceSPKM(lap, samples),
+        avgGradeAdjustedPaceSPKM: lap.avgGradeAdjustedPaceSPKM,
+        avgHeartRate: lap.avgHeartRate,
+        maxHeartRate: lap.maxHeartRate,
+        elevationGainM: lap.elevationGainM,
+        elevationLossM: lap.elevationLossM,
+        avgRunCadence: lap.avgRunCadence,
+        avgGroundContactTimeMS: lap.avgGroundContactTimeMS,
+        avgPower: lap.avgPower
+      });
+    }
+    return intervalRows;
+  });
+
+  return markdownTable(rows, [
+    { heading: "Step", value: (item) => item.step, always: true },
+    { heading: "Target", value: (item) => item.target },
+    { heading: "Laps", value: (item) => item.laps, always: true },
+    { heading: "Time", value: (item) => formatDuration(item.timeS), always: true },
+    { heading: "Cumulative", value: (item) => formatDuration(item.cumulativeS), always: true },
     { heading: "Distance", value: (item) => formatDistance(item.distanceM), always: true },
-    { heading: "Avg pace", value: (item) => formatPace(item.avgPaceSPKM) },
+    { heading: "Avg pace", value: (item) => formatPace(item.avgPaceSPKM), always: true },
     { heading: "Avg GAP", value: (item) => formatPace(item.avgGradeAdjustedPaceSPKM) },
     { heading: "Avg HR", value: (item) => formatBPM(item.avgHeartRate) },
     { heading: "Max HR", value: (item) => formatBPM(item.maxHeartRate) },
     { heading: "Gain", value: (item) => formatMeters(item.elevationGainM) },
     { heading: "Loss", value: (item) => formatMeters(item.elevationLossM) },
-    { heading: "Cadence", value: (item) => formatInteger(item.avgRunCadence, "spm") },
-    { heading: "GCT", value: (item) => formatInteger(item.avgGroundContactTimeMS, "ms") },
-    { heading: "Avg power", value: (item) => formatInteger(item.avgPower, "W") },
-    { heading: "Max power", value: (item) => formatInteger(item.maxPower, "W") },
-    { heading: "Normalized power", value: (item) => formatInteger(item.normalizedPower, "W") },
-    { heading: "Calories", value: (item) => formatInteger(item.caloriesKcal, "kcal") }
+    { heading: "Avg cadence", value: (item) => formatInteger(item.avgRunCadence, "spm") },
+    { heading: "Avg GCT", value: (item) => formatInteger(item.avgGroundContactTimeMS, "ms") },
+    { heading: "Avg power", value: (item) => formatInteger(item.avgPower, "W") }
   ]);
 }
 
-function lapTable(laps: ActivityLap[]) {
+function lapTable(activity: Activity) {
+  const laps = activity.laps ?? [];
+  const samples = activity.samples ?? [];
   return markdownTable(laps, [
     { heading: "Lap", value: (item) => String(item.index + 1), always: true },
-    { heading: "Intensity", value: (item) => item.intensityType ? humanize(item.intensityType) : undefined },
-    { heading: "Repeat", value: (item) => item.workoutRepeatIndex === undefined ? undefined : String(item.workoutRepeatIndex) },
-    { heading: "Time", value: (item) => formatDuration(preferredDuration(item)), always: true },
     { heading: "Distance", value: (item) => formatDistance(item.distanceM), always: true },
-    { heading: "Avg pace", value: (item) => formatPace(item.avgPaceSPKM) },
-    { heading: "Avg GAP", value: (item) => formatPace(item.avgGradeAdjustedPaceSPKM) },
-    { heading: "Avg HR", value: (item) => formatBPM(item.avgHeartRate) },
-    { heading: "Max HR", value: (item) => formatBPM(item.maxHeartRate) },
+    { heading: "Time", value: (item) => formatDuration(lapDisplayTimeS(item, samples)), always: true },
+    { heading: "Pace", value: (item) => formatPace(lapPaceSPKM(item, samples)), always: true },
+    { heading: "GAP", value: (item) => formatPace(item.avgGradeAdjustedPaceSPKM) },
     { heading: "Gain", value: (item) => formatMeters(item.elevationGainM) },
-    { heading: "Loss", value: (item) => formatMeters(item.elevationLossM) },
-    { heading: "Cadence", value: (item) => formatInteger(item.avgRunCadence, "spm") },
-    { heading: "GCT", value: (item) => formatInteger(item.avgGroundContactTimeMS, "ms") },
-    { heading: "Avg power", value: (item) => formatInteger(item.avgPower, "W") },
-    { heading: "Max power", value: (item) => formatInteger(item.maxPower, "W") },
-    { heading: "Normalized power", value: (item) => formatInteger(item.normalizedPower, "W") }
+    { heading: "Loss", value: (item) => formatMeters(item.elevationLossM) }
   ]);
 }
 
@@ -122,10 +177,6 @@ function markdownTable<T>(items: T[], columns: MarkdownColumn<T>[]) {
     `| ${visible.map(() => "---").join(" | ")} |`,
     ...items.map((item) => `| ${visible.map((column) => escapeTableCell(column.value(item) ?? "")).join(" | ")} |`)
   ];
-}
-
-function preferredDuration(item: { movingTimeS: number; elapsedTimeS: number }) {
-  return item.movingTimeS > 0 ? item.movingTimeS : item.elapsedTimeS;
 }
 
 function formatDistance(value?: number) {
@@ -168,11 +219,6 @@ function formatDecimal(value: number | undefined, unit: string) {
   return `${value.toFixed(1).replace(/\.0$/, "")} ${unit}`;
 }
 
-function formatIndexes(indexes?: number[]) {
-  if (!indexes?.length) return undefined;
-  return indexes.map((index) => index + 1).join(", ");
-}
-
 function formatGear(activity: Activity) {
   const names = (activity.gear ?? []).map((item) => item.name.trim()).filter(Boolean);
   return names.length > 0 ? names.join(", ") : undefined;
@@ -201,4 +247,121 @@ function isFiniteNonNegative(value: number | undefined): value is number {
 
 function isFinitePositive(value: number | undefined): value is number {
   return value !== undefined && Number.isFinite(value) && value > 0;
+}
+
+function intervalCategoryLabel(category: string, sportType: string) {
+  switch (category.toLowerCase()) {
+    case "warmup": return "Warm Up";
+    case "active": return /run|walk|hike/i.test(sportType) ? "Run" : "Active";
+    case "recovery": return "Recovery";
+    case "cooldown": return "Cool Down";
+    default: return category.replace(/(^|[-_])([a-z])/g, (_, prefix: string, letter: string) => `${prefix ? " " : ""}${letter.toUpperCase()}`);
+  }
+}
+
+function intervalStepLabel(interval: ActivityInterval, sportType: string) {
+  const category = intervalCategoryLabel(interval.category, sportType);
+  if (interval.workoutRepeatIndex !== undefined && (interval.category === "active" || interval.category === "recovery")) {
+    return `${interval.workoutRepeatIndex}. ${category}`;
+  }
+  return category;
+}
+
+function formatLapRange(lapIndexes: number[]) {
+  if (lapIndexes.length === 0) return "";
+  const first = lapIndexes[0] + 1;
+  const last = lapIndexes[lapIndexes.length - 1] + 1;
+  return first === last ? String(first) : `${first}–${last}`;
+}
+
+function intervalLapIndexesForDisplay(interval: ActivityInterval, intervals: ActivityInterval[], laps: ActivityLap[]) {
+  if (interval.lapIndexes?.length) return interval.lapIndexes;
+  return intervals.length === 1 ? laps.map((lap) => lap.index) : [];
+}
+
+function intervalCumulativeTime(interval: ActivityInterval, intervals: ActivityInterval[]) {
+  const index = intervals.findIndex((candidate) => candidate.index === interval.index);
+  return Math.round(intervals.slice(0, index + 1).reduce((total, candidate) => total + intervalDisplayTimeS(candidate), 0));
+}
+
+function lapCumulativeTime(lap: ActivityLap, laps: ActivityLap[], samples: ActivitySample[]) {
+  return Math.round(laps
+    .filter((candidate) => candidate.index <= lap.index)
+    .reduce((total, candidate) => total + lapDisplayTimeS(candidate, samples), 0));
+}
+
+function intervalDisplayTimeS(interval: ActivityInterval) {
+  return rawDurationS(interval.raw) ?? (interval.movingTimeS > 0 ? interval.movingTimeS : interval.elapsedTimeS);
+}
+
+function lapDisplayTimeS(lap: ActivityLap, samples: ActivitySample[]) {
+  return rawDurationS(lap.raw) ?? lapMovingTimeS(lap, samples);
+}
+
+function rawDurationS(raw?: Record<string, unknown>) {
+  const value = raw?.duration;
+  const parsed = typeof value === "string" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function lapPaceSPKM(lap: ActivityLap, samples: ActivitySample[]) {
+  if (isFinitePositive(lap.avgPaceSPKM)) return lap.avgPaceSPKM;
+  if (!isFinitePositive(lap.distanceM)) return undefined;
+  const movingTimeS = lapMovingTimeS(lap, samples);
+  return movingTimeS > 0 ? movingTimeS / (lap.distanceM / 1000) : undefined;
+}
+
+function lapMovingTimeS(lap: ActivityLap, samples: ActivitySample[]) {
+  return lap.movingTimeS > 0 ? lap.movingTimeS : movingLapTimeFromSamples(lap, samples);
+}
+
+function movingLapTimeFromSamples(lap: ActivityLap, samples: ActivitySample[]) {
+  if (!lap.startTime || lap.elapsedTimeS <= 0 || samples.length < 2) return lap.elapsedTimeS;
+  const startMs = Date.parse(lap.startTime);
+  if (!Number.isFinite(startMs)) return lap.elapsedTimeS;
+  const endMs = startMs + lap.elapsedTimeS * 1000;
+  let movingMs = 0;
+  for (let index = 1; index < samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    if (!previous.timestamp || !current.timestamp) continue;
+    const previousMs = Date.parse(previous.timestamp);
+    const currentMs = Date.parse(current.timestamp);
+    const segmentStart = Math.max(startMs, previousMs);
+    const segmentEnd = Math.min(endMs, currentMs);
+    if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs) || segmentEnd <= segmentStart) continue;
+    const distanceDelta = (current.distanceM ?? 0) - (previous.distanceM ?? 0);
+    if ((previous.speedMPS ?? 0) > 0.5 || (current.speedMPS ?? 0) > 0.5 || distanceDelta > 0.5) {
+      movingMs += segmentEnd - segmentStart;
+    }
+  }
+  return movingMs > 0 ? Math.round(movingMs / 1000) : lap.elapsedTimeS;
+}
+
+function intervalTargetLabel(workout: Activity["workout"], interval: ActivityInterval) {
+  const stepType = interval.category === "active" ? "interval" : interval.category;
+  const step = flattenWorkoutSteps(workout?.steps).find((candidate) => candidate.type?.toLowerCase() === stepType);
+  if (!step) return undefined;
+  if (step.targetType?.toLowerCase() === "pace.zone" && step.targetValueOne !== undefined && step.targetValueTwo !== undefined) {
+    const paces = [speedToPaceSPKM(step.targetValueOne), speedToPaceSPKM(step.targetValueTwo)]
+      .filter((pace): pace is number => pace !== undefined)
+      .sort((left, right) => left - right);
+    return paces.length === 2 ? `Target ${formatPace(paces[0])}–${formatPace(paces[1])}` : undefined;
+  }
+  if (step.endCondition?.toLowerCase() === "time" && step.endConditionValue !== undefined) {
+    return `Target ${formatDuration(step.endConditionValue)}`;
+  }
+  return undefined;
+}
+
+function flattenWorkoutSteps(steps?: ActivityWorkoutStep[]) {
+  const flattened: ActivityWorkoutStep[] = [];
+  const visit = (items?: ActivityWorkoutStep[]) => {
+    for (const item of items ?? []) {
+      flattened.push(item);
+      visit(item.children);
+    }
+  };
+  visit(steps);
+  return flattened;
 }

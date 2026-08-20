@@ -34,7 +34,20 @@ describe("formatActivityForAI", () => {
       summaryPolyline: "private-polyline",
       samples: [{ index: 0, latitude: 53.34, longitude: -6.26 }],
       gear: [{ id: "gear-secret-id", providerGearId: "provider-gear-secret", name: "Daily Trainers", retired: false }],
-      workout: { provider: "garmin", providerWorkoutId: "workout-secret-id", name: "Threshold Repeats", sportType: "Run" },
+      workout: {
+        provider: "garmin",
+        providerWorkoutId: "workout-secret-id",
+        name: "Threshold Repeats",
+        sportType: "Run",
+        steps: [{
+          index: 0,
+          order: 0,
+          type: "interval",
+          targetType: "pace.zone",
+          targetValueOne: 1000 / 300,
+          targetValueTwo: 1000 / 280
+        }]
+      },
       intervals: [{
         index: 0,
         category: "active",
@@ -42,11 +55,45 @@ describe("formatActivityForAI", () => {
         movingTimeS: 600,
         distanceM: 2000,
         avgPaceSPKM: 285,
+        avgGradeAdjustedPaceSPKM: 280,
         avgHeartRate: 165,
         maxHeartRate: 178,
         elevationGainM: 18,
-        lapIndexes: [1, 2],
-        raw: { latitude: 53.34, providerToken: "secret" }
+        elevationLossM: 7,
+        avgRunCadence: 182,
+        avgGroundContactTimeMS: 220,
+        avgPower: 305,
+        lapIndexes: [0, 1],
+        raw: { duration: 610, latitude: 53.34, providerToken: "secret" }
+      }],
+      laps: [{
+        index: 0,
+        elapsedTimeS: 300,
+        movingTimeS: 300,
+        distanceM: 1000,
+        avgPaceSPKM: 280,
+        avgGradeAdjustedPaceSPKM: 275,
+        avgHeartRate: 162,
+        maxHeartRate: 174,
+        elevationGainM: 10,
+        elevationLossM: 2,
+        avgRunCadence: 180,
+        avgGroundContactTimeMS: 225,
+        avgPower: 300
+      }, {
+        index: 1,
+        elapsedTimeS: 300,
+        movingTimeS: 300,
+        distanceM: 1000,
+        avgPaceSPKM: 290,
+        avgGradeAdjustedPaceSPKM: 285,
+        avgHeartRate: 168,
+        maxHeartRate: 178,
+        elevationGainM: 8,
+        elevationLossM: 5,
+        avgRunCadence: 184,
+        avgGroundContactTimeMS: 215,
+        avgPower: 310
       }],
       climbs: [{
         index: 0,
@@ -72,7 +119,10 @@ describe("formatActivityForAI", () => {
     expect(result).toContain("## Notes\n\n> Felt controlled.");
     expect(result).toContain("## Workout\n- Name: Threshold Repeats");
     expect(result).toContain("## Intervals");
-    expect(result).toContain("| 1 | Active | 2, 3 | 10:00 | 2.00 km | 4:45 /km | 165 bpm | 178 bpm | 18 m |");
+    expect(result).toContain("| Step | Target | Laps | Time | Cumulative | Distance | Avg pace | Avg GAP | Avg HR | Max HR | Gain | Loss | Avg cadence | Avg GCT | Avg power |");
+    expect(result).toContain("| Run | Target 4:40 /km–5:00 /km | 1–2 | 10:10 | 10:10 | 2.00 km | 4:45 /km | 4:40 /km | 165 bpm | 178 bpm | 18 m | 7 m | 182 spm | 220 ms | 305 W |");
+    expect(result).toContain("| Lap 1 |  | 1 | 5:00 | 5:00 | 1.00 km | 4:40 /km | 4:35 /km | 162 bpm | 174 bpm | 10 m | 2 m | 180 spm | 225 ms | 300 W |");
+    expect(result).toContain("| Lap 2 |  | 2 | 5:00 | 10:00 | 1.00 km | 4:50 /km | 4:45 /km | 168 bpm | 178 bpm | 8 m | 5 m | 184 spm | 215 ms | 310 W |");
     expect(result).toContain("## Climbs");
     expect(result).not.toMatch(/activity-secret-id|provider-secret-id|private-polyline|providerToken|latitude|longitude|workout-secret-id|gear-secret-id/);
   });
@@ -91,8 +141,8 @@ describe("formatActivityForAI", () => {
 
     expect(result).toContain("- Distance: 400 m");
     expect(result).toContain("## Laps");
-    expect(result).toContain("| Lap | Time | Distance |");
-    expect(result).toContain("| 1 | 1:00 | 200 m |");
+    expect(result).toContain("| Lap | Distance | Time | Pace |");
+    expect(result).toContain("| 1 | 200 m | 1:00 | 5:00 /km |");
     expect(result).not.toContain("Avg HR");
     expect(result).not.toContain("## Intervals");
   });

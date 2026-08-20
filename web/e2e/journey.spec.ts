@@ -441,7 +441,8 @@ test.describe("local product journey", () => {
       expect(copiedCyclingActivity).toContain("## Workout");
       expect(copiedCyclingActivity).toContain("- Name: E2E Structured Ride");
       expect(copiedCyclingActivity).toContain("## Intervals");
-      expect(copiedCyclingActivity).toContain("| 1 | Active | 15:00 | 6.00 km | 2:30 /km |");
+      expect(copiedCyclingActivity).toContain("| Step | Laps | Time | Cumulative | Distance | Avg pace |");
+      expect(copiedCyclingActivity).toContain("| Active |  | 15:00 | 15:00 | 6.00 km | 2:30 /km |");
     }
     const cyclingIntervalsTab = page.getByRole("tab", { name: "Intervals" });
     await expect(cyclingIntervalsTab).toBeVisible();
