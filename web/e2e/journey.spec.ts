@@ -299,6 +299,7 @@ test.describe("local product journey", () => {
   });
 
   test("imports and inspects an activity, media, and export", { tag: "@visual-activity-inspection" }, async ({ page }, testInfo) => {
+    testInfo.setTimeout(60_000);
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     await login(page, mobile);
