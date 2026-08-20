@@ -685,8 +685,20 @@ test.describe("local product journey", () => {
       await expect.poll(() => mapLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     }
 
+    const firstMarker = page.locator(".course-planner-map .course-waypoint-marker-icon").first();
+    const markerBeforeAdjustment = visualBaseline ? null : await firstMarker.boundingBox();
+    if (!visualBaseline) expect(markerBeforeAdjustment).not.toBeNull();
     await plannerMap.click({ position: { x: 90, y: 110 } });
     await expect(waypointRows).toHaveCount(2);
+    if (!visualBaseline) {
+      await expect.poll(async () => {
+        const markerAfterAdjustment = await firstMarker.boundingBox();
+        if (!markerAfterAdjustment || !markerBeforeAdjustment) return Number.POSITIVE_INFINITY;
+        const horizontalShift = Math.abs(markerAfterAdjustment.x - markerBeforeAdjustment.x);
+        const verticalShift = Math.abs(markerAfterAdjustment.y - markerBeforeAdjustment.y);
+        return Math.max(horizontalShift, verticalShift);
+      }).toBeLessThan(1);
+    }
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Enter fullscreen map", exact: true })).toBeVisible();
     await expect(fullscreenPanel).not.toHaveClass(/course-planner-map-fullscreen/);

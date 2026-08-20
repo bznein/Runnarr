@@ -5880,7 +5880,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highl
       {canEdit && <MapLocationPicker onSelect={onAdd} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
       {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
-      <FitMapContent points={fitPoints} />
+      <FitMapContentOnce points={fitPoints} />
       <ResizeMapOnFullscreenChange fullscreen={fullscreen} />
     </MapContainer>
     <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>
@@ -8070,6 +8070,22 @@ function FitMapContent({ points }: { points: RoutePoint[] }) {
     if (points.length > 1) {
       map.fitBounds(points, { padding: [24, 24] });
     } else if (points.length === 1) {
+      map.setView(points[0], 15);
+    }
+  }, [map, pointsKey]);
+  return null;
+}
+
+function FitMapContentOnce({ points }: { points: RoutePoint[] }) {
+  const map = useMap();
+  const fitted = useRef(false);
+  const pointsKey = routePointsKey(points);
+  useEffect(() => {
+    if (fitted.current || points.length === 0) return;
+    fitted.current = true;
+    if (points.length > 1) {
+      map.fitBounds(points, { padding: [24, 24] });
+    } else {
       map.setView(points[0], 15);
     }
   }, [map, pointsKey]);
