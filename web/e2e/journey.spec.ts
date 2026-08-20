@@ -714,6 +714,16 @@ test.describe("local product journey", () => {
       await expect(mapLabel).toBeVisible();
       await expect(mapLabel).toHaveAttribute("title", waypointName);
       await expect.poll(() => mapLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+      const searchMarker = page.locator(".course-planner-map .course-search-marker-icon");
+      await expect(searchMarker).toBeVisible();
+      await expect.poll(async () => {
+        const mapBounds = await plannerMap.boundingBox();
+        const markerBounds = await searchMarker.boundingBox();
+        if (!mapBounds || !markerBounds) return Number.POSITIVE_INFINITY;
+        const horizontalOffset = Math.abs(markerBounds.x + markerBounds.width / 2 - (mapBounds.x + mapBounds.width / 2));
+        const verticalOffset = Math.abs(markerBounds.y + markerBounds.height - (mapBounds.y + mapBounds.height / 2));
+        return Math.max(horizontalOffset, verticalOffset);
+      }).toBeLessThan(8);
     }
 
     const firstMarker = page.locator(".course-planner-map .course-waypoint-marker-icon").first();
