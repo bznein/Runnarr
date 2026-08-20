@@ -28,6 +28,7 @@ import { fullPathForSimplePath, normalizeSimpleMatchFilter, shouldRedirectToSimp
 import type { SimpleMatchFilter } from "./simpleMode";
 import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
 import { trainingSheetSourceURL } from "./trainingSheetLink";
+import { courseDistanceMarkers, kilometreMarkerStride, routePointDistanceM } from "./courseDistanceMarkers";
 import type {
   Activity,
   ActivityClimb,
@@ -5455,6 +5456,7 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [highlighted, setHighlighted] = useState<CourseProfilePoint>();
   const course = useQuery({ queryKey: ["course", id], queryFn: () => api.course(id!), enabled: Boolean(id) });
+  const garminCourse = useQuery({ queryKey: ["course-garmin", id], queryFn: () => api.courseGarminStatus(id!), enabled: Boolean(id) });
   const favorite = useMutation({
     mutationFn: (value: boolean) => api.setCourseFavorite(id!, value),
     onSuccess: async () => {
@@ -5482,11 +5484,31 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
       navigate("/courses");
     }
   });
+  const sendToGarmin = useMutation({
+    mutationFn: () => api.sendCourseToGarmin(id!),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["course-garmin", id] });
+    }
+  });
 
   if (course.isLoading) return <Page title="Course"><LoadingRow /></Page>;
   if (!course.data) return <Page title="Course"><EmptyState title="Course not found" /></Page>;
   const item = course.data;
   const diagnostics = Object.entries(item.diagnostics ?? {});
+  const garminSend = garminCourse.data;
+  const garminSendCurrent = garminSend?.status !== "not_sent" && garminSend?.courseRevision === item.revision;
+  const garminSendLocked = garminSendCurrent && Boolean(garminSend && ["sending", "sent", "attention"].includes(garminSend.status));
+  const garminSendLabel = sendToGarmin.isPending
+    ? "Sending…"
+    : garminSendCurrent && garminSend?.status === "sent"
+      ? "Sent to Garmin"
+      : garminSendCurrent && garminSend?.status === "attention"
+        ? "Garmin needs attention"
+        : garminSendCurrent && garminSend?.status === "sending"
+          ? "Sending to Garmin"
+          : garminSend?.status === "sent"
+            ? "Send update to Garmin"
+            : "Send to Garmin";
 
   return (
     <Page
@@ -5498,10 +5520,20 @@ function CourseDetailPage({ canWrite, mapTileURL }: { canWrite: boolean; mapTile
         {canWrite && <Link className="secondary-button small-button" to={`/courses/${encodeURIComponent(item.id)}/plan`}><RouteIcon size={15} />Edit route</Link>}
         {canWrite && <button className="secondary-button small-button" type="button" onClick={() => { duplicate.reset(); setDuplicateOpen(true); }}><Copy size={15} />Duplicate</button>}
         <a className="secondary-button small-button" href={courseGPXURL(item.id)}><Download size={15} />GPX</a>
+        {canWrite && garminSend?.connected && <button className="secondary-button small-button" type="button" disabled={sendToGarmin.isPending || garminSendLocked} onClick={() => { if (window.confirm("Create this course in Garmin Connect? Runnarr will not replace or delete the Garmin copy.")) sendToGarmin.mutate(); }}><Upload size={15} />{garminSendLabel}</button>}
+        {canWrite && garminSend && !garminSend.connected && <Link className="secondary-button small-button" to="/settings">Connect Garmin</Link>}
         {canWrite && <button className="danger-button small-button" type="button" disabled={remove.isPending} onClick={() => { if (window.confirm(`Permanently delete “${item.name}”? This cannot be undone.`)) remove.mutate(); }}><Trash2 size={15} />Delete</button>}
       </>}
     >
-      {(favorite.error || update.error || duplicate.error || remove.error) && <div className="error">{courseMutationMessage(favorite.error ?? update.error ?? duplicate.error ?? remove.error)}</div>}
+      {(favorite.error || update.error || duplicate.error || remove.error || garminCourse.error || sendToGarmin.error) && <div className="error">{courseMutationMessage(favorite.error ?? update.error ?? duplicate.error ?? remove.error ?? garminCourse.error ?? sendToGarmin.error)}</div>}
+      {garminSend?.status === "sent" && (
+        <div className={`course-garmin-status ${garminSendCurrent ? "success" : "stale"}`}>
+          <span>{garminSendCurrent ? "This revision is in Garmin Connect." : `Garmin has revision ${garminSend.courseRevision}; send again to create a new copy of the current revision.`}</span>
+          {garminSend.providerUrl && <a href={garminSend.providerUrl} target="_blank" rel="noreferrer">Open in Garmin <ExternalLink size={13} /></a>}
+        </div>
+      )}
+      {garminSendCurrent && garminSend?.status === "attention" && <div className="course-garmin-status attention"><strong>Garmin send needs attention.</strong><span>{garminSend.error}</span>{garminSend.providerUrl && <a href={garminSend.providerUrl} target="_blank" rel="noreferrer">Inspect possible Garmin copy <ExternalLink size={13} /></a>}</div>}
+      {garminSendCurrent && garminSend?.status === "sending" && <div className="course-garmin-status"><span>Runnarr has an in-progress Garmin send record. It will not start another upload for this revision.</span></div>}
       {editOpen && <CourseDetailsDialog course={item} saving={update.isPending} error={update.error} onSave={(input) => update.mutate(input)} onClose={() => setEditOpen(false)} />}
       {duplicateOpen && <CourseDuplicateDialog course={item} saving={duplicate.isPending} error={duplicate.error} onSave={(input) => duplicate.mutate(input)} onClose={() => setDuplicateOpen(false)} />}
       <section className="metric-grid course-metric-grid">
@@ -5895,6 +5927,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highl
     <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
+      <CourseKilometreMarkers polylines={pointsByLeg} />
       {waypoints.map((waypoint, index) => {
         const customName = waypoint.name?.trim();
         const markerName = customName || defaultCourseWaypointName(index, waypoints.length);
@@ -5906,7 +5939,7 @@ function CoursePlannerMap({ legs, waypoints, tileURL, canEdit, fullscreen, highl
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
       {searchedPlace && <><CenterMapOnPoint point={[searchedPlace.latitude, searchedPlace.longitude]} /><Marker position={[searchedPlace.latitude, searchedPlace.longitude]} icon={courseSearchIcon()} title={searchedPlace.displayName} zIndexOffset={900} /></>}
       {position && <><CenterMapOnPoint point={position.point} /><Circle center={position.point} radius={position.accuracy} pathOptions={{ color: "#2f6df6", fillColor: "#2f6df6", fillOpacity: 0.12, weight: 1 }} /><Marker position={position.point} icon={courseLocationIcon()} title="Current location" /></>}
-      <FitMapContent points={fitPoints} />
+      <FitMapContentOnce points={fitPoints} />
       <ResizeMapOnFullscreenChange fullscreen={fullscreen} />
     </MapContainer>
     <button className="secondary-button small-button course-locate-button" type="button" disabled={locating} onClick={locate}><LocateFixed size={15} />{locating ? "Locating…" : "Current location"}</button>
@@ -5980,11 +6013,7 @@ function courseLegDistance(legs: Array<Pick<CourseLeg, "encodedPolyline">>) {
 }
 
 function routePointDistance(start: RoutePoint, end: RoutePoint) {
-  const radians = (value: number) => value * Math.PI / 180;
-  const latitude = radians(end[0] - start[0]);
-  const longitude = radians(end[1] - start[1]);
-  const value = Math.sin(latitude / 2) ** 2 + Math.cos(radians(start[0])) * Math.cos(radians(end[0])) * Math.sin(longitude / 2) ** 2;
-  return 6371000 * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
+  return routePointDistanceM(start, end);
 }
 
 function courseWaypointIcon(number: number) {
@@ -6121,6 +6150,7 @@ function CourseMap({ legs, tileURL, highlighted, allowLocation = false }: { legs
     <MapContainer center={center} zoom={13} scrollWheelZoom className="route-map">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url={tileURL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"} />
       {pointsByLeg.map((points, index) => points.length > 1 && <Polyline key={legs[index].id ?? index} positions={points} pathOptions={{ color: legs[index].mode === "direct" ? "#aa5b38" : "#d85c41", weight: 5, dashArray: legs[index].mode === "direct" ? "8 8" : undefined }} />)}
+      <CourseKilometreMarkers polylines={pointsByLeg} />
       {allPoints[0] && <Marker position={allPoints[0]} icon={routeEndpointIcon("start")} interactive={false} keyboard={false} />}
       {allPoints.length > 1 && <Marker position={allPoints[allPoints.length - 1]} icon={routeEndpointIcon("end")} interactive={false} keyboard={false} />}
       {highlighted && <Marker position={highlighted} icon={routeHighlightIcon()} interactive={false} keyboard={false} zIndexOffset={1000} />}
@@ -6165,6 +6195,24 @@ function courseLocationIcon() {
 
 function courseSearchIcon() {
   return divIcon({ className: "course-search-marker-icon", html: '<span class="course-search-marker"></span>', iconSize: [22, 22], iconAnchor: [11, 22] });
+}
+
+function CourseKilometreMarkers({ polylines }: { polylines: RoutePoint[][] }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+  const markers = courseDistanceMarkers(polylines);
+  const routeLatitude = polylines.find((points) => points.length > 0)?.[0]?.[0] ?? map.getCenter().lat;
+  const stride = kilometreMarkerStride(zoom, routeLatitude);
+
+  return <>{markers.filter((marker) => marker.kilometre % stride === 0).map((marker) => {
+    const label = `${marker.kilometre} km`;
+    return <Marker key={marker.kilometre} position={marker.point} icon={courseKilometreIcon(label)} interactive={false} keyboard={false} title={`${label} along course`} zIndexOffset={-200} />;
+  })}</>;
+}
+
+function courseKilometreIcon(label: string) {
+  return divIcon({ className: "course-kilometre-marker-icon", html: `<span class="course-kilometre-marker">${label}</span>`, iconSize: [42, 20], iconAnchor: [21, 10] });
 }
 
 function formatCourseElevation(value?: number) {
@@ -8085,6 +8133,22 @@ function FitMapContent({ points }: { points: RoutePoint[] }) {
     if (points.length > 1) {
       map.fitBounds(points, { padding: [24, 24] });
     } else if (points.length === 1) {
+      map.setView(points[0], 15);
+    }
+  }, [map, pointsKey]);
+  return null;
+}
+
+function FitMapContentOnce({ points }: { points: RoutePoint[] }) {
+  const map = useMap();
+  const fitted = useRef(false);
+  const pointsKey = routePointsKey(points);
+  useEffect(() => {
+    if (fitted.current || points.length === 0) return;
+    fitted.current = true;
+    if (points.length > 1) {
+      map.fitBounds(points, { padding: [24, 24] });
+    } else {
       map.setView(points[0], 15);
     }
   }, [map, pointsKey]);

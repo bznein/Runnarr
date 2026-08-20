@@ -18,6 +18,19 @@ set training_sheet_sheet_url = 'https://docs.google.com/spreadsheets/d/e2e-workb
     default_experience = 'full'
 where user_id = (select id from users where username = :'e2e_username');
 
+-- Garmin mutations in browser journeys are routed to the offline bridge.
+insert into provider_connections(user_id, provider, provider_account_id, display_name, scopes, metadata)
+select id, 'garmin', 'testbed-garmin', 'Offline Garmin Testbed', array['garmin-connect'],
+    '{"fixture":"e2e"}'::jsonb
+from users
+where username = :'e2e_username'
+on conflict(user_id, provider) do update set
+    provider_account_id = excluded.provider_account_id,
+    display_name = excluded.display_name,
+    scopes = excluded.scopes,
+    metadata = excluded.metadata,
+    updated_at = :'e2e_now'::timestamptz;
+
 insert into daily_health_metrics(
     user_id, provider, metric_date, steps, total_calories_kcal,
     active_calories_kcal, resting_heart_rate_bpm, avg_heart_rate_bpm,
@@ -266,7 +279,7 @@ insert into courses(
 )
 select '00000000-0000-4000-8000-000000000180'::uuid, id,
     'E2E Riverside Loop', 'Run', 'Synthetic course for library and map inspection.',
-    true, 1, 'e2e-riverside-loop-v1', 4210, 38, 35, 1, 5, 1, 0,
+    true, 1, 'e2e-riverside-loop-v2', 5363, 38, 35, 1, 5, 1, 0,
     '{"fixture":"e2e"}'::jsonb, :'e2e_now'::timestamptz - interval '2 days', :'e2e_now'::timestamptz - interval '1 day'
 from users
 where username = :'e2e_username'

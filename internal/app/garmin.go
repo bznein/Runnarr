@@ -72,6 +72,8 @@ type GarminBridge interface {
 	ListWorkouts(ctx context.Context, tokenStore string, start, limit int) ([]GarminBridgeWorkout, error)
 	GetWorkout(ctx context.Context, tokenStore, workoutID string) (GarminBridgeWorkout, error)
 	UploadWorkout(ctx context.Context, tokenStore string, payload map[string]any) (GarminBridgeWorkout, error)
+	UploadCourse(ctx context.Context, tokenStore, filename string, content []byte, name string, sport CourseSport, description string) (GarminBridgeCourse, error)
+	GetCourse(ctx context.Context, tokenStore, courseID string) (GarminBridgeCourse, error)
 	DeleteWorkout(ctx context.Context, tokenStore, workoutID string) error
 	ListScheduledWorkouts(ctx context.Context, tokenStore string, year, month int) ([]GarminBridgeScheduledWorkout, error)
 	GetScheduledWorkout(ctx context.Context, tokenStore, scheduledWorkoutID string) (GarminBridgeScheduledWorkout, error)
@@ -167,6 +169,14 @@ type GarminBridgeWorkout struct {
 	ID          string         `json:"id"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
+	Raw         map[string]any `json:"raw"`
+}
+
+type GarminBridgeCourse struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	URL         string         `json:"url"`
 	Raw         map[string]any `json:"raw"`
 }
 
@@ -926,6 +936,30 @@ func (b PythonGarminBridge) UploadWorkout(ctx context.Context, tokenStore string
 		"action":     "upload-workout",
 		"tokenStore": tokenStore,
 		"workout":    payload,
+	}, &response)
+	return response, err
+}
+
+func (b PythonGarminBridge) UploadCourse(ctx context.Context, tokenStore, filename string, content []byte, name string, sport CourseSport, description string) (GarminBridgeCourse, error) {
+	var response GarminBridgeCourse
+	err := b.run(ctx, map[string]any{
+		"action":        "upload-course",
+		"tokenStore":    tokenStore,
+		"filename":      filename,
+		"contentBase64": base64.StdEncoding.EncodeToString(content),
+		"name":          name,
+		"sport":         sport,
+		"description":   description,
+	}, &response)
+	return response, err
+}
+
+func (b PythonGarminBridge) GetCourse(ctx context.Context, tokenStore, courseID string) (GarminBridgeCourse, error) {
+	var response GarminBridgeCourse
+	err := b.run(ctx, map[string]any{
+		"action":     "course",
+		"tokenStore": tokenStore,
+		"courseId":   courseID,
 	}, &response)
 	return response, err
 }

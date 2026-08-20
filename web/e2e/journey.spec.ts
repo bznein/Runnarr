@@ -522,7 +522,27 @@ test.describe("local product journey", () => {
     await expect(page.getByText("Elevation profile", { exact: true })).toBeVisible();
     await expect(page.locator(".course-elevation-coverage-notice")).toHaveCount(0);
     await expect(page.locator(".course-map-frame .leaflet-container")).toBeVisible();
+    if (!visualBaseline) {
+      const kilometreMarkers = page.locator(".course-map-panel .course-kilometre-marker-icon");
+      await expect(kilometreMarkers).toHaveCount(5);
+      await expect(kilometreMarkers.first()).toContainText("1 km");
+      await expect(kilometreMarkers.last()).toContainText("5 km");
+    }
     await expect(page.getByRole("link", { name: "GPX", exact: true })).toHaveAttribute("href", "/api/courses/00000000-0000-4000-8000-000000000180/gpx");
+    if (!visualBaseline) {
+      const sendToGarmin = page.getByRole("button", { name: /(?:Send|Sent).*Garmin/i });
+      await expect(sendToGarmin).toBeVisible();
+      if (await sendToGarmin.isEnabled()) {
+        page.once("dialog", (dialog) => void dialog.accept());
+        await Promise.all([
+          page.waitForResponse((response) => response.url().endsWith("/api/courses/00000000-0000-4000-8000-000000000180/garmin") && response.request().method() === "POST" && [200, 201].includes(response.status())),
+          sendToGarmin.click()
+        ]);
+      }
+      await expect(page.getByText("This revision is in Garmin Connect.", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sent to Garmin", exact: true })).toBeDisabled();
+      await expect(page.getByRole("link", { name: /Open in Garmin/ })).toHaveAttribute("href", /connect\.garmin\.com\/modern\/course\/\d+$/);
+    }
 
     const activityCourseName = `E2E ${testInfo.project.name} Activity Course`;
     await ensureActivityImported(page, testInfo.project.name, mobile);
@@ -619,6 +639,7 @@ test.describe("local product journey", () => {
     await expect(plannerMetrics).toHaveCount(3);
     await expect(plannerMetrics.first()).toContainText("Distance");
     await expect(page.getByText("Elevation covers 0% of this route", { exact: false })).toBeVisible();
+    if (!visualBaseline && !mobile) await expect(page.locator(".course-planner-map .course-kilometre-marker-icon").first()).toBeVisible();
     await page.context().grantPermissions(["geolocation"], { origin: new URL(page.url()).origin });
     await page.context().setGeolocation({ latitude: 53.2707, longitude: -9.0568, accuracy: 12 });
     await page.getByRole("button", { name: "Current location", exact: true }).click();
@@ -695,8 +716,20 @@ test.describe("local product journey", () => {
       await expect.poll(() => mapLabel.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
     }
 
+    const firstMarker = page.locator(".course-planner-map .course-waypoint-marker-icon").first();
+    const markerBeforeAdjustment = visualBaseline ? null : await firstMarker.boundingBox();
+    if (!visualBaseline) expect(markerBeforeAdjustment).not.toBeNull();
     await plannerMap.click({ position: { x: 90, y: 110 } });
     await expect(waypointRows).toHaveCount(2);
+    if (!visualBaseline) {
+      await expect.poll(async () => {
+        const markerAfterAdjustment = await firstMarker.boundingBox();
+        if (!markerAfterAdjustment || !markerBeforeAdjustment) return Number.POSITIVE_INFINITY;
+        const horizontalShift = Math.abs(markerAfterAdjustment.x - markerBeforeAdjustment.x);
+        const verticalShift = Math.abs(markerAfterAdjustment.y - markerBeforeAdjustment.y);
+        return Math.max(horizontalShift, verticalShift);
+      }).toBeLessThan(1);
+    }
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Enter fullscreen map", exact: true })).toBeVisible();
     await expect(fullscreenPanel).not.toHaveClass(/course-planner-map-fullscreen/);

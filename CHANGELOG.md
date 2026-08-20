@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Course maps now show zoom-aware kilometre markers while planning and when
+  inspecting a saved course, with wider clean intervals when zoomed out.
+- Keep the course planner map at the user's chosen position and zoom while waypoints and route geometry are adjusted.
+
 - Fixed the initial production rollback-compatibility check to include
   staging's generated HTTPS and deployment environment settings.
 - Fixed non-production ingress routing so the gateway resolves staging and
@@ -14,6 +18,9 @@
 - Added explicit-submit place search to the course planner through an optional
   backend-proxied Nominatim-compatible geocoder, with map centering and direct
   waypoint creation from bounded results.
+- Saved courses can now be sent to a connected Garmin account as private Garmin
+  Connect courses, with per-revision duplicate protection, durable success or
+  attention states, and an offline fake-Garmin testbed flow.
 - Course-planner waypoints can now be reordered by mouse, touch, or pen dragging,
   with a labeled insertion preview and arrow controls for keyboard use.
 - Added the PostGIS-backed, account-private course foundation with bounded
@@ -51,6 +58,9 @@
 
 ### Fixes
 
+- Runtime images now install current Debian security updates and patched
+  Python dependencies, then remove unused package-installation tooling before
+  candidate vulnerability scans.
 - Training-sheet and manual prescriptions such as `45mins w/surges` now create
   five-minute blocks with a 4:30 steady run and 30-second surge, retaining any
   leftover duration as a final run step.

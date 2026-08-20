@@ -57,7 +57,11 @@ Course detail supports local metadata, favorites, duplication, permanent
 deletion, GPX export, and a one-shot current-location overlay. Location is
 requested only after pressing the control and is not stored separately by
 Runnarr. When a saved course is available, its starting point seeds the next
-new course draft.
+new course draft. A saved revision can also be sent once to the connected
+Garmin account. Garmin receives a private, separately managed copy: later local
+edits create a new Garmin course, and Runnarr never replaces or deletes the
+remote copy automatically. Inconclusive provider responses are retained as an
+attention state instead of being retried and potentially creating duplicates.
 
 The waypoint planner can keep individual legs direct or route them through an
 optional backend-connected Valhalla service. The normal stack leaves this

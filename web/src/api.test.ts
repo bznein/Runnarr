@@ -205,4 +205,19 @@ describe("shared backend API contract", () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe("/api/course-geocoding/search?q=St%20Stephen's%20Green%20%26%20lake");
   });
+
+  it("sends a course revision to Garmin with CSRF protection", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      connected: true, current: true, status: "sent", providerCourseId: "321"
+    }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    setCsrfToken("course-csrf");
+
+    await api.sendCourseToGarmin("course/with spaces");
+
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/courses/course%2Fwith%20spaces/garmin");
+    expect(init.method).toBe("POST");
+    expect(init.headers.get("X-CSRF-Token")).toBe("course-csrf");
+  });
 });

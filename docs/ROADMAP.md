@@ -78,6 +78,7 @@ is a separate integration concern and must not expand the reusable core.
 
 ### 9. Garmin sync and writeback
 
+- [Issue #280](https://github.com/bznein/Runnarr/issues/280)
 - [Issue #181](https://github.com/bznein/Runnarr/issues/181)
 - [Issue #187](https://github.com/bznein/Runnarr/issues/187)
 - [Issue #49](https://github.com/bznein/Runnarr/issues/49)
