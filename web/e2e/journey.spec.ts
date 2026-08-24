@@ -532,7 +532,7 @@ test.describe("local product journey", () => {
     await weatherActivity.click();
     await expect(page.getByRole("heading", { name: "E2E Calendar Matched Run" })).toBeVisible();
     const weatherPanel = page.getByLabel("Activity weather");
-    await weatherPanel.scrollIntoViewIfNeeded();
+    await weatherPanel.evaluate((element) => element.scrollIntoView({ block: "center" }));
     await expect(weatherPanel).toContainText("Partly cloudy");
     await expect(weatherPanel.getByText("18.3 °C", { exact: true })).toBeVisible();
     await expect(weatherPanel.getByText("17.6 °C", { exact: true })).toBeVisible();
