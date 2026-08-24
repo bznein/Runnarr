@@ -594,11 +594,14 @@ func aggregateWorkoutRecords(records []trainingSheetWorkoutRecord) (trainingShee
 			result.MaxHeartRate = &value
 		}
 	}
-	if movingTime > 0 && distance > 0 {
-		pace := movingTime / distance * 1000
-		result.AvgPaceSPKM = &pace
-	} else if paceWeight > 0 {
+	// An average row has no single provider value, so aggregate the Garmin
+	// interval paces. Only derive pace from time and distance when the provider
+	// omitted pace for every record.
+	if paceWeight > 0 {
 		pace := paceWeighted / paceWeight
+		result.AvgPaceSPKM = &pace
+	} else if movingTime > 0 && distance > 0 {
+		pace := movingTime / distance * 1000
 		result.AvgPaceSPKM = &pace
 	}
 	if heartWeight > 0 {

@@ -213,6 +213,8 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/providers/garmin/health-sync", s.handleGarminHealthSync)
 			r.Post("/providers/garmin/gear-sync", s.handleGarminGearSync)
 			r.Post("/training-sheet/sync", s.handleTrainingSheetSync)
+			r.Get("/training-sheet/reconciliation", s.handleNextTrainingSheetReconciliation)
+			r.Post("/training-sheet/reconciliation", s.handleApplyTrainingSheetReconciliation)
 			r.Get("/planned-activities", s.handlePlannedActivities)
 			r.Get("/workouts", s.handleListWorkouts)
 			r.Post("/workouts", s.handleCreateWorkout)

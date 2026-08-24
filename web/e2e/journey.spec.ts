@@ -978,6 +978,51 @@ test.describe("local product journey", () => {
 
   test("covers calendar, health, gear, tools, and settings", { tag: "@visual-app-settings" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
+    const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
+    let reconciliationApplied = false;
+    await page.route("**/api/config/training-sheet", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ enabled: true, sheetURL: "https://docs.google.com/spreadsheets/d/e2e", checkEveryHours: 24, planYear: 2026 })
+      });
+    });
+    await page.route("**/api/providers/google/status", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ configured: true, connected: true, writeReady: true, provider: "google_sheets" }) });
+    });
+    await page.route("**/api/training-sheet/reconciliation?*", async (route) => {
+      const offset = new URL(route.request().url()).searchParams.get("offset");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(offset === "0" ? {
+          item: {
+            activityId: "38ad721a-055b-4210-bc8a-a19ea36cfa0b",
+            activityName: "E2E Garmin Fartlek",
+            activityStartTime: "2026-08-22T08:00:00Z",
+            plannedActivityId: "26d243fc-c40e-49f5-85df-7b002d43d186",
+            plannedName: "Fartlek",
+            sheetTitle: "23-08",
+            sheetUrl: "https://docs.google.com/spreadsheets/d/e2e/edit#gid=23",
+            fingerprint: "e2e-live-sheet",
+            changes: [{ range: "'23-08'!B27", label: "1min set 2 avg", currentValue: "3:08", proposedValue: "3:16" }]
+          },
+          nextOffset: 1,
+          scanned: 1,
+          skipped: 0,
+          done: false
+        } : { nextOffset: 2, scanned: 1, skipped: 0, done: true })
+      });
+    });
+    await page.route("**/api/training-sheet/reconciliation", async (route) => {
+      reconciliationApplied = true;
+      expect(route.request().postDataJSON()).toEqual({
+        activityId: "38ad721a-055b-4210-bc8a-a19ea36cfa0b",
+        plannedActivityId: "26d243fc-c40e-49f5-85df-7b002d43d186",
+        fingerprint: "e2e-live-sheet"
+      });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ updated: 1 }) });
+    });
     await login(page, mobile);
 
     await navigateTo(page, "Activities", mobile);
@@ -1076,6 +1121,23 @@ test.describe("local product journey", () => {
     ]);
     await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
     await expect(themePicker.getByRole("radio", { name: "Midnight" })).toBeChecked();
+
+    if (!visualBaseline) {
+      const trainingSheet = page.locator("#training-sheet");
+      await trainingSheet.locator("summary").click();
+      await expect(trainingSheet.getByRole("button", { name: "Reconcile interval paces" })).toBeEnabled();
+      await trainingSheet.getByRole("button", { name: "Reconcile interval paces" }).click();
+      const reconciliationDialog = page.getByRole("dialog", { name: "Reconcile interval paces" });
+      await expect(reconciliationDialog).toBeVisible();
+      await expect(reconciliationDialog.getByText("E2E Garmin Fartlek", { exact: true })).toBeVisible();
+      await expect(reconciliationDialog.getByText("3:08", { exact: true })).toBeVisible();
+      await expect(reconciliationDialog.getByText("3:16", { exact: true })).toBeVisible();
+      await reconciliationDialog.getByRole("button", { name: "Confirm and fix 1" }).click();
+      await expect.poll(() => reconciliationApplied).toBe(true);
+      await expect(reconciliationDialog.getByText("Reconciliation complete", { exact: true })).toBeVisible();
+      await expect(reconciliationDialog.getByText("1 fixed", { exact: true })).toBeVisible();
+    }
+    if (mobile) await expectNoHorizontalOverflow(page);
   });
 
   test("keeps navigation and key controls usable on mobile", { tag: "@visual-mobile-navigation" }, async ({ page }, testInfo) => {

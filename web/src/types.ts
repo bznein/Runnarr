@@ -366,6 +366,33 @@ export type TrainingSheetWritebackPreview = {
   conflictCount: number;
 };
 
+export type TrainingSheetReconciliationChange = {
+  range: string;
+  label: string;
+  currentValue: string;
+  proposedValue: string;
+};
+
+export type TrainingSheetReconciliationItem = {
+  activityId: string;
+  activityName: string;
+  activityStartTime: string;
+  plannedActivityId: string;
+  plannedName: string;
+  sheetTitle: string;
+  sheetUrl: string;
+  fingerprint: string;
+  changes: TrainingSheetReconciliationChange[];
+};
+
+export type TrainingSheetReconciliationResult = {
+  item?: TrainingSheetReconciliationItem;
+  nextOffset: number;
+  scanned: number;
+  skipped: number;
+  done: boolean;
+};
+
 export type TrainingSheetWritebackStatus = {
   plannedActivityId: string;
   activityId: string;

@@ -17,6 +17,9 @@
 
 ### Features
 
+- Added a confirmation-based training-sheet interval-pace reconciliation that
+  scans matched activities newest-first, supports an explicit age cutoff, and
+  revalidates live sheet values before applying each approved correction.
 - Added explicit-submit place search to the course planner through an optional
   backend-proxied Nominatim-compatible geocoder, with map centering and direct
   waypoint creation from bounded results.
@@ -60,6 +63,9 @@
 
 ### Fixes
 
+- Garmin structured intervals now use Garmin Connect's displayed average pace
+  instead of the faster moving pace, including repair of retained interval data
+  and provider-pace-based training-sheet aggregates.
 - Runtime images now install current Debian security updates and patched
   Python dependencies, then remove unused package-installation tooling before
   candidate vulnerability scans.

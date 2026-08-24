@@ -12,6 +12,7 @@ import type {
   PlannedActivity,
   PlannedActivityMatchResponse,
   TrainingSheetWritebackPreview,
+  TrainingSheetReconciliationResult,
   TrainingSheetConfig,
   AppConfig,
   ClimbDetectionSettingsUpdate,
@@ -399,6 +400,13 @@ export const api = {
     body: JSON.stringify(body)
   }),
   trainingSheetSync: () => request<{ jobId: string; status: string }>("/api/training-sheet/sync", { method: "POST" }),
+  nextTrainingSheetReconciliation: (notBefore: string, offset: number) =>
+    request<TrainingSheetReconciliationResult>(`/api/training-sheet/reconciliation?${new URLSearchParams({ notBefore, offset: String(offset) }).toString()}`),
+  applyTrainingSheetReconciliation: (body: { plannedActivityId: string; activityId: string; fingerprint: string }) =>
+    request<{ updated: number }>("/api/training-sheet/reconciliation", {
+      method: "POST",
+      body: JSON.stringify(body)
+    }),
   plannedActivities: (from?: string, to?: string) => request<{ planned: PlannedActivity[] | null }>(`/api/planned-activities${from || to ? `?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()}` : ""}`),
   workoutConfig: () => request<WorkoutConfig>("/api/config/workouts"),
   updateWorkoutConfig: (body: Partial<WorkoutConfig>) => request<WorkoutConfig>("/api/config/workouts", {
