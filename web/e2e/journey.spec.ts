@@ -1411,15 +1411,16 @@ test.describe("local product journey", () => {
     await expect(settings).toBeVisible();
 
     const activityMatching = settings.getByLabel(/Activity matching/);
-    await Promise.all([
-      page.waitForResponse((response) => response.url().endsWith("/api/notification-settings") && response.request().method() === "PATCH" && response.ok()),
-      activityMatching.selectOption("off")
-    ]);
+    const selectActivityMatchingMode = async (mode: "off" | "in_app") => {
+      if (await activityMatching.inputValue() === mode) return;
+      await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith("/api/notification-settings") && response.request().method() === "PATCH" && response.ok()),
+        activityMatching.selectOption(mode)
+      ]);
+    };
+    await selectActivityMatchingMode("off");
     await expect(activityMatching).toHaveValue("off");
-    await Promise.all([
-      page.waitForResponse((response) => response.url().endsWith("/api/notification-settings") && response.request().method() === "PATCH" && response.ok()),
-      activityMatching.selectOption("in_app")
-    ]);
+    await selectActivityMatchingMode("in_app");
     await expect(activityMatching).toHaveValue("in_app");
 
     await page.goto("/notifications");
