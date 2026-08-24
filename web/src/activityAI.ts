@@ -1,5 +1,6 @@
 import { speedToPaceSPKM } from "./paceDisplay";
 import type { Activity, ActivityAIContext, ActivityClimb, ActivityInterval, ActivityLap, ActivitySample, ActivityWorkoutStep } from "./types";
+import { openMeteoAISource } from "./weatherAttribution";
 
 type MarkdownColumn<T> = {
   heading: string;
@@ -70,7 +71,7 @@ export function formatActivityForAI(activity: Activity, context?: ActivityAICont
       ["Feels like", formatWeatherTemperature(activity.weather.apparentTemperatureC)],
       ["Humidity", formatWeatherPercent(activity.weather.relativeHumidityPct)],
       ["Wind", formatWeatherWind(activity.weather.windDirection, activity.weather.windSpeedKPH)],
-      ["Source", activity.weather.provider === "open-meteo" ? "Open-Meteo (model-derived, nearest hour; WMO code rendered as text; CC BY 4.0): https://open-meteo.com/" : undefined]
+      ["Source", activity.weather.provider === "open-meteo" ? openMeteoAISource(activity.weather) : undefined]
     ]);
   }
 

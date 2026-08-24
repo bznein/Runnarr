@@ -19,14 +19,16 @@ func (fn openMeteoRoundTripFunc) RoundTrip(request *http.Request) (*http.Respons
 	return fn(request)
 }
 
-func TestOpenMeteoFetchUsesRoundedCoordinatesAndNearestHour(t *testing.T) {
+func TestOpenMeteoFetchUsesMidpoint15MinuteDataAndMedianTemperatureModel(t *testing.T) {
 	start := time.Date(2026, 8, 24, 6, 24, 0, 0, time.UTC)
+	reservedUnits := 0
 	service := &OpenMeteoWeatherService{
 		forecastURL: "https://weather.test/v1/forecast",
 		archiveURL:  "https://archive.test/v1/archive",
 		minInterval: 0,
 		now:         func() time.Time { return time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC) },
-		reserveLimit: func(context.Context, time.Time) (time.Duration, error) {
+		reserveLimit: func(_ context.Context, _ time.Time, units int) (time.Duration, error) {
+			reservedUnits = units
 			return 0, nil
 		},
 	}
@@ -40,14 +42,23 @@ func TestOpenMeteoFetchUsesRoundedCoordinatesAndNearestHour(t *testing.T) {
 		if request.URL.Query().Get("start_date") != "2026-08-24" || request.URL.Query().Get("timezone") != "UTC" {
 			t.Fatalf("unexpected time query: %s", request.URL.RawQuery)
 		}
+		if request.URL.Query().Get("models") != "ukmo_seamless,icon_seamless,ecmwf_ifs025" || request.URL.Query().Get("minutely_15") == "" || request.URL.Query().Has("hourly") {
+			t.Fatalf("unexpected consensus query: %s", request.URL.RawQuery)
+		}
 		body := `{
 			"latitude":53.125,"longitude":-8.0,"timezone":"GMT",
-			"hourly":{
-				"time":["2026-08-24T05:00","2026-08-24T06:00","2026-08-24T07:00"],
-				"temperature_2m":[12.1,13.4,14.2],"apparent_temperature":[11.0,12.8,13.6],
-				"dew_point_2m":[8.0,8.4,9.0],"relative_humidity_2m":[76,73,70],
-				"weather_code":[3,2,1],"wind_speed_10m":[8,9.5,11],
-				"wind_gusts_10m":[14,16,18],"wind_direction_10m":[180,225,270]
+			"minutely_15":{
+				"time":["2026-08-24T06:15","2026-08-24T06:30","2026-08-24T06:45"],
+				"temperature_2m_ukmo_seamless":[5.0,3.2,7.0],
+				"temperature_2m_icon_seamless":[6.0,8.4,9.0],
+				"temperature_2m_ecmwf_ifs025":[6.0,6.5,8.0],
+				"apparent_temperature_ecmwf_ifs025":[5.0,5.8,7.1],
+				"dew_point_2m_ecmwf_ifs025":[4.0,4.5,5.0],
+				"relative_humidity_2m_ecmwf_ifs025":[90,87,84],
+				"weather_code_ecmwf_ifs025":[3,2,1],
+				"wind_speed_10m_ecmwf_ifs025":[8,9.5,11],
+				"wind_gusts_10m_ecmwf_ifs025":[14,16,18],
+				"wind_direction_10m_ecmwf_ifs025":[180,225,270]
 			}
 		}`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
@@ -57,16 +68,19 @@ func TestOpenMeteoFetchUsesRoundedCoordinatesAndNearestHour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if weather.Provider != openMeteoProvider || weather.Condition != "Partly cloudy" || weather.WindDirection != "SW" {
+	if weather.Provider != openMeteoProvider || weather.SelectionMethod != openMeteoMethodMultiModel15Min || weather.Model != "ECMWF IFS" || weather.Condition != "Partly cloudy" || weather.WindDirection != "SW" {
 		t.Fatalf("weather labels = %#v", weather)
 	}
-	if weather.TemperatureC == nil || math.Abs(*weather.TemperatureC-13.4) > 0.0001 {
+	if weather.TemperatureC == nil || math.Abs(*weather.TemperatureC-6.5) > 0.0001 {
 		t.Fatalf("temperature = %#v", weather.TemperatureC)
 	}
-	if weather.ObservedAt == nil || !weather.ObservedAt.Equal(time.Date(2026, 8, 24, 6, 0, 0, 0, time.UTC)) {
+	if weather.ObservedAt == nil || !weather.ObservedAt.Equal(time.Date(2026, 8, 24, 6, 30, 0, 0, time.UTC)) {
 		t.Fatalf("observed at = %#v", weather.ObservedAt)
 	}
-	if weather.Raw["hourly"] == nil {
+	if reservedUnits != openMeteoRecentRequestUnits {
+		t.Fatalf("reserved units = %d, want %d", reservedUnits, openMeteoRecentRequestUnits)
+	}
+	if weather.Raw["minutely_15"] == nil {
 		t.Fatal("raw provider payload was not retained")
 	}
 	encoded, err := json.Marshal(Activity{Weather: weather})
@@ -80,23 +94,41 @@ func TestOpenMeteoFetchUsesRoundedCoordinatesAndNearestHour(t *testing.T) {
 
 func TestOpenMeteoFetchUsesArchiveForOlderActivities(t *testing.T) {
 	requested := make(chan *url.URL, 1)
+	reservedUnits := 0
 	service := &OpenMeteoWeatherService{
 		client: &http.Client{Transport: openMeteoRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 			requested <- request.URL
-			return &http.Response{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header)}, nil
+			body := `{
+				"latitude":53.0,"longitude":-7.0,"timezone":"GMT",
+				"hourly":{
+					"time":["2025-01-01T08:00","2025-01-01T09:00","2025-01-01T10:00"],
+					"temperature_2m":[4.1,4.8,5.2],"weather_code":[3,2,1]
+				}
+			}`
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 		})},
 		forecastURL: "https://forecast.test/v1/forecast",
 		archiveURL:  "https://archive.test/v1/archive",
 		minInterval: 0,
 		now:         func() time.Time { return time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC) },
-		reserveLimit: func(context.Context, time.Time) (time.Duration, error) {
+		reserveLimit: func(_ context.Context, _ time.Time, units int) (time.Duration, error) {
+			reservedUnits = units
 			return 0, nil
 		},
 	}
 
-	_, _ = service.Fetch(context.Background(), time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC), 53, -7)
-	if got := <-requested; got.Host != "archive.test" {
+	weather, err := service.Fetch(context.Background(), time.Date(2025, 1, 1, 9, 10, 0, 0, time.UTC), 53, -7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := <-requested; got.Host != "archive.test" || got.Query().Get("hourly") == "" || got.Query().Has("models") || got.Query().Has("minutely_15") {
 		t.Fatalf("host = %q, want archive endpoint", got.Host)
+	}
+	if reservedUnits != 1 {
+		t.Fatalf("reserved units = %d, want 1", reservedUnits)
+	}
+	if weather.SelectionMethod != openMeteoMethodArchiveHourly || weather.Model != "" || weather.TemperatureC == nil || *weather.TemperatureC != 4.8 || weather.ObservedAt == nil || !weather.ObservedAt.Equal(time.Date(2025, 1, 1, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("archive weather = %#v", weather)
 	}
 }
 
@@ -111,7 +143,7 @@ func TestOpenMeteoFetchStopsBeforeHTTPWhenQuotaIsExhausted(t *testing.T) {
 		archiveURL:  "https://archive.test/v1/archive",
 		minInterval: 0,
 		now:         func() time.Time { return time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC) },
-		reserveLimit: func(context.Context, time.Time) (time.Duration, error) {
+		reserveLimit: func(context.Context, time.Time, int) (time.Duration, error) {
 			return time.Hour, ErrOpenMeteoRateLimited
 		},
 	}

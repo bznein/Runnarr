@@ -537,8 +537,10 @@ test.describe("local product journey", () => {
     await expect(weatherPanel.getByText("17.6 °C", { exact: true })).toBeVisible();
     await expect(weatherPanel.getByText("72%", { exact: true })).toBeVisible();
     await expect(weatherPanel.getByText("SW 14.5 km/h", { exact: true })).toBeVisible();
+    await expect(weatherPanel.getByRole("link", { name: /Weather data by Open-Meteo.com/ })).toHaveAttribute("href", "https://open-meteo.com/");
     if (!visualBaseline) {
-      await expect(weatherPanel.getByRole("link", { name: /Weather data by Open-Meteo.com/ })).toHaveAttribute("href", "https://open-meteo.com/");
+      await expect(weatherPanel).toContainText("activity midpoint from 15-minute values");
+      await expect(weatherPanel).toContainText("ECMWF IFS");
       await page.getByRole("button", { name: "Activity actions" }).click();
       await page.getByRole("menuitem", { name: "Copy for AI" }).click();
       await expect(page.getByRole("status")).toHaveText("Activity copied for AI.");
@@ -546,10 +548,8 @@ test.describe("local product journey", () => {
       expect(copiedWeatherActivity).toContain("## Weather");
       expect(copiedWeatherActivity).toContain("- Conditions: Partly cloudy");
       expect(copiedWeatherActivity).toContain("- Temperature: 18.3 °C");
-      expect(copiedWeatherActivity).toContain("- Source: Open-Meteo (model-derived, nearest hour; WMO code rendered as text; CC BY 4.0): https://open-meteo.com/");
+      expect(copiedWeatherActivity).toContain("- Source: Open-Meteo (model-derived at the activity midpoint from 15-minute values; median-temperature model selected from UKMO, ICON, and ECMWF: ECMWF IFS; WMO code rendered as text; CC BY 4.0): https://open-meteo.com/");
       expect(copiedWeatherActivity).not.toMatch(/latitude|longitude|station/i);
-    } else {
-      await expect(weatherPanel.getByRole("link", { name: /Weather data by Open-Meteo.com/ })).toHaveCount(0);
     }
     if (mobile) await expectNoHorizontalOverflow(page);
 

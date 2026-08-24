@@ -215,7 +215,41 @@ on conflict (user_id, source, source_id) do update set
 do $$
 begin
     if to_regclass('public.activity_weather') is not null then
-        execute $weather$
+        if exists (
+            select 1
+            from information_schema.columns
+            where table_schema = 'public'
+              and table_name = 'activity_weather'
+              and column_name = 'selection_method'
+        ) then
+            execute $weather_current$
+                insert into activity_weather(
+                    activity_id, provider, selection_method, model, observed_at, condition, temperature_c,
+                    apparent_temperature_c, relative_humidity_pct, wind_speed_kph,
+                    wind_direction, latitude, longitude, station_id, station_name,
+                    station_timezone, raw
+                )
+                select id, 'open-meteo', 'midpoint-15-minute-multi-model', 'ECMWF IFS', start_time,
+                    'Partly cloudy', 18.3, 17.6, 72, 14.5, 'SW', 53.3498, -6.2603, '', '',
+                    'GMT', '{"fixture":"open-meteo-weather","latitude":53.3498,"longitude":-6.2603}'::jsonb
+                from activities
+                where source_id = 'e2e-calendar-matched-run'
+                on conflict (activity_id) do update set
+                    provider = excluded.provider,
+                    selection_method = excluded.selection_method,
+                    model = excluded.model,
+                    observed_at = excluded.observed_at,
+                    condition = excluded.condition,
+                    temperature_c = excluded.temperature_c,
+                    apparent_temperature_c = excluded.apparent_temperature_c,
+                    relative_humidity_pct = excluded.relative_humidity_pct,
+                    wind_speed_kph = excluded.wind_speed_kph,
+                    wind_direction = excluded.wind_direction,
+                    raw = excluded.raw,
+                    updated_at = now()
+            $weather_current$;
+        else
+            execute $weather_legacy$
             insert into activity_weather(
                 activity_id, provider, observed_at, condition, temperature_c,
                 apparent_temperature_c, relative_humidity_pct, wind_speed_kph,
@@ -238,7 +272,8 @@ begin
                 wind_direction = excluded.wind_direction,
                 raw = excluded.raw,
                 updated_at = now()
-        $weather$;
+            $weather_legacy$;
+        end if;
     end if;
 end $$;
 

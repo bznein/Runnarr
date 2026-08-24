@@ -389,13 +389,13 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 			return nil, ctx.Err()
 		}
 		if !activityWeatherHasDisplayData(importedActivity.Weather) {
-			latitude, longitude, hasLocation := activityWeatherLocation(importedActivity)
+			referenceTime, latitude, longitude, hasLocation := activityWeatherReference(importedActivity)
 			importedActivity.Weather = nil
 			if weatherConfig.OpenMeteoFallbackEnabled {
 				if !hasLocation {
 					weatherFallbackNoLocation++
 				} else if s.weatherFallback != nil {
-					fallback, fallbackErr := s.weatherFallback.Fetch(ctx, importedActivity.StartTime, latitude, longitude)
+					fallback, fallbackErr := s.weatherFallback.Fetch(ctx, referenceTime, latitude, longitude)
 					switch {
 					case fallbackErr == nil && fallback != nil:
 						importedActivity.Weather = fallback
@@ -805,6 +805,64 @@ func activityWeatherLocation(activity ImportedActivity) (float64, float64, bool)
 		}
 	}
 	return 0, 0, false
+}
+
+func activityWeatherReference(activity ImportedActivity) (time.Time, float64, float64, bool) {
+	if activity.StartTime.IsZero() {
+		return time.Time{}, 0, 0, false
+	}
+	durationSeconds := activity.ElapsedTimeS
+	if durationSeconds <= 0 {
+		durationSeconds = activity.MovingTimeS
+	}
+	referenceTime := activity.StartTime
+	if durationSeconds > 0 {
+		referenceTime = referenceTime.Add(time.Duration(durationSeconds) * time.Second / 2)
+	}
+
+	bestIndex := -1
+	bestDistance := time.Duration(1<<63 - 1)
+	for index, sample := range activity.Samples {
+		if sample.Latitude == nil || sample.Longitude == nil || !validWeatherCoordinate(*sample.Latitude, *sample.Longitude) || sample.Timestamp == nil {
+			continue
+		}
+		distance := sample.Timestamp.Sub(referenceTime).Abs()
+		if distance < bestDistance {
+			bestIndex, bestDistance = index, distance
+		}
+	}
+	if bestIndex < 0 && durationSeconds > 0 {
+		targetElapsed := durationSeconds / 2
+		bestElapsedDistance := int(^uint(0) >> 1)
+		for index, sample := range activity.Samples {
+			if sample.Latitude == nil || sample.Longitude == nil || !validWeatherCoordinate(*sample.Latitude, *sample.Longitude) || sample.ElapsedS == nil {
+				continue
+			}
+			distance := absInt(*sample.ElapsedS - targetElapsed)
+			if distance < bestElapsedDistance {
+				bestIndex, bestElapsedDistance = index, distance
+			}
+		}
+	}
+	if bestIndex < 0 {
+		middle := len(activity.Samples) / 2
+		bestSampleDistance := int(^uint(0) >> 1)
+		for index, sample := range activity.Samples {
+			if sample.Latitude == nil || sample.Longitude == nil || !validWeatherCoordinate(*sample.Latitude, *sample.Longitude) {
+				continue
+			}
+			distance := absInt(index - middle)
+			if distance < bestSampleDistance {
+				bestIndex, bestSampleDistance = index, distance
+			}
+		}
+	}
+	if bestIndex >= 0 {
+		sample := activity.Samples[bestIndex]
+		return referenceTime, *sample.Latitude, *sample.Longitude, true
+	}
+	latitude, longitude, ok := activityWeatherLocation(activity)
+	return referenceTime, latitude, longitude, ok
 }
 
 func appendWeatherFallbackError(current []string, activity GarminBridgeActivity, err error) []string {
