@@ -54,10 +54,11 @@ func garminBridgeErrorIsNotFound(code, message string) bool {
 }
 
 type GarminService struct {
-	store        *Store
-	bridge       GarminBridge
-	tokenDir     string
-	legacyUserID string
+	store           *Store
+	bridge          GarminBridge
+	weatherFallback *OpenMeteoWeatherService
+	tokenDir        string
+	legacyUserID    string
 }
 
 type GarminBridge interface {
@@ -315,9 +316,18 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		}
 		return nil, err
 	}
+	weatherConfig, err := s.store.GetWeatherConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load weather settings: %w", err)
+	}
 
 	imported := 0
 	failed := 0
+	weatherFallbackImported := 0
+	weatherFallbackFailed := 0
+	weatherFallbackRateLimited := 0
+	weatherFallbackNoLocation := 0
+	weatherFallbackErrors := make([]string, 0, 5)
 	skippedExcluded := 0
 	autoMatches := make([]map[string]string, 0)
 	firstErrors := make([]string, 0, 5)
@@ -378,6 +388,28 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		if !activityWeatherHasDisplayData(importedActivity.Weather) {
+			latitude, longitude, hasLocation := activityWeatherLocation(importedActivity)
+			importedActivity.Weather = nil
+			if weatherConfig.OpenMeteoFallbackEnabled {
+				if !hasLocation {
+					weatherFallbackNoLocation++
+				} else if s.weatherFallback != nil {
+					fallback, fallbackErr := s.weatherFallback.Fetch(ctx, importedActivity.StartTime, latitude, longitude)
+					switch {
+					case fallbackErr == nil && fallback != nil:
+						importedActivity.Weather = fallback
+						weatherFallbackImported++
+					case errors.Is(fallbackErr, ErrOpenMeteoRateLimited):
+						weatherFallbackRateLimited++
+						weatherFallbackErrors = appendWeatherFallbackError(weatherFallbackErrors, source, fallbackErr)
+					case fallbackErr != nil:
+						weatherFallbackFailed++
+						weatherFallbackErrors = appendWeatherFallbackError(weatherFallbackErrors, source, fallbackErr)
+					}
+				}
+			}
+		}
 		activityID, err := s.store.SaveImportedActivity(ctx, garminProvider, source.ID, nil, importedActivity)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -411,17 +443,22 @@ func (s *GarminService) Sync(ctx context.Context, opts GarminSyncOptions, progre
 	}
 
 	return map[string]any{
-		"provider":        garminProvider,
-		"stage":           "Completed",
-		"activities":      len(activities),
-		"processed":       len(activities),
-		"imported":        imported,
-		"failed":          failed,
-		"skippedExcluded": skippedExcluded,
-		"firstErrors":     firstErrors,
-		"oldest":          oldest.Format("2006-01-02"),
-		"allData":         opts.AllData,
-		"autoMatches":     autoMatches,
+		"provider":                   garminProvider,
+		"stage":                      "Completed",
+		"activities":                 len(activities),
+		"processed":                  len(activities),
+		"imported":                   imported,
+		"failed":                     failed,
+		"skippedExcluded":            skippedExcluded,
+		"firstErrors":                firstErrors,
+		"oldest":                     oldest.Format("2006-01-02"),
+		"allData":                    opts.AllData,
+		"autoMatches":                autoMatches,
+		"weatherFallbackImported":    weatherFallbackImported,
+		"weatherFallbackFailed":      weatherFallbackFailed,
+		"weatherFallbackRateLimited": weatherFallbackRateLimited,
+		"weatherFallbackNoLocation":  weatherFallbackNoLocation,
+		"weatherFallbackErrors":      weatherFallbackErrors,
 	}, nil
 }
 
@@ -700,18 +737,18 @@ func applyGarminWorkoutMetadata(activity *ImportedActivity, source GarminBridgeA
 	if source.Weather != nil {
 		activity.Weather = activityWeatherFromGarmin(*source.Weather)
 	}
+	if source.Raw != nil {
+		if activity.Raw == nil {
+			activity.Raw = map[string]any{}
+		}
+		activity.Raw["garmin_workout"] = source.Raw
+	}
 	if !source.Available {
 		return
 	}
 	activity.ReplaceWorkoutMetadata = true
 	activity.Workout = source.Workout
 	activity.Intervals = append([]ActivityInterval(nil), source.Intervals...)
-	if activity.Raw == nil {
-		activity.Raw = map[string]any{}
-	}
-	if source.Raw != nil {
-		activity.Raw["garmin_workout"] = source.Raw
-	}
 	applyGarminLapMetadata(&activity.Laps, source.Laps)
 	for _, interval := range source.Intervals {
 		for _, lapIndex := range interval.LapIndexes {
@@ -748,6 +785,33 @@ func activityWeatherFromGarmin(source GarminBridgeWeather) *ActivityWeather {
 		StationTimezone:      strings.TrimSpace(source.StationTimezone),
 		Raw:                  source.Raw,
 	}
+}
+
+func activityWeatherHasDisplayData(weather *ActivityWeather) bool {
+	return weather != nil && (strings.TrimSpace(weather.Condition) != "" ||
+		weather.TemperatureC != nil || weather.ApparentTemperatureC != nil ||
+		weather.RelativeHumidityPct != nil || weather.WindSpeedKPH != nil ||
+		strings.TrimSpace(weather.WindDirection) != "")
+}
+
+func activityWeatherLocation(activity ImportedActivity) (float64, float64, bool) {
+	if activity.Weather != nil && activity.Weather.Latitude != nil && activity.Weather.Longitude != nil &&
+		validWeatherCoordinate(*activity.Weather.Latitude, *activity.Weather.Longitude) {
+		return *activity.Weather.Latitude, *activity.Weather.Longitude, true
+	}
+	for _, sample := range activity.Samples {
+		if sample.Latitude != nil && sample.Longitude != nil && validWeatherCoordinate(*sample.Latitude, *sample.Longitude) {
+			return *sample.Latitude, *sample.Longitude, true
+		}
+	}
+	return 0, 0, false
+}
+
+func appendWeatherFallbackError(current []string, activity GarminBridgeActivity, err error) []string {
+	if err == nil {
+		return current
+	}
+	return appendGarminSyncError(current, activity, err)
 }
 
 func fahrenheitToCelsius(value *float64) *float64 {

@@ -52,6 +52,7 @@ import type {
   WorkoutReconcileResult,
   NotificationPage,
   NotificationSettings,
+  WeatherConfig,
   PushSubscriptionDevice,
   RunnarrNotification
 } from "./types";
@@ -268,6 +269,11 @@ export const api = {
     body: JSON.stringify({ sensitivity })
   }),
   updateClimbDetectionSettings: (body: ClimbDetectionSettingsUpdate) => request<AppConfig>("/api/config/climb-detection", {
+    method: "PATCH",
+    body: JSON.stringify(body)
+  }),
+  weatherConfig: () => request<WeatherConfig>("/api/config/weather"),
+  updateWeatherConfig: (body: WeatherConfig) => request<WeatherConfig>("/api/config/weather", {
     method: "PATCH",
     body: JSON.stringify(body)
   }),

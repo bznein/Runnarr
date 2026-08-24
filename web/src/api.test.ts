@@ -167,6 +167,20 @@ describe("shared backend API contract", () => {
     expect(JSON.parse(init.body)).toMatchObject({ categories: { activity_matching: "in_app" } });
   });
 
+  it("updates the opt-in weather fallback with CSRF protection", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ openMeteoFallbackEnabled: true }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    setCsrfToken("weather-csrf");
+
+    await api.updateWeatherConfig({ openMeteoFallbackEnabled: true });
+
+    const [path, init] = fetchMock.mock.calls[0];
+    expect(path).toBe("/api/config/weather");
+    expect(init.method).toBe("PATCH");
+    expect(init.headers.get("X-CSRF-Token")).toBe("weather-csrf");
+    expect(JSON.parse(init.body)).toEqual({ openMeteoFallbackEnabled: true });
+  });
+
   it("encodes course library filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       courses: [], limit: 50, offset: 0, hasMore: false

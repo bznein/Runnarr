@@ -68,6 +68,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		return nil, fmt.Errorf("load bootstrap admin: %w", err)
 	}
 	garmin := NewGarminService(cfg, store)
+	garmin.weatherFallback = NewOpenMeteoWeatherService(store)
 	garmin.legacyUserID = adminUser.ID
 	users, err := store.ListUsers(context.Background())
 	if err != nil {
@@ -155,6 +156,8 @@ func (s *Server) Routes() http.Handler {
 			r.Patch("/config/training-sheet", s.handleUpdateTrainingSheetConfig)
 			r.Get("/config/workouts", s.handleWorkoutConfig)
 			r.Patch("/config/workouts", s.handleUpdateWorkoutConfig)
+			r.Get("/config/weather", s.handleWeatherConfig)
+			r.Patch("/config/weather", s.handleUpdateWeatherConfig)
 			r.Patch("/config/climb-detection", s.handleUpdateClimbDetection)
 			r.Post("/tools/pace", s.handleToolsPace)
 			r.Post("/tools/vdot", s.handleToolsVDOT)

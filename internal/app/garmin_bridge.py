@@ -489,15 +489,17 @@ def normalize_weather(payload):
         "stationTimezone": str(first_value(station, ("timezone", "timeZone")) or "").strip(),
         "raw": payload,
     }
-    visible_keys = (
+    usable_keys = (
         "condition",
         "temperatureF",
         "apparentTemperatureF",
         "relativeHumidityPct",
         "windSpeedMPH",
         "windDirection",
+        "latitude",
+        "longitude",
     )
-    if not any(weather[key] not in (None, "") for key in visible_keys):
+    if not any(weather[key] not in (None, "") for key in usable_keys):
         return None
     return weather
 

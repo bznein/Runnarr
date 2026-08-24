@@ -222,12 +222,13 @@ begin
                 wind_direction, latitude, longitude, station_id, station_name,
                 station_timezone, raw
             )
-            select id, 'garmin', start_time, 'Partly cloudy', 18.3, 17.6, 72, 14.5,
-                'SW', 53.3498, -6.2603, 'e2e-weather-station', 'E2E Dublin Station',
-                'Europe/Dublin', '{"fixture":"garmin-weather","latitude":53.3498,"longitude":-6.2603}'::jsonb
+            select id, 'open-meteo', start_time, 'Partly cloudy', 18.3, 17.6, 72, 14.5,
+                'SW', 53.3498, -6.2603, '', '',
+                'GMT', '{"fixture":"open-meteo-weather","latitude":53.3498,"longitude":-6.2603}'::jsonb
             from activities
             where source_id = 'e2e-calendar-matched-run'
             on conflict (activity_id) do update set
+                provider = excluded.provider,
                 observed_at = excluded.observed_at,
                 condition = excluded.condition,
                 temperature_c = excluded.temperature_c,

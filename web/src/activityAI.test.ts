@@ -143,6 +143,7 @@ describe("formatActivityForAI", () => {
         gapSPKM: 295
       }],
       weather: {
+        provider: "open-meteo",
         condition: "Partly cloudy",
         temperatureC: 18.3,
         apparentTemperatureC: 17.6,
@@ -169,6 +170,7 @@ describe("formatActivityForAI", () => {
     expect(result).toContain("- Feels like: 17.6 °C");
     expect(result).toContain("- Humidity: 72%");
     expect(result).toContain("- Wind: SW 14.5 km/h");
+    expect(result).toContain("- Source: Open-Meteo (model-derived, nearest hour; WMO code rendered as text; CC BY 4.0): https://open-meteo.com/");
     expect(result).toContain("## Notes\n\n> Felt controlled.");
     expect(result).toContain("## Workout\n- Name: Threshold Repeats");
     expect(result).toContain("## Intervals");

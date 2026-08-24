@@ -539,6 +539,7 @@ test.describe("local product journey", () => {
       await expect(weatherPanel.getByText("17.6 °C", { exact: true })).toBeVisible();
       await expect(weatherPanel.getByText("72%", { exact: true })).toBeVisible();
       await expect(weatherPanel.getByText("SW 14.5 km/h", { exact: true })).toBeVisible();
+      await expect(weatherPanel.getByRole("link", { name: /Weather data by Open-Meteo.com/ })).toHaveAttribute("href", "https://open-meteo.com/");
       await page.getByRole("button", { name: "Activity actions" }).click();
       await page.getByRole("menuitem", { name: "Copy for AI" }).click();
       await expect(page.getByRole("status")).toHaveText("Activity copied for AI.");
@@ -546,6 +547,7 @@ test.describe("local product journey", () => {
       expect(copiedWeatherActivity).toContain("## Weather");
       expect(copiedWeatherActivity).toContain("- Conditions: Partly cloudy");
       expect(copiedWeatherActivity).toContain("- Temperature: 18.3 °C");
+      expect(copiedWeatherActivity).toContain("- Source: Open-Meteo (model-derived, nearest hour; WMO code rendered as text; CC BY 4.0): https://open-meteo.com/");
       expect(copiedWeatherActivity).not.toMatch(/latitude|longitude|station/i);
     } else {
       await expect(page.getByLabel("Activity weather")).toHaveCount(0);
@@ -1136,6 +1138,23 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sync health", exact: true })).toBeVisible();
     await expect(page.getByText("Health from", { exact: true })).toBeVisible();
+    if (!visualBaseline) {
+      const weatherSettings = page.locator("#weather");
+      const weatherFallback = weatherSettings.getByRole("checkbox", { name: "Use Open-Meteo fallback" });
+      await expect(weatherSettings).toContainText("Activity weather fallback");
+      await expect(weatherFallback).not.toBeChecked();
+      await weatherFallback.check();
+      await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith("/api/config/weather") && response.request().method() === "PATCH" && response.ok()),
+        weatherSettings.getByRole("button", { name: "Save weather settings" }).click()
+      ]);
+      await expect(weatherSettings).toContainText("Weather settings saved");
+      await weatherFallback.uncheck();
+      await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith("/api/config/weather") && response.request().method() === "PATCH" && response.ok()),
+        weatherSettings.getByRole("button", { name: "Save weather settings" }).click()
+      ]);
+    }
     if (mobile) {
       await expect(page.locator(".mobile-header-title")).toHaveText("Settings");
       await expect(page.locator('input[type="file"][accept=".gpx,.tcx,.fit"]')).toBeVisible();

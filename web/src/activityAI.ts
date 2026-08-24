@@ -69,7 +69,8 @@ export function formatActivityForAI(activity: Activity, context?: ActivityAICont
       ["Temperature", formatWeatherTemperature(activity.weather.temperatureC)],
       ["Feels like", formatWeatherTemperature(activity.weather.apparentTemperatureC)],
       ["Humidity", formatWeatherPercent(activity.weather.relativeHumidityPct)],
-      ["Wind", formatWeatherWind(activity.weather.windDirection, activity.weather.windSpeedKPH)]
+      ["Wind", formatWeatherWind(activity.weather.windDirection, activity.weather.windSpeedKPH)],
+      ["Source", activity.weather.provider === "open-meteo" ? "Open-Meteo (model-derived, nearest hour; WMO code rendered as text; CC BY 4.0): https://open-meteo.com/" : undefined]
     ]);
   }
 
