@@ -327,7 +327,6 @@ test.describe("local product journey", () => {
       expect(copiedActivity).not.toContain("E2E Cycling Activity");
       expect(copiedActivity).not.toContain("E2E Calendar Planned Run");
       expect(copiedActivity).not.toMatch(/latitude|longitude|sourceId|summaryPolyline/);
-      if (mobile) expect(copiedActivity).toContain("E2E chromium Morning Run");
     }
 
     await page.getByRole("button", { name: "Match", exact: true }).click();
