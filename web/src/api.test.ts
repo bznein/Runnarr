@@ -95,6 +95,24 @@ describe("shared backend API contract", () => {
     expect(requestURL).toContain("matchState=attention");
   });
 
+  it("scans and applies one confirmed training-sheet reconciliation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ nextOffset: 4, scanned: 4, skipped: 0, done: false }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ updated: 1 }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    setCsrfToken("reconcile-csrf");
+
+    await api.nextTrainingSheetReconciliation("2026-05-01", 0);
+    await api.applyTrainingSheetReconciliation({ plannedActivityId: "planned", activityId: "activity", fingerprint: "live-sheet" });
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/training-sheet/reconciliation?notBefore=2026-05-01&offset=0");
+    const [path, init] = fetchMock.mock.calls[1];
+    expect(path).toBe("/api/training-sheet/reconciliation");
+    expect(init.method).toBe("POST");
+    expect(init.headers.get("X-CSRF-Token")).toBe("reconcile-csrf");
+    expect(JSON.parse(init.body)).toEqual({ plannedActivityId: "planned", activityId: "activity", fingerprint: "live-sheet" });
+  });
+
   it("encodes notification pagination and unread filters", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       notifications: [],

@@ -1217,6 +1217,73 @@ textarea {
   gap: 10px;
 }
 
+.training-sheet-reconciliation-launcher {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.training-sheet-reconciliation-launcher p {
+  margin: 7px 0 0;
+}
+
+.training-sheet-reconciliation-dialog {
+  width: min(100%, 640px);
+}
+
+.training-sheet-reconciliation-progress,
+.training-sheet-reconciliation-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.training-sheet-reconciliation-progress span {
+  padding: 6px 9px;
+  border-radius: 6px;
+  color: var(--color-text-soft);
+  background: var(--color-surface-muted);
+}
+
+.training-sheet-reconciliation-review,
+.training-sheet-reconciliation-changes {
+  display: grid;
+  gap: 12px;
+}
+
+.training-sheet-reconciliation-change {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface-muted);
+}
+
+.training-sheet-reconciliation-change del {
+  color: var(--color-danger);
+}
+
+@media (max-width: 720px) {
+  .training-sheet-reconciliation-launcher {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .training-sheet-reconciliation-change {
+    display: grid;
+  }
+
+  .training-sheet-reconciliation-confirm-actions {
+    width: 100%;
+  }
+}
+
 .date-preset-grid {
   display: flex;
   flex-wrap: wrap;

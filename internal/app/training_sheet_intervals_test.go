@@ -1,6 +1,7 @@
 package app
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -95,7 +96,7 @@ func TestIntervalUpdatesForRecordsUsesWeightedAggregatesAndRepNumbers(t *testing
 	if len(updates) != 11 {
 		t.Fatalf("update count = %d, want 11", len(updates))
 	}
-	if value := updateValue(updates, "'Week'!B5"); value != "'3:09" {
+	if value := updateValue(updates, "'Week'!B5"); value != "'3:10" {
 		t.Fatalf("weighted pace = %#v", value)
 	}
 	if value := updateValue(updates, "'Week'!C5"); value != "'155" {
@@ -109,6 +110,22 @@ func TestIntervalUpdatesForRecordsUsesWeightedAggregatesAndRepNumbers(t *testing
 	}
 	if value := updateValue(updates, "'Week'!E7"); value != 2 {
 		t.Fatalf("slowest repetition = %#v", value)
+	}
+}
+
+func TestAggregateWorkoutRecordsPrefersProviderPaces(t *testing.T) {
+	providerPaceOne, providerPaceTwo := 196.0, 190.0
+	records := []trainingSheetWorkoutRecord{
+		{DurationS: 60, MovingTimeS: 59, DistanceM: 305, AvgPaceSPKM: &providerPaceOne},
+		{DurationS: 60, MovingTimeS: 59, DistanceM: 314, AvgPaceSPKM: &providerPaceTwo},
+	}
+
+	aggregate, err := aggregateWorkoutRecords(records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aggregate.AvgPaceSPKM == nil || math.Abs(*aggregate.AvgPaceSPKM-193) > 0.0001 {
+		t.Fatalf("aggregate pace = %#v, want provider-weighted 193", aggregate.AvgPaceSPKM)
 	}
 }
 

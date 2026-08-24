@@ -62,6 +62,7 @@ import type {
   ImportFile,
   PlannedActivityMatchResponse,
   TrainingSheetWritebackPreview,
+  TrainingSheetReconciliationItem,
   Session,
   SyncJob,
   TrainingSheetPreviewChange,
@@ -6910,6 +6911,12 @@ function TrainingSheetSettings() {
   const [sheetURL, setSheetURL] = useState("");
   const [checkEveryHours, setCheckEveryHours] = useState(24);
   const [planYear, setPlanYear] = useState(new Date().getFullYear());
+  const [reconcileNotBefore, setReconcileNotBefore] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() - 90);
+    return localDateString(date);
+  });
+  const [reconcileOpen, setReconcileOpen] = useState(false);
   const jobs = useQuery({ queryKey: ["sync-jobs"], queryFn: api.syncJobs, refetchInterval: 2000 });
   useEffect(() => {
     if (!config.data) return;
@@ -6952,6 +6959,13 @@ function TrainingSheetSettings() {
           <button className="secondary-button small-button" type="button" disabled={!canSync || trainingSheetSyncRunning} onClick={() => sync.mutate()}>{trainingSheetSyncRunning ? "Syncing..." : "Sync now"}</button>
           <SyncJobCancelButton job={trainingSheetJob} compact />
         </div>
+        <div className="training-sheet-reconciliation-launcher">
+          <label className="field"><span>Reconcile activities back to</span><input type="date" value={reconcileNotBefore} max={localDateString()} onChange={(event) => setReconcileNotBefore(event.target.value)} /></label>
+          <div>
+            <button className="secondary-button small-button" type="button" disabled={!canSync || trainingSheetSyncRunning || !reconcileNotBefore} onClick={() => setReconcileOpen(true)}>Reconcile interval paces</button>
+            <p className="muted">Scans matched activities from newest to oldest and stops at this date. Every sheet correction requires confirmation.</p>
+          </div>
+        </div>
         {trainingSheetSyncRunning && <p className="muted">Training plan sync is running{syncStage ? `: ${syncStage}` : "..."}</p>}
         {trainingSheetJob?.status === "completed" && <p className="muted">Training plan sync completed.</p>}
         {trainingSheetJob?.status === "canceled" && <p className="muted">Training plan sync canceled.</p>}
@@ -6959,8 +6973,127 @@ function TrainingSheetSettings() {
         {config.data?.lastSyncedAt && <p className="muted">Last synced: {config.data.lastSyncedAt}</p>}
         {save.error && <div className="error">{save.error instanceof Error ? save.error.message : "Could not save training sheet settings"}</div>}
         {sync.error && <div className="error">{sync.error instanceof Error ? sync.error.message : "Training sheet sync failed"}</div>}
+        {reconcileOpen && <TrainingSheetReconciliationDialog notBefore={reconcileNotBefore} onClose={() => setReconcileOpen(false)} />}
       </div>
     </details>
+  );
+}
+
+function TrainingSheetReconciliationDialog({ notBefore, onClose }: { notBefore: string; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const initialScanStarted = useRef(false);
+  const [item, setItem] = useState<TrainingSheetReconciliationItem>();
+  const [offset, setOffset] = useState(0);
+  const [scanned, setScanned] = useState(0);
+  const [skipped, setSkipped] = useState(0);
+  const [fixed, setFixed] = useState(0);
+  const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState("");
+
+  const scan = async (startOffset: number) => {
+    setLoading(true);
+    setError("");
+    setItem(undefined);
+    let nextOffset = startOffset;
+    try {
+      while (true) {
+        const result = await api.nextTrainingSheetReconciliation(notBefore, nextOffset);
+        setScanned((count) => count + result.scanned);
+        setSkipped((count) => count + result.skipped);
+        nextOffset = result.nextOffset;
+        setOffset(nextOffset);
+        if (result.item) {
+          setItem(result.item);
+          setDone(false);
+          return;
+        }
+        if (result.done) {
+          setDone(true);
+          return;
+        }
+      }
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : "Could not scan the training sheet");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (initialScanStarted.current) return;
+    initialScanStarted.current = true;
+    void scan(0);
+  }, [notBefore]);
+
+  const apply = async () => {
+    if (!item) return;
+    setApplying(true);
+    setError("");
+    try {
+      await api.applyTrainingSheetReconciliation({
+        plannedActivityId: item.plannedActivityId,
+        activityId: item.activityId,
+        fingerprint: item.fingerprint
+      });
+      setFixed((count) => count + 1);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["planned-activities"] })
+      ]);
+      await scan(offset);
+    } catch (applyError) {
+      setError(applyError instanceof Error ? applyError.message : "Could not update the training sheet");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <section className="filter-dialog training-sheet-reconciliation-dialog" role="dialog" aria-modal="true" aria-labelledby="training-sheet-reconciliation-title">
+        <div className="dialog-header">
+          <div><div className="eyebrow">Training sheet</div><h2 id="training-sheet-reconciliation-title">Reconcile interval paces</h2></div>
+          <button className="icon-button" type="button" aria-label="Stop reconciliation" onClick={onClose}><X size={16} /></button>
+        </div>
+        <p className="muted">Scanning newest to oldest through {formatDate(`${notBefore}T12:00:00`)}. Closing this dialog stops immediately; no unconfirmed value is changed.</p>
+        <div className="training-sheet-reconciliation-progress" aria-live="polite">
+          <span><strong>{scanned}</strong> scanned</span>
+          <span><strong>{fixed}</strong> fixed</span>
+          {skipped > 0 && <span><strong>{skipped}</strong> not applicable</span>}
+        </div>
+        {loading && <div className="muted">Checking activity {scanned + 1}…</div>}
+        {!loading && item && (
+          <div className="training-sheet-reconciliation-review">
+            <div>
+              <strong>{item.activityName || item.plannedName}</strong>
+              <div className="muted">{formatDate(item.activityStartTime)} · {item.sheetTitle}</div>
+            </div>
+            <div className="training-sheet-reconciliation-changes">
+              {item.changes.map((change) => (
+                <div className="training-sheet-reconciliation-change" key={change.range}>
+                  <span>{change.label}</span>
+                  <span><del>{change.currentValue || "blank"}</del><span aria-hidden="true"> → </span><strong>{change.proposedValue}</strong></span>
+                </div>
+              ))}
+            </div>
+            {item.sheetUrl && <a href={item.sheetUrl} target="_blank" rel="noreferrer">Open source sheet <ExternalLink size={13} /></a>}
+          </div>
+        )}
+        {!loading && done && <div className="empty-state-copy"><strong>Reconciliation complete</strong><span className="muted">No more discrepancies were found before the selected cutoff.</span></div>}
+        {error && <div className="error" role="alert">{error}</div>}
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" disabled={applying} onClick={onClose}>Stop</button>
+          <div className="training-sheet-reconciliation-confirm-actions">
+            {error && <button className="secondary-button" type="button" disabled={loading || applying} onClick={() => void scan(item ? Math.max(0, offset - 1) : offset)}>Try again</button>}
+            {item && <button className="secondary-button" type="button" disabled={loading || applying} onClick={() => void scan(offset)}>Skip</button>}
+            {item && <button className="primary-button" type="button" disabled={loading || applying} onClick={() => void apply()}>{applying ? "Fixing…" : `Confirm and fix ${item.changes.length}`}</button>}
+            {done && <button className="primary-button" type="button" onClick={onClose}>Done</button>}
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 

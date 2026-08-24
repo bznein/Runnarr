@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -314,6 +315,73 @@ func (s *Server) handleTrainingSheetWriteback(w http.ResponseWriter, r *http.Req
 	}
 	go s.runTrainingSheetWritebackJob(jobID, planned.ID, activityID, scope)
 	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": jobID, "status": "running", "writebackScope": scope})
+}
+
+type trainingSheetReconciliationApplyRequest struct {
+	PlannedActivityID string `json:"plannedActivityId"`
+	ActivityID        string `json:"activityId"`
+	Fingerprint       string `json:"fingerprint"`
+}
+
+func (s *Server) handleNextTrainingSheetReconciliation(w http.ResponseWriter, r *http.Request) {
+	notBefore := time.Now().UTC().AddDate(0, 0, -90)
+	if raw := strings.TrimSpace(r.URL.Query().Get("notBefore")); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "notBefore must use YYYY-MM-DD")
+			return
+		}
+		notBefore = parsed
+	}
+	offset := 0
+	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			return
+		}
+		offset = parsed
+	}
+	result, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).NextReconciliation(r.Context(), notBefore, offset)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleApplyTrainingSheetReconciliation(w http.ResponseWriter, r *http.Request) {
+	var body trainingSheetReconciliationApplyRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.PlannedActivityID) == "" || strings.TrimSpace(body.ActivityID) == "" || strings.TrimSpace(body.Fingerprint) == "" {
+		writeError(w, http.StatusBadRequest, "plannedActivityId, activityId, and fingerprint are required")
+		return
+	}
+	if err := reconciliationCandidateExists(r.Context(), s.store, strings.TrimSpace(body.PlannedActivityID), strings.TrimSpace(body.ActivityID)); errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "matched training-sheet activity not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load matched training-sheet activity")
+		return
+	}
+	if running, err := s.store.HasRunningSyncJob(r.Context(), trainingSheetProvider); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not check training-sheet job state")
+		return
+	} else if running {
+		writeError(w, http.StatusConflict, "a training sheet job is already running")
+		return
+	}
+	count, err := NewTrainingSheetWritebackService(s.store, s.googleAuth()).ApplyReconciliation(
+		r.Context(), strings.TrimSpace(body.PlannedActivityID), strings.TrimSpace(body.ActivityID), strings.TrimSpace(body.Fingerprint),
+	)
+	if errors.Is(err, errTrainingSheetReconciliationChanged) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"updated": count})
 }
 
 func trainingSheetWritebackRetryScope(writeback *TrainingSheetWritebackStatus) trainingSheetWritebackScope {

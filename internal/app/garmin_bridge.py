@@ -402,7 +402,10 @@ def normalize_interval(item, fallback_index, laps_by_index, repeat_counts):
         "elapsedTimeS": rounded_seconds(item.get("elapsedDuration") or item.get("duration")),
         "movingTimeS": rounded_seconds(item.get("movingDuration") or item.get("duration")),
         "distanceM": parse_number(item.get("distance")) or 0,
-        "avgPaceSPKM": pace_from_speed(item.get("averageMovingSpeed") or item.get("averageSpeed")),
+        # Garmin Connect displays interval pace from averageSpeed. Prefer that
+        # provider metric over averageMovingSpeed so Runnarr matches Garmin's
+        # interval summary instead of silently showing a faster moving pace.
+        "avgPaceSPKM": pace_from_speed(item.get("averageSpeed") or item.get("averageMovingSpeed")),
         "avgGradeAdjustedPaceSPKM": pace_from_speed(item.get("avgGradeAdjustedSpeed")),
         "avgHeartRate": parse_number(item.get("averageHR")),
         "maxHeartRate": parse_number(item.get("maxHR")),

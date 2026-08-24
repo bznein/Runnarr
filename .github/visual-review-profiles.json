@@ -55,6 +55,11 @@
       "id": "notifications",
       "tag": "@visual-notifications",
       "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "training-sheet-reconciliation",
+      "tag": "@visual-training-sheet-reconciliation",
+      "viewports": ["desktop", "mobile"]
     }
   ]
 }
