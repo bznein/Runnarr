@@ -540,7 +540,7 @@ test.describe("local product journey", () => {
     await expect(weatherPanel.getByText("SW 14.5 km/h", { exact: true })).toBeVisible();
     await expect(weatherPanel.getByRole("link", { name: /Weather data by Open-Meteo.com/ })).toHaveAttribute("href", "https://open-meteo.com/");
     if (!visualBaseline) {
-      await expect(weatherPanel).toContainText("activity midpoint from 15-minute values");
+      await expect(weatherPanel).toContainText("Mid-activity 15-minute model data");
       await expect(weatherPanel).toContainText("ECMWF IFS");
       await page.getByRole("button", { name: "Activity actions" }).click();
       await page.getByRole("menuitem", { name: "Copy for AI" }).click();

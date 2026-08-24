@@ -6,12 +6,12 @@ const archiveMethod = "midpoint-nearest-hour-archive";
 export function openMeteoUIAttribution(weather: ActivityWeather) {
   if (weather.selectionMethod === multiModelMethod) {
     const selectedModel = weather.model?.trim() ? ` (${weather.model.trim()})` : "";
-    return `Model-derived at the activity midpoint from 15-minute values. The median-temperature model among UKMO, ICON, and ECMWF supplied this record${selectedModel}. WMO code rendered as text.`;
+    return `Mid-activity 15-minute model data. Median-temperature record from UKMO, ICON, and ECMWF${selectedModel}. WMO code shown as text.`;
   }
   if (weather.selectionMethod === archiveMethod) {
-    return "Model-derived at the activity midpoint from the nearest-hour archive value. WMO code rendered as text.";
+    return "Mid-activity model data from the nearest-hour archive value. WMO code shown as text.";
   }
-  return "Model-derived conditions. WMO code rendered as text.";
+  return "Model-derived conditions. WMO code shown as text.";
 }
 
 export function openMeteoAISource(weather: ActivityWeather) {

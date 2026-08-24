@@ -9,7 +9,7 @@ describe("Open-Meteo attribution", () => {
       model: "ECMWF IFS"
     };
 
-    expect(openMeteoUIAttribution(weather)).toContain("median-temperature model among UKMO, ICON, and ECMWF");
+    expect(openMeteoUIAttribution(weather)).toContain("Median-temperature record from UKMO, ICON, and ECMWF");
     expect(openMeteoUIAttribution(weather)).toContain("ECMWF IFS");
     expect(openMeteoAISource(weather)).toContain("activity midpoint from 15-minute values");
   });
@@ -24,7 +24,7 @@ describe("Open-Meteo attribution", () => {
   it("does not mislabel legacy rows", () => {
     const weather = { provider: "open-meteo" };
 
-    expect(openMeteoUIAttribution(weather)).toBe("Model-derived conditions. WMO code rendered as text.");
+    expect(openMeteoUIAttribution(weather)).toBe("Model-derived conditions. WMO code shown as text.");
     expect(openMeteoAISource(weather)).not.toMatch(/midpoint|median|nearest-hour/);
   });
 });
