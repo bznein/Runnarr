@@ -532,13 +532,13 @@ test.describe("local product journey", () => {
     await expect(weatherActivity).toBeVisible();
     await weatherActivity.click();
     await expect(page.getByRole("heading", { name: "E2E Calendar Matched Run" })).toBeVisible();
+    const weatherPanel = page.getByLabel("Activity weather");
+    await expect(weatherPanel).toContainText("Partly cloudy");
+    await expect(weatherPanel.getByText("18.3 °C", { exact: true })).toBeVisible();
+    await expect(weatherPanel.getByText("17.6 °C", { exact: true })).toBeVisible();
+    await expect(weatherPanel.getByText("72%", { exact: true })).toBeVisible();
+    await expect(weatherPanel.getByText("SW 14.5 km/h", { exact: true })).toBeVisible();
     if (!visualBaseline) {
-      const weatherPanel = page.getByLabel("Activity weather");
-      await expect(weatherPanel).toContainText("Partly cloudy");
-      await expect(weatherPanel.getByText("18.3 °C", { exact: true })).toBeVisible();
-      await expect(weatherPanel.getByText("17.6 °C", { exact: true })).toBeVisible();
-      await expect(weatherPanel.getByText("72%", { exact: true })).toBeVisible();
-      await expect(weatherPanel.getByText("SW 14.5 km/h", { exact: true })).toBeVisible();
       await expect(weatherPanel.getByRole("link", { name: /Weather data by Open-Meteo.com/ })).toHaveAttribute("href", "https://open-meteo.com/");
       await page.getByRole("button", { name: "Activity actions" }).click();
       await page.getByRole("menuitem", { name: "Copy for AI" }).click();
@@ -550,7 +550,7 @@ test.describe("local product journey", () => {
       expect(copiedWeatherActivity).toContain("- Source: Open-Meteo (model-derived, nearest hour; WMO code rendered as text; CC BY 4.0): https://open-meteo.com/");
       expect(copiedWeatherActivity).not.toMatch(/latitude|longitude|station/i);
     } else {
-      await expect(page.getByLabel("Activity weather")).toHaveCount(0);
+      await expect(weatherPanel.getByRole("link", { name: /Weather data by Open-Meteo.com/ })).toHaveCount(0);
     }
     if (mobile) await expectNoHorizontalOverflow(page);
 
