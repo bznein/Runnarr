@@ -978,6 +978,7 @@ test.describe("local product journey", () => {
 
   test("covers calendar, health, gear, tools, and settings", { tag: "@visual-app-settings" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
+    const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     let reconciliationApplied = false;
     await page.route("**/api/config/training-sheet", async (route) => {
       await route.fulfill({
@@ -1121,19 +1122,21 @@ test.describe("local product journey", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
     await expect(themePicker.getByRole("radio", { name: "Midnight" })).toBeChecked();
 
-    const trainingSheet = page.locator("#training-sheet");
-    await trainingSheet.locator("summary").click();
-    await expect(trainingSheet.getByRole("button", { name: "Reconcile interval paces" })).toBeEnabled();
-    await trainingSheet.getByRole("button", { name: "Reconcile interval paces" }).click();
-    const reconciliationDialog = page.getByRole("dialog", { name: "Reconcile interval paces" });
-    await expect(reconciliationDialog).toBeVisible();
-    await expect(reconciliationDialog.getByText("E2E Garmin Fartlek", { exact: true })).toBeVisible();
-    await expect(reconciliationDialog.getByText("3:08", { exact: true })).toBeVisible();
-    await expect(reconciliationDialog.getByText("3:16", { exact: true })).toBeVisible();
-    await reconciliationDialog.getByRole("button", { name: "Confirm and fix 1" }).click();
-    await expect.poll(() => reconciliationApplied).toBe(true);
-    await expect(reconciliationDialog.getByText("Reconciliation complete", { exact: true })).toBeVisible();
-    await expect(reconciliationDialog.getByText("1 fixed", { exact: true })).toBeVisible();
+    if (!visualBaseline) {
+      const trainingSheet = page.locator("#training-sheet");
+      await trainingSheet.locator("summary").click();
+      await expect(trainingSheet.getByRole("button", { name: "Reconcile interval paces" })).toBeEnabled();
+      await trainingSheet.getByRole("button", { name: "Reconcile interval paces" }).click();
+      const reconciliationDialog = page.getByRole("dialog", { name: "Reconcile interval paces" });
+      await expect(reconciliationDialog).toBeVisible();
+      await expect(reconciliationDialog.getByText("E2E Garmin Fartlek", { exact: true })).toBeVisible();
+      await expect(reconciliationDialog.getByText("3:08", { exact: true })).toBeVisible();
+      await expect(reconciliationDialog.getByText("3:16", { exact: true })).toBeVisible();
+      await reconciliationDialog.getByRole("button", { name: "Confirm and fix 1" }).click();
+      await expect.poll(() => reconciliationApplied).toBe(true);
+      await expect(reconciliationDialog.getByText("Reconciliation complete", { exact: true })).toBeVisible();
+      await expect(reconciliationDialog.getByText("1 fixed", { exact: true })).toBeVisible();
+    }
     if (mobile) await expectNoHorizontalOverflow(page);
   });
 
