@@ -628,6 +628,8 @@ export type Activity = {
 
 export type ActivityWeather = {
   provider?: string;
+  selectionMethod?: string;
+  model?: string;
   observedAt?: string;
   condition?: string;
   temperatureC?: number;

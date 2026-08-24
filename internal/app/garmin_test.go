@@ -234,6 +234,33 @@ func TestActivityWeatherLocationUsesGarminCoordinatesBeforeSamples(t *testing.T)
 	}
 }
 
+func TestActivityWeatherReferenceUsesRouteMidpointTimeAndCoordinates(t *testing.T) {
+	start := time.Date(2026, 8, 24, 6, 24, 0, 0, time.UTC)
+	garminLatitude, garminLongitude := 53.1, -7.2
+	startLatitude, startLongitude := 52.945, -7.218
+	midpointLatitude, midpointLongitude := 52.910, -7.296
+	finishLatitude, finishLongitude := 52.945, -7.218
+	startElapsed, midpointElapsed, finishElapsed := 0, 2700, 5400
+	startSampleTime := start
+	midpointSampleTime := start.Add(45 * time.Minute)
+	finishSampleTime := start.Add(90 * time.Minute)
+	activity := ImportedActivity{
+		StartTime:    start,
+		ElapsedTimeS: 5400,
+		Weather:      &ActivityWeather{Latitude: &garminLatitude, Longitude: &garminLongitude},
+		Samples: []ActivitySample{
+			{Timestamp: &startSampleTime, ElapsedS: &startElapsed, Latitude: &startLatitude, Longitude: &startLongitude},
+			{Timestamp: &midpointSampleTime, ElapsedS: &midpointElapsed, Latitude: &midpointLatitude, Longitude: &midpointLongitude},
+			{Timestamp: &finishSampleTime, ElapsedS: &finishElapsed, Latitude: &finishLatitude, Longitude: &finishLongitude},
+		},
+	}
+
+	referenceTime, latitude, longitude, ok := activityWeatherReference(activity)
+	if !ok || !referenceTime.Equal(midpointSampleTime) || latitude != midpointLatitude || longitude != midpointLongitude {
+		t.Fatalf("reference = (%v, %v, %v, %v), want route midpoint", referenceTime, latitude, longitude, ok)
+	}
+}
+
 func TestGradeAdjustedPaceFromSpeedMPS(t *testing.T) {
 	speed := 3.2
 	pace := gradeAdjustedPaceFromSpeedMPS(&speed)

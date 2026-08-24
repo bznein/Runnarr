@@ -30,6 +30,7 @@ import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
 import { trainingSheetSourceURL } from "./trainingSheetLink";
 import { courseDistanceMarkers, kilometreMarkerStride, routePointDistanceM } from "./courseDistanceMarkers";
 import { formatActivityForAI } from "./activityAI";
+import { openMeteoUIAttribution } from "./weatherAttribution";
 import { copyTextToClipboard } from "./clipboard";
 import type {
   Activity,
@@ -6782,7 +6783,7 @@ function WeatherSettings({ canWrite }: { canWrite: boolean }) {
     <section id="weather" className="panel workout-settings-panel weather-settings-panel">
       <div>
         <div className="panel-heading">Activity weather fallback</div>
-        <p className="muted">Garmin weather remains the first choice. When it is missing, this can send the activity’s rounded start coordinates and start date to Open-Meteo and store the nearest hourly model result.</p>
+        <p className="muted">Garmin weather remains the first choice. When it is missing, this sends the activity’s rounded midpoint coordinates and date to Open-Meteo. Recent activities use 15-minute UKMO, ICON, and ECMWF values and retain the complete record from the median-temperature model; older activities use the nearest hourly archive value.</p>
       </div>
       <div className="workout-settings-controls">
         <label className="checkbox-field"><input type="checkbox" disabled={!canWrite || config.isLoading || save.isPending} checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Use Open-Meteo fallback</label>
@@ -8043,7 +8044,7 @@ function ActivityWeatherPanel({ weather }: { weather: ActivityWeather }) {
       {items.length > 0 && <div className="activity-weather-values">
         {items.map((item) => <span key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
       </div>}
-      {weather.provider === "open-meteo" && <p className="muted activity-weather-attribution">Model-derived, nearest-hour conditions; WMO code rendered as text. <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather data by Open-Meteo.com <ExternalLink size={12} aria-hidden /></a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a></p>}
+      {weather.provider === "open-meteo" && <p className="muted activity-weather-attribution">{openMeteoUIAttribution(weather)} <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather data by Open-Meteo.com <ExternalLink size={12} aria-hidden /></a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a></p>}
     </section>
   );
 }

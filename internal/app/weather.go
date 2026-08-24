@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,12 +31,27 @@ const (
 	openMeteoDailyRequestLimit   = 9000
 	openMeteoMonthlyRequestLimit = 270000
 	openMeteoCoordinatePrecision = 1000
+	openMeteoRecentRequestUnits  = 3
+
+	openMeteoMethodMultiModel15Min = "midpoint-15-minute-multi-model"
+	openMeteoMethodArchiveHourly   = "midpoint-nearest-hour-archive"
 )
 
 var (
 	ErrOpenMeteoRateLimited = errors.New("Open-Meteo fallback rate limit reached")
-	errOpenMeteoNoWeather   = errors.New("Open-Meteo returned no weather near the activity start")
+	errOpenMeteoNoWeather   = errors.New("Open-Meteo returned no weather near the activity midpoint")
 )
+
+type openMeteoModel struct {
+	ID    string
+	Label string
+}
+
+var openMeteoConsensusModels = []openMeteoModel{
+	{ID: "ukmo_seamless", Label: "UKMO Seamless"},
+	{ID: "icon_seamless", Label: "ICON Seamless"},
+	{ID: "ecmwf_ifs025", Label: "ECMWF IFS"},
+}
 
 type WeatherConfig struct {
 	OpenMeteoFallbackEnabled bool `json:"openMeteoFallbackEnabled"`
@@ -49,24 +65,17 @@ type OpenMeteoWeatherService struct {
 	now          func() time.Time
 	requestMu    sync.Mutex
 	nextRequest  time.Time
-	reserveLimit func(context.Context, time.Time) (time.Duration, error)
+	reserveLimit func(context.Context, time.Time, int) (time.Duration, error)
 }
 
+type openMeteoSeries map[string]json.RawMessage
+
 type openMeteoResponse struct {
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Timezone  string  `json:"timezone"`
-	Hourly    struct {
-		Time                []string   `json:"time"`
-		Temperature         []*float64 `json:"temperature_2m"`
-		ApparentTemperature []*float64 `json:"apparent_temperature"`
-		DewPoint            []*float64 `json:"dew_point_2m"`
-		RelativeHumidity    []*float64 `json:"relative_humidity_2m"`
-		WeatherCode         []*int     `json:"weather_code"`
-		WindSpeed           []*float64 `json:"wind_speed_10m"`
-		WindGusts           []*float64 `json:"wind_gusts_10m"`
-		WindDirection       []*float64 `json:"wind_direction_10m"`
-	} `json:"hourly"`
+	Latitude   float64         `json:"latitude"`
+	Longitude  float64         `json:"longitude"`
+	Timezone   string          `json:"timezone"`
+	Minutely15 openMeteoSeries `json:"minutely_15"`
+	Hourly     openMeteoSeries `json:"hourly"`
 }
 
 type externalAPIRateLimitWindow struct {
@@ -106,7 +115,10 @@ func (s *Store) SetWeatherConfig(ctx context.Context, config WeatherConfig) erro
 	return err
 }
 
-func (s *Store) ReserveOpenMeteoRequest(ctx context.Context, now time.Time) (time.Duration, error) {
+func (s *Store) ReserveOpenMeteoRequest(ctx context.Context, now time.Time, units int) (time.Duration, error) {
+	if units < 1 {
+		units = 1
+	}
 	transaction, err := s.db.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -117,13 +129,13 @@ func (s *Store) ReserveOpenMeteoRequest(ctx context.Context, now time.Time) (tim
 		var count int
 		err = transaction.QueryRow(ctx, `
 			insert into external_api_rate_limit_usage(provider, window_kind, window_start, request_count)
-			values($1, $2, $3, 1)
+			values($1, $2, $3, $4)
 			on conflict(provider, window_kind, window_start) do update set
-				request_count = external_api_rate_limit_usage.request_count + 1,
+				request_count = external_api_rate_limit_usage.request_count + excluded.request_count,
 				updated_at = now()
-			where external_api_rate_limit_usage.request_count < $4
+			where external_api_rate_limit_usage.request_count + excluded.request_count <= $5
 			returning request_count
-		`, openMeteoProvider, window.Kind, window.Start, window.Limit).Scan(&count)
+		`, openMeteoProvider, window.Kind, window.Start, units, window.Limit).Scan(&count)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return max(window.Next.Sub(now), time.Second), ErrOpenMeteoRateLimited
 		}
@@ -156,13 +168,18 @@ func (service *OpenMeteoWeatherService) Fetch(ctx context.Context, activityStart
 		return nil, errors.New("Open-Meteo fallback is unavailable")
 	}
 	if activityStart.IsZero() || !validWeatherCoordinate(latitude, longitude) {
-		return nil, errors.New("activity start time and coordinates are required for weather fallback")
+		return nil, errors.New("activity midpoint time and coordinates are required for weather fallback")
 	}
 	if err := service.waitForRequestSlot(ctx); err != nil {
 		return nil, err
 	}
 	now := service.now().UTC()
-	if retryAfter, err := service.reserveLimit(ctx, now); err != nil {
+	recent := !activityStart.UTC().Before(now.AddDate(0, 0, -openMeteoRecentHistoryDays))
+	requestUnits := 1
+	if recent {
+		requestUnits = openMeteoRecentRequestUnits
+	}
+	if retryAfter, err := service.reserveLimit(ctx, now, requestUnits); err != nil {
 		if errors.Is(err, ErrOpenMeteoRateLimited) {
 			return nil, fmt.Errorf("%w; retry after %s", ErrOpenMeteoRateLimited, now.Add(retryAfter).Format(time.RFC3339))
 		}
@@ -170,10 +187,10 @@ func (service *OpenMeteoWeatherService) Fetch(ctx context.Context, activityStart
 	}
 
 	endpoint := service.forecastURL
-	if activityStart.UTC().Before(now.AddDate(0, 0, -openMeteoRecentHistoryDays)) {
+	if !recent {
 		endpoint = service.archiveURL
 	}
-	requestURL, err := openMeteoRequestURL(endpoint, activityStart, latitude, longitude)
+	requestURL, err := openMeteoRequestURL(endpoint, activityStart, latitude, longitude, recent)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +223,7 @@ func (service *OpenMeteoWeatherService) Fetch(ctx context.Context, activityStart
 	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("retain Open-Meteo response: %w", err)
 	}
-	return activityWeatherFromOpenMeteo(payload, raw, activityStart)
+	return activityWeatherFromOpenMeteo(payload, raw, activityStart, recent)
 }
 
 func (service *OpenMeteoWeatherService) waitForRequestSlot(ctx context.Context) error {
@@ -233,7 +250,7 @@ func (service *OpenMeteoWeatherService) waitForRequestSlot(ctx context.Context) 
 	}
 }
 
-func openMeteoRequestURL(endpoint string, activityStart time.Time, latitude, longitude float64) (string, error) {
+func openMeteoRequestURL(endpoint string, activityStart time.Time, latitude, longitude float64, recent bool) (string, error) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
 		return "", fmt.Errorf("parse Open-Meteo endpoint: %w", err)
@@ -245,47 +262,98 @@ func openMeteoRequestURL(endpoint string, activityStart time.Time, latitude, lon
 	params.Set("start_date", date)
 	params.Set("end_date", date)
 	params.Set("timezone", "UTC")
-	params.Set("hourly", strings.Join([]string{
+	variables := strings.Join([]string{
 		"temperature_2m", "apparent_temperature", "dew_point_2m", "relative_humidity_2m",
 		"weather_code", "wind_speed_10m", "wind_gusts_10m", "wind_direction_10m",
-	}, ","))
+	}, ",")
+	if recent {
+		models := make([]string, 0, len(openMeteoConsensusModels))
+		for _, model := range openMeteoConsensusModels {
+			models = append(models, model.ID)
+		}
+		params.Set("minutely_15", variables)
+		params.Set("models", strings.Join(models, ","))
+	} else {
+		params.Set("hourly", variables)
+	}
 	parsed.RawQuery = params.Encode()
 	return parsed.String(), nil
 }
 
-func activityWeatherFromOpenMeteo(payload openMeteoResponse, raw map[string]any, activityStart time.Time) (*ActivityWeather, error) {
+func activityWeatherFromOpenMeteo(payload openMeteoResponse, raw map[string]any, activityStart time.Time, recent bool) (*ActivityWeather, error) {
+	if !recent {
+		index, observedAt, err := nearestOpenMeteoTime(payload.Hourly, activityStart, 90*time.Minute)
+		if err != nil {
+			return nil, err
+		}
+		return openMeteoWeatherAt(payload, raw, payload.Hourly, "", index, observedAt, openMeteoMethodArchiveHourly, "")
+	}
+
+	index, observedAt, err := nearestOpenMeteoTime(payload.Minutely15, activityStart, 20*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	type modelCandidate struct {
+		temperature float64
+		weather     *ActivityWeather
+	}
+	candidates := make([]modelCandidate, 0, len(openMeteoConsensusModels))
+	for _, model := range openMeteoConsensusModels {
+		weather, candidateErr := openMeteoWeatherAt(payload, raw, payload.Minutely15, "_"+model.ID, index, observedAt, openMeteoMethodMultiModel15Min, model.Label)
+		if candidateErr != nil || weather.TemperatureC == nil {
+			continue
+		}
+		candidates = append(candidates, modelCandidate{temperature: *weather.TemperatureC, weather: weather})
+	}
+	if len(candidates) == 0 {
+		return nil, errOpenMeteoNoWeather
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].temperature < candidates[j].temperature
+	})
+	return candidates[len(candidates)/2].weather, nil
+}
+
+func nearestOpenMeteoTime(series openMeteoSeries, target time.Time, maximumDistance time.Duration) (int, time.Time, error) {
+	times := stringValues(series, "time")
 	index := -1
-	closest := 2 * time.Hour
+	closest := maximumDistance + time.Second
 	var observedAt time.Time
-	for candidate, value := range payload.Hourly.Time {
+	for candidate, value := range times {
 		parsed, err := time.ParseInLocation("2006-01-02T15:04", value, time.UTC)
 		if err != nil {
 			continue
 		}
-		distance := parsed.Sub(activityStart.UTC()).Abs()
+		distance := parsed.Sub(target.UTC()).Abs()
 		if distance < closest {
 			index, closest, observedAt = candidate, distance, parsed
 		}
 	}
-	if index < 0 || closest > 90*time.Minute {
-		return nil, errOpenMeteoNoWeather
+	if index < 0 || closest > maximumDistance {
+		return -1, time.Time{}, errOpenMeteoNoWeather
 	}
+	return index, observedAt, nil
+}
+
+func openMeteoWeatherAt(payload openMeteoResponse, raw map[string]any, series openMeteoSeries, suffix string, index int, observedAt time.Time, method, model string) (*ActivityWeather, error) {
 	weather := &ActivityWeather{
 		Provider:             openMeteoProvider,
+		SelectionMethod:      method,
+		Model:                model,
 		ObservedAt:           &observedAt,
-		TemperatureC:         floatAt(payload.Hourly.Temperature, index),
-		ApparentTemperatureC: floatAt(payload.Hourly.ApparentTemperature, index),
-		DewPointC:            floatAt(payload.Hourly.DewPoint, index),
-		RelativeHumidityPct:  floatAt(payload.Hourly.RelativeHumidity, index),
-		WindSpeedKPH:         floatAt(payload.Hourly.WindSpeed, index),
-		WindGustKPH:          floatAt(payload.Hourly.WindGusts, index),
-		WindDirectionDeg:     floatAt(payload.Hourly.WindDirection, index),
+		TemperatureC:         floatAt(floatValues(series, "temperature_2m"+suffix), index),
+		ApparentTemperatureC: floatAt(floatValues(series, "apparent_temperature"+suffix), index),
+		DewPointC:            floatAt(floatValues(series, "dew_point_2m"+suffix), index),
+		RelativeHumidityPct:  floatAt(floatValues(series, "relative_humidity_2m"+suffix), index),
+		WindSpeedKPH:         floatAt(floatValues(series, "wind_speed_10m"+suffix), index),
+		WindGustKPH:          floatAt(floatValues(series, "wind_gusts_10m"+suffix), index),
+		WindDirectionDeg:     floatAt(floatValues(series, "wind_direction_10m"+suffix), index),
 		Latitude:             &payload.Latitude,
 		Longitude:            &payload.Longitude,
 		StationTimezone:      strings.TrimSpace(payload.Timezone),
 		Raw:                  raw,
 	}
-	if code := intAt(payload.Hourly.WeatherCode, index); code != nil {
+	if code := intAt(intValues(series, "weather_code"+suffix), index); code != nil {
 		weather.Condition = openMeteoWeatherCodeLabel(*code)
 	}
 	if weather.WindDirectionDeg != nil {
@@ -295,6 +363,30 @@ func activityWeatherFromOpenMeteo(payload openMeteoResponse, raw map[string]any,
 		return nil, errOpenMeteoNoWeather
 	}
 	return weather, nil
+}
+
+func stringValues(series openMeteoSeries, key string) []string {
+	var values []string
+	if raw := series[key]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &values)
+	}
+	return values
+}
+
+func floatValues(series openMeteoSeries, key string) []*float64 {
+	var values []*float64
+	if raw := series[key]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &values)
+	}
+	return values
+}
+
+func intValues(series openMeteoSeries, key string) []*int {
+	var values []*int
+	if raw := series[key]; len(raw) > 0 {
+		_ = json.Unmarshal(raw, &values)
+	}
+	return values
 }
 
 func floatAt(values []*float64, index int) *float64 {
