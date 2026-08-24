@@ -44,6 +44,23 @@ describe("shared backend API contract", () => {
     expect(requestURL).toContain("maxPoints=900");
   });
 
+  it("requests account-scoped AI context in the browser timezone", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      activityDate: "2026-08-20",
+      windowStart: "2026-08-14",
+      windowEnd: "2026-08-20",
+      totals: { runCount: 0, distanceM: 0, movingTimeS: 0, elevationGainM: 0 },
+      runs: []
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.activityAIContext("activity/with spaces", "Europe/Dublin");
+
+    const requestURL = String(fetchMock.mock.calls[0][0]);
+    expect(requestURL).toContain("/api/activities/activity%2Fwith%20spaces/ai-context?");
+    expect(requestURL).toContain("timezone=Europe%2FDublin");
+  });
+
   it("passes the browser timezone to calendar requests", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       date: "2026-07-01",

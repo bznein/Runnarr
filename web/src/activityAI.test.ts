@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatActivityForAI } from "./activityAI";
-import type { Activity } from "./types";
+import type { Activity, ActivityAIContext } from "./types";
 
 function activity(overrides: Partial<Activity> = {}): Activity {
   return {
@@ -16,6 +16,38 @@ function activity(overrides: Partial<Activity> = {}): Activity {
     elapsedTimeS: 3035,
     elevationGainM: 125,
     createdAt: "2026-08-20T07:30:00Z",
+    ...overrides
+  };
+}
+
+function weeklyContext(overrides: Partial<ActivityAIContext> = {}): ActivityAIContext {
+  return {
+    activityDate: "2026-08-20",
+    windowStart: "2026-08-14",
+    windowEnd: "2026-08-20",
+    totals: {
+      runCount: 2,
+      distanceM: 15000,
+      movingTimeS: 4500,
+      elevationGainM: 180,
+      avgPaceSPKM: 300
+    },
+    runs: [{
+      date: "2026-08-18",
+      name: "Easy Run",
+      distanceM: 5000,
+      movingTimeS: 1500,
+      elevationGainM: 40,
+      avgPaceSPKM: 300,
+      avgHeartRate: 138
+    }, {
+      date: "2026-08-19",
+      name: "Steady Run",
+      distanceM: 10000,
+      movingTimeS: 3000,
+      elevationGainM: 140,
+      avgPaceSPKM: 300
+    }],
     ...overrides
   };
 }
@@ -109,13 +141,34 @@ describe("formatActivityForAI", () => {
         endElevationM: 62,
         paceSPKM: 320,
         gapSPKM: 295
-      }]
-    }));
+      }],
+      weather: {
+        condition: "Partly cloudy",
+        temperatureC: 18.3,
+        apparentTemperatureC: 17.6,
+        relativeHumidityPct: 72,
+        windSpeedKPH: 14.5,
+        windDirection: "SW"
+      }
+    }), weeklyContext());
 
     expect(result).toContain("# Activity: Morning Run");
     expect(result).toContain("- Distance: 10.00 km");
     expect(result).toContain("- Moving time: 50:00");
     expect(result).toContain("- RPE: 7/10");
+    expect(result).toContain("## Weekly running context");
+    expect(result).toContain("- Activity day: Thursday");
+    expect(result).toContain("- Window: 14 Aug 2026 to 20 Aug 2026");
+    expect(result).toContain("- Other runs: 2");
+    expect(result).toContain("| Day | Activity | Distance | Moving time | Avg pace | Avg HR |");
+    expect(result).toContain("| Tue 18 Aug | Easy Run | 5.00 km | 25:00 | 5:00 /km | 138 bpm |");
+    expect(result).toContain("| Wed 19 Aug | Steady Run | 10.00 km | 50:00 | 5:00 /km |  |");
+    expect(result).toContain("## Weather");
+    expect(result).toContain("- Conditions: Partly cloudy");
+    expect(result).toContain("- Temperature: 18.3 °C");
+    expect(result).toContain("- Feels like: 17.6 °C");
+    expect(result).toContain("- Humidity: 72%");
+    expect(result).toContain("- Wind: SW 14.5 km/h");
     expect(result).toContain("## Notes\n\n> Felt controlled.");
     expect(result).toContain("## Workout\n- Name: Threshold Repeats");
     expect(result).toContain("## Intervals");
@@ -161,5 +214,16 @@ describe("formatActivityForAI", () => {
 
     expect(result).toContain("> First line\n>\n> # Not a section");
     expect(result).toContain("Run\\|fast");
+  });
+
+  it("states when the weekly context contains no other runs", () => {
+    const result = formatActivityForAI(activity(), weeklyContext({
+      totals: { runCount: 0, distanceM: 0, movingTimeS: 0, elevationGainM: 0 },
+      runs: []
+    }));
+
+    expect(result).toContain("- Other runs: 0");
+    expect(result).toContain("No other runs were recorded in this window.");
+    expect(result).not.toContain("| Day | Activity |");
   });
 });

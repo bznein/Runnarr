@@ -621,8 +621,19 @@ export type Activity = {
   intervals?: ActivityInterval[];
   climbs?: ActivityClimb[];
   media?: ActivityMedia[];
+  weather?: ActivityWeather;
   trainingSheetMatch?: ActivityTrainingSheetMatch;
   createdAt: string;
+};
+
+export type ActivityWeather = {
+  observedAt?: string;
+  condition?: string;
+  temperatureC?: number;
+  apparentTemperatureC?: number;
+  relativeHumidityPct?: number;
+  windSpeedKPH?: number;
+  windDirection?: string;
 };
 
 export type ActivityTrainingSheetMatch = {
@@ -667,6 +678,30 @@ export type ActivityListPage = {
 export type ActivityNavigation = {
   previousId?: string;
   nextId?: string;
+};
+
+export type ActivityAIContext = {
+  activityDate: string;
+  windowStart: string;
+  windowEnd: string;
+  totals: {
+    runCount: number;
+    distanceM: number;
+    movingTimeS: number;
+    elevationGainM: number;
+    avgPaceSPKM?: number;
+  };
+  runs: ActivityAIContextRun[];
+};
+
+export type ActivityAIContextRun = {
+  date: string;
+  name: string;
+  distanceM: number;
+  movingTimeS: number;
+  elevationGainM: number;
+  avgPaceSPKM?: number;
+  avgHeartRate?: number;
 };
 
 export type CalendarActivitySummary = {

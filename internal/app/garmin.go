@@ -123,12 +123,32 @@ type GarminBridgeLap struct {
 }
 
 type GarminBridgeActivityWorkout struct {
-	Available bool               `json:"available"`
-	Workout   *ActivityWorkout   `json:"workout,omitempty"`
-	Intervals []ActivityInterval `json:"intervals,omitempty"`
-	Laps      []GarminBridgeLap  `json:"laps,omitempty"`
-	Raw       map[string]any     `json:"raw,omitempty"`
-	Errors    map[string]string  `json:"errors,omitempty"`
+	Available bool                 `json:"available"`
+	Workout   *ActivityWorkout     `json:"workout,omitempty"`
+	Intervals []ActivityInterval   `json:"intervals,omitempty"`
+	Laps      []GarminBridgeLap    `json:"laps,omitempty"`
+	Weather   *GarminBridgeWeather `json:"weather,omitempty"`
+	Raw       map[string]any       `json:"raw,omitempty"`
+	Errors    map[string]string    `json:"errors,omitempty"`
+}
+
+type GarminBridgeWeather struct {
+	ObservedAt           *time.Time     `json:"observedAt,omitempty"`
+	Condition            string         `json:"condition,omitempty"`
+	TemperatureF         *float64       `json:"temperatureF,omitempty"`
+	ApparentTemperatureF *float64       `json:"apparentTemperatureF,omitempty"`
+	DewPointF            *float64       `json:"dewPointF,omitempty"`
+	RelativeHumidityPct  *float64       `json:"relativeHumidityPct,omitempty"`
+	WindSpeedMPH         *float64       `json:"windSpeedMPH,omitempty"`
+	WindGustMPH          *float64       `json:"windGustMPH,omitempty"`
+	WindDirectionDeg     *float64       `json:"windDirectionDeg,omitempty"`
+	WindDirection        string         `json:"windDirection,omitempty"`
+	Latitude             *float64       `json:"latitude,omitempty"`
+	Longitude            *float64       `json:"longitude,omitempty"`
+	StationID            string         `json:"stationId,omitempty"`
+	StationName          string         `json:"stationName,omitempty"`
+	StationTimezone      string         `json:"stationTimezone,omitempty"`
+	Raw                  map[string]any `json:"raw,omitempty"`
 }
 
 type GarminBridgeHealthDay struct {
@@ -677,6 +697,9 @@ func applyGarminMetadata(activity *ImportedActivity, source GarminBridgeActivity
 }
 
 func applyGarminWorkoutMetadata(activity *ImportedActivity, source GarminBridgeActivityWorkout) {
+	if source.Weather != nil {
+		activity.Weather = activityWeatherFromGarmin(*source.Weather)
+	}
 	if !source.Available {
 		return
 	}
@@ -703,6 +726,44 @@ func applyGarminWorkoutMetadata(activity *ImportedActivity, source GarminBridgeA
 			lap.WorkoutRepeatIndex = interval.WorkoutRepeatIndex
 		}
 	}
+}
+
+func activityWeatherFromGarmin(source GarminBridgeWeather) *ActivityWeather {
+	return &ActivityWeather{
+		Provider:             garminProvider,
+		ObservedAt:           source.ObservedAt,
+		Condition:            strings.TrimSpace(source.Condition),
+		TemperatureC:         fahrenheitToCelsius(source.TemperatureF),
+		ApparentTemperatureC: fahrenheitToCelsius(source.ApparentTemperatureF),
+		DewPointC:            fahrenheitToCelsius(source.DewPointF),
+		RelativeHumidityPct:  source.RelativeHumidityPct,
+		WindSpeedKPH:         milesPerHourToKPH(source.WindSpeedMPH),
+		WindGustKPH:          milesPerHourToKPH(source.WindGustMPH),
+		WindDirectionDeg:     source.WindDirectionDeg,
+		WindDirection:        strings.ToUpper(strings.TrimSpace(source.WindDirection)),
+		Latitude:             source.Latitude,
+		Longitude:            source.Longitude,
+		StationID:            strings.TrimSpace(source.StationID),
+		StationName:          strings.TrimSpace(source.StationName),
+		StationTimezone:      strings.TrimSpace(source.StationTimezone),
+		Raw:                  source.Raw,
+	}
+}
+
+func fahrenheitToCelsius(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	converted := (*value - 32) * 5 / 9
+	return &converted
+}
+
+func milesPerHourToKPH(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	converted := *value * 1.609344
+	return &converted
 }
 
 func applyGarminLapMetadata(activityLaps *[]ActivityLap, sourceLaps []GarminBridgeLap) {

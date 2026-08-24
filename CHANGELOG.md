@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Garmin activity imports now retain weather conditions for a compact
+  activity-detail summary and include them in Copy for AI.
+- Copy for AI now includes the activity weekday and a privacy-safe seven-day running summary with workload totals and each other run in the window.
 - Activity details can now copy a concise Markdown summary with metrics,
   notes, complete interval-tab data, and climbs for use with AI tools.
 - Course maps now show zoom-aware kilometre markers while planning and when
