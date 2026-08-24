@@ -669,6 +669,30 @@ export type ActivityNavigation = {
   nextId?: string;
 };
 
+export type ActivityAIContext = {
+  activityDate: string;
+  windowStart: string;
+  windowEnd: string;
+  totals: {
+    runCount: number;
+    distanceM: number;
+    movingTimeS: number;
+    elevationGainM: number;
+    avgPaceSPKM?: number;
+  };
+  runs: ActivityAIContextRun[];
+};
+
+export type ActivityAIContextRun = {
+  date: string;
+  name: string;
+  distanceM: number;
+  movingTimeS: number;
+  elevationGainM: number;
+  avgPaceSPKM?: number;
+  avgHeartRate?: number;
+};
+
 export type CalendarActivitySummary = {
 	id: string;
 	workoutId?: string;

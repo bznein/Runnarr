@@ -557,6 +557,83 @@ func (s *Store) ActivityNavigation(ctx context.Context, id string, filters Activ
 	return navigation, nil
 }
 
+func (s *Store) ActivityAIContext(ctx context.Context, id, timezone string) (ActivityAIContext, error) {
+	var startTime time.Time
+	if err := s.db.QueryRow(ctx, `
+		select start_time
+		from activities
+		where id = $1 and user_id = $2
+	`, id, scopedUserID(ctx)).Scan(&startTime); err != nil {
+		return ActivityAIContext{}, err
+	}
+
+	windowStart, windowEnd, err := activityAIContextWindow(startTime, timezone)
+	if err != nil {
+		return ActivityAIContext{}, err
+	}
+	context := ActivityAIContext{
+		ActivityDate: windowEnd.Format("2006-01-02"),
+		WindowStart:  windowStart.Format("2006-01-02"),
+		WindowEnd:    windowEnd.Format("2006-01-02"),
+		Runs:         make([]ActivityAIContextRun, 0),
+	}
+
+	rows, err := s.db.Query(ctx, `
+		select
+			to_char(date(start_time at time zone $3), 'YYYY-MM-DD'),
+			coalesce(nullif(local_name, ''), name),
+			distance_m,
+			moving_time_s,
+			elevation_gain_m,
+			avg_pace_s_per_km,
+			avg_heart_rate
+		from activities
+		where user_id = $1
+			and id <> $2
+			and source <> 'training_sheet'
+			and sport_type in ('Run', 'Treadmill Run')
+			and date(start_time at time zone $3) between $4::date and $5::date
+		order by start_time, id
+	`, scopedUserID(ctx), id, timezone, context.WindowStart, context.WindowEnd)
+	if err != nil {
+		return ActivityAIContext{}, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var run ActivityAIContextRun
+		var avgPace, avgHeartRate sql.NullFloat64
+		if err := rows.Scan(&run.Date, &run.Name, &run.DistanceM, &run.MovingTimeS, &run.ElevationGainM, &avgPace, &avgHeartRate); err != nil {
+			return ActivityAIContext{}, err
+		}
+		run.AvgPaceSPKM = floatPtrFromNull(avgPace)
+		if run.AvgPaceSPKM == nil {
+			run.AvgPaceSPKM = averagePace(run.DistanceM, run.MovingTimeS)
+		}
+		run.AvgHeartRate = floatPtrFromNull(avgHeartRate)
+		context.Runs = append(context.Runs, run)
+		context.Totals.RunCount++
+		context.Totals.DistanceM += run.DistanceM
+		context.Totals.MovingTimeS += run.MovingTimeS
+		context.Totals.ElevationGainM += run.ElevationGainM
+	}
+	if err := rows.Err(); err != nil {
+		return ActivityAIContext{}, err
+	}
+	context.Totals.AvgPaceSPKM = averagePace(context.Totals.DistanceM, context.Totals.MovingTimeS)
+	return context, nil
+}
+
+func activityAIContextWindow(startTime time.Time, timezone string) (time.Time, time.Time, error) {
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	localStart := startTime.In(location)
+	windowEnd := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, location)
+	return windowEnd.AddDate(0, 0, -6), windowEnd, nil
+}
+
 func (s *Store) ActivityCalendar(ctx context.Context, filters ActivityFilters) (ActivityCalendar, error) {
 	filters.IncludeTrainingSheet = true
 	userID := scopedUserID(ctx)

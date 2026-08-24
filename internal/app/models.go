@@ -104,6 +104,32 @@ type ActivityNavigation struct {
 	NextID     string `json:"nextId,omitempty"`
 }
 
+type ActivityAIContext struct {
+	ActivityDate string                  `json:"activityDate"`
+	WindowStart  string                  `json:"windowStart"`
+	WindowEnd    string                  `json:"windowEnd"`
+	Totals       ActivityAIContextTotals `json:"totals"`
+	Runs         []ActivityAIContextRun  `json:"runs"`
+}
+
+type ActivityAIContextTotals struct {
+	RunCount       int      `json:"runCount"`
+	DistanceM      float64  `json:"distanceM"`
+	MovingTimeS    int      `json:"movingTimeS"`
+	ElevationGainM float64  `json:"elevationGainM"`
+	AvgPaceSPKM    *float64 `json:"avgPaceSPKM,omitempty"`
+}
+
+type ActivityAIContextRun struct {
+	Date           string   `json:"date"`
+	Name           string   `json:"name"`
+	DistanceM      float64  `json:"distanceM"`
+	MovingTimeS    int      `json:"movingTimeS"`
+	ElevationGainM float64  `json:"elevationGainM"`
+	AvgPaceSPKM    *float64 `json:"avgPaceSPKM,omitempty"`
+	AvgHeartRate   *float64 `json:"avgHeartRate,omitempty"`
+}
+
 // ActivitySeries is the bounded display representation of an activity's
 // samples. Full samples remain available to server-side exports and analysis,
 // but clients should use this response for charts and maps.

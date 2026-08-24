@@ -1,6 +1,7 @@
 import type {
   Activity,
   ActivityClimbPreviewResponse,
+  ActivityAIContext,
   ActivityListPage,
   ActivityNavigation,
   ActivitySeries,
@@ -276,6 +277,7 @@ export const api = {
   },
   activityTypes: () => request<{ activityTypes: string[] | null }>("/api/activity-types"),
   activity: (id: string) => request<{ activity: Activity }>(`/api/activities/${id}`),
+  activityAIContext: (id: string, timezone: string) => request<ActivityAIContext>(`/api/activities/${encodeURIComponent(id)}/ai-context?${new URLSearchParams({ timezone }).toString()}`),
   courses: (options: { q?: string; sport?: CourseSport | ""; favorite?: boolean; sort?: string; order?: string; limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams();
     if (options.q?.trim()) params.set("q", options.q.trim());

@@ -1,5 +1,5 @@
 import { speedToPaceSPKM } from "./paceDisplay";
-import type { Activity, ActivityClimb, ActivityInterval, ActivityLap, ActivitySample, ActivityWorkoutStep } from "./types";
+import type { Activity, ActivityAIContext, ActivityClimb, ActivityInterval, ActivityLap, ActivitySample, ActivityWorkoutStep } from "./types";
 
 type MarkdownColumn<T> = {
   heading: string;
@@ -25,7 +25,7 @@ type IntervalExportRow = {
   avgPower?: number;
 };
 
-export function formatActivityForAI(activity: Activity) {
+export function formatActivityForAI(activity: Activity, context?: ActivityAIContext) {
   const lines = [`# Activity: ${inlineText(activity.name)}`, "", "## Overview"];
   appendFields(lines, [
     ["Sport", activity.sportType],
@@ -43,6 +43,24 @@ export function formatActivityForAI(activity: Activity) {
     ["Gear", formatGear(activity)],
     ["Matched plan", activity.trainingSheetMatch?.plannedActivityName]
   ]);
+
+  if (context) {
+    lines.push("", "## Weekly running context");
+    appendFields(lines, [
+      ["Activity day", formatContextWeekday(context.activityDate)],
+      ["Window", `${formatContextDate(context.windowStart)} to ${formatContextDate(context.windowEnd)}`],
+      ["Other runs", String(context.totals.runCount)],
+      ["Distance", formatDistance(context.totals.distanceM)],
+      ["Moving time", formatDuration(context.totals.movingTimeS)],
+      ["Elevation gain", formatMeters(context.totals.elevationGainM)],
+      ["Average pace", formatPace(context.totals.avgPaceSPKM)]
+    ]);
+    if (context.runs.length > 0) {
+      lines.push("", ...weeklyContextTable(context));
+    } else {
+      lines.push("", "No other runs were recorded in this window.");
+    }
+  }
 
   if (activity.notes?.trim()) {
     lines.push("", "## Notes", "", ...quoteText(activity.notes));
@@ -69,6 +87,33 @@ export function formatActivityForAI(activity: Activity) {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function weeklyContextTable(context: ActivityAIContext) {
+  return markdownTable(context.runs, [
+    { heading: "Day", value: (item) => formatContextRunDate(item.date), always: true },
+    { heading: "Activity", value: (item) => item.name, always: true },
+    { heading: "Distance", value: (item) => formatDistance(item.distanceM), always: true },
+    { heading: "Moving time", value: (item) => formatDuration(item.movingTimeS), always: true },
+    { heading: "Avg pace", value: (item) => formatPace(item.avgPaceSPKM), always: true },
+    { heading: "Avg HR", value: (item) => formatBPM(item.avgHeartRate) }
+  ]);
+}
+
+function formatContextWeekday(value: string) {
+  return contextDate(value).toLocaleDateString("en-GB", { weekday: "long", timeZone: "UTC" });
+}
+
+function formatContextDate(value: string) {
+  return contextDate(value).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+function formatContextRunDate(value: string) {
+  return contextDate(value).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+function contextDate(value: string) {
+  return new Date(`${value}T12:00:00Z`);
 }
 
 function appendFields(lines: string[], fields: Array<[string, string | undefined]>) {

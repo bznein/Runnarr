@@ -318,6 +318,14 @@ test.describe("local product journey", () => {
       const copiedActivity = await page.evaluate(() => navigator.clipboard.readText());
       expect(copiedActivity).toContain(`# Activity: ${name}`);
       expect(copiedActivity).toContain("## Overview");
+      expect(copiedActivity).toContain("## Weekly running context");
+      expect(copiedActivity).toContain("- Other runs: 3");
+      expect(copiedActivity).toContain("E2E Calendar Matched Run");
+      expect(copiedActivity).toContain("E2E Recovery Run");
+      expect(copiedActivity).toContain("E2E Treadmill Run");
+      expect(copiedActivity).not.toContain("E2E Old Run");
+      expect(copiedActivity).not.toContain("E2E Cycling Activity");
+      expect(copiedActivity).not.toContain("E2E Calendar Planned Run");
       expect(copiedActivity).not.toMatch(/latitude|longitude|sourceId|summaryPolyline/);
     }
 

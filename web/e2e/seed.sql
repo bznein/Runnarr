@@ -181,6 +181,35 @@ on conflict (user_id, source, source_id) do update set
     elapsed_time_s = excluded.elapsed_time_s,
     raw = excluded.raw;
 
+insert into activities(
+    user_id, source, source_id, name, sport_type, start_time,
+    distance_m, moving_time_s, elapsed_time_s, elevation_gain_m,
+    avg_heart_rate, avg_pace_s_per_km, raw
+)
+select users.id, 'e2e', fixture.source_id, fixture.name, fixture.sport_type,
+    :'e2e_date'::date + fixture.day_offset + time '06:00',
+    fixture.distance_m, fixture.moving_time_s, fixture.moving_time_s,
+    fixture.elevation_gain_m, fixture.avg_heart_rate, fixture.avg_pace_s_per_km,
+    '{"fixture":"ai-weekly-context"}'::jsonb
+from users
+cross join (values
+    ('e2e-ai-recovery-run', 'E2E Recovery Run', 'Run', -2, 5000::double precision, 1500, 30::double precision, 135::double precision, 300::double precision),
+    ('e2e-ai-treadmill-run', 'E2E Treadmill Run', 'Treadmill Run', -6, 3000::double precision, 960, 0::double precision, 128::double precision, 320::double precision),
+    ('e2e-ai-old-run', 'E2E Old Run', 'Run', -7, 7000::double precision, 2100, 70::double precision, 140::double precision, 300::double precision)
+) as fixture(source_id, name, sport_type, day_offset, distance_m, moving_time_s, elevation_gain_m, avg_heart_rate, avg_pace_s_per_km)
+where users.username = :'e2e_username'
+on conflict (user_id, source, source_id) do update set
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    start_time = excluded.start_time,
+    distance_m = excluded.distance_m,
+    moving_time_s = excluded.moving_time_s,
+    elapsed_time_s = excluded.elapsed_time_s,
+    elevation_gain_m = excluded.elevation_gain_m,
+    avg_heart_rate = excluded.avg_heart_rate,
+    avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+    raw = excluded.raw;
+
 -- Model the training-sheet activity row created by a real plan import. Once
 -- matched, this future placeholder must stay hidden while its provenance is
 -- attached to the completed activity on the actual completion date.

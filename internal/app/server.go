@@ -161,6 +161,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
 			r.Get("/activities/{id}/navigation", s.handleActivityNavigation)
+			r.Get("/activities/{id}/ai-context", s.handleActivityAIContext)
 			r.Get("/activities/{id}/series", s.handleActivitySeries)
 			r.Get("/activities/{id}/gpx", s.handleExportActivityGPX)
 			r.Post("/activities/{id}/course", s.handleSaveActivityAsCourse)
@@ -502,6 +503,28 @@ func (s *Server) handleActivityNavigation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, navigation)
+}
+
+func (s *Server) handleActivityAIContext(w http.ResponseWriter, r *http.Request) {
+	timezone := strings.TrimSpace(r.URL.Query().Get("timezone"))
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		writeError(w, http.StatusBadRequest, "timezone must be a valid IANA timezone")
+		return
+	}
+	context, err := s.store.ActivityAIContext(r.Context(), chi.URLParam(r, "id"), timezone)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "activity not found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("get activity AI context", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not get activity AI context")
+		return
+	}
+	writeJSON(w, http.StatusOK, context)
 }
 
 func (s *Server) handleActivityTypes(w http.ResponseWriter, r *http.Request) {
