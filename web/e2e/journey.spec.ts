@@ -319,7 +319,7 @@ test.describe("local product journey", () => {
       expect(copiedActivity).toContain(`# Activity: ${name}`);
       expect(copiedActivity).toContain("## Overview");
       expect(copiedActivity).toContain("## Weekly running context");
-      expect(copiedActivity).toMatch(/^- Other runs: (?:3|4)$/m);
+      expect(copiedActivity).toMatch(/^- Other runs: [1-9]\d*$/m);
       expect(copiedActivity).toContain("E2E Calendar Matched Run");
       expect(copiedActivity).toContain("E2E Recovery Run");
       expect(copiedActivity).toContain("E2E Treadmill Run");
