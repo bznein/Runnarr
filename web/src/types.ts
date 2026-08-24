@@ -621,8 +621,19 @@ export type Activity = {
   intervals?: ActivityInterval[];
   climbs?: ActivityClimb[];
   media?: ActivityMedia[];
+  weather?: ActivityWeather;
   trainingSheetMatch?: ActivityTrainingSheetMatch;
   createdAt: string;
+};
+
+export type ActivityWeather = {
+  observedAt?: string;
+  condition?: string;
+  temperatureC?: number;
+  apparentTemperatureC?: number;
+  relativeHumidityPct?: number;
+  windSpeedKPH?: number;
+  windDirection?: string;
 };
 
 export type ActivityTrainingSheetMatch = {

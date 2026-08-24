@@ -210,6 +210,37 @@ on conflict (user_id, source, source_id) do update set
     avg_pace_s_per_km = excluded.avg_pace_s_per_km,
     raw = excluded.raw;
 
+-- The visual-review baseline may run this seed against a revision before the
+-- weather migration. Dynamic SQL keeps the shared seed compatible with both.
+do $$
+begin
+    if to_regclass('public.activity_weather') is not null then
+        execute $weather$
+            insert into activity_weather(
+                activity_id, provider, observed_at, condition, temperature_c,
+                apparent_temperature_c, relative_humidity_pct, wind_speed_kph,
+                wind_direction, latitude, longitude, station_id, station_name,
+                station_timezone, raw
+            )
+            select id, 'garmin', start_time, 'Partly cloudy', 18.3, 17.6, 72, 14.5,
+                'SW', 53.3498, -6.2603, 'e2e-weather-station', 'E2E Dublin Station',
+                'Europe/Dublin', '{"fixture":"garmin-weather","latitude":53.3498,"longitude":-6.2603}'::jsonb
+            from activities
+            where source_id = 'e2e-calendar-matched-run'
+            on conflict (activity_id) do update set
+                observed_at = excluded.observed_at,
+                condition = excluded.condition,
+                temperature_c = excluded.temperature_c,
+                apparent_temperature_c = excluded.apparent_temperature_c,
+                relative_humidity_pct = excluded.relative_humidity_pct,
+                wind_speed_kph = excluded.wind_speed_kph,
+                wind_direction = excluded.wind_direction,
+                raw = excluded.raw,
+                updated_at = now()
+        $weather$;
+    end if;
+end $$;
+
 -- Model the training-sheet activity row created by a real plan import. Once
 -- matched, this future placeholder must stay hidden while its provenance is
 -- attached to the completed activity on the actual completion date.

@@ -57,8 +57,29 @@ type Activity struct {
 	Intervals                []ActivityInterval          `json:"intervals,omitempty"`
 	Climbs                   []ActivityClimb             `json:"climbs,omitempty"`
 	Media                    []ActivityMedia             `json:"media,omitempty"`
+	Weather                  *ActivityWeather            `json:"weather,omitempty"`
 	TrainingSheetMatch       *ActivityTrainingSheetMatch `json:"trainingSheetMatch,omitempty"`
 	CreatedAt                time.Time                   `json:"createdAt"`
+}
+
+type ActivityWeather struct {
+	Provider             string         `json:"-"`
+	ObservedAt           *time.Time     `json:"observedAt,omitempty"`
+	Condition            string         `json:"condition,omitempty"`
+	TemperatureC         *float64       `json:"temperatureC,omitempty"`
+	ApparentTemperatureC *float64       `json:"apparentTemperatureC,omitempty"`
+	DewPointC            *float64       `json:"-"`
+	RelativeHumidityPct  *float64       `json:"relativeHumidityPct,omitempty"`
+	WindSpeedKPH         *float64       `json:"windSpeedKPH,omitempty"`
+	WindGustKPH          *float64       `json:"-"`
+	WindDirectionDeg     *float64       `json:"-"`
+	WindDirection        string         `json:"windDirection,omitempty"`
+	Latitude             *float64       `json:"-"`
+	Longitude            *float64       `json:"-"`
+	StationID            string         `json:"-"`
+	StationName          string         `json:"-"`
+	StationTimezone      string         `json:"-"`
+	Raw                  map[string]any `json:"-"`
 }
 
 type ActivityTrainingSheetMatch struct {
@@ -339,6 +360,7 @@ type ImportedActivity struct {
 	Laps                     []ActivityLap      `json:"laps,omitempty"`
 	Workout                  *ActivityWorkout   `json:"workout,omitempty"`
 	Intervals                []ActivityInterval `json:"intervals,omitempty"`
+	Weather                  *ActivityWeather   `json:"weather,omitempty"`
 	ReplaceWorkoutMetadata   bool               `json:"-"`
 	Raw                      map[string]any     `json:"raw,omitempty"`
 }

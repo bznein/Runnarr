@@ -62,6 +62,17 @@ export function formatActivityForAI(activity: Activity, context?: ActivityAICont
     }
   }
 
+  if (activity.weather) {
+    lines.push("", "## Weather");
+    appendFields(lines, [
+      ["Conditions", activity.weather.condition],
+      ["Temperature", formatWeatherTemperature(activity.weather.temperatureC)],
+      ["Feels like", formatWeatherTemperature(activity.weather.apparentTemperatureC)],
+      ["Humidity", formatWeatherPercent(activity.weather.relativeHumidityPct)],
+      ["Wind", formatWeatherWind(activity.weather.windDirection, activity.weather.windSpeedKPH)]
+    ]);
+  }
+
   if (activity.notes?.trim()) {
     lines.push("", "## Notes", "", ...quoteText(activity.notes));
   }
@@ -114,6 +125,19 @@ function formatContextRunDate(value: string) {
 
 function contextDate(value: string) {
   return new Date(`${value}T12:00:00Z`);
+}
+
+function formatWeatherTemperature(value?: number) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(1).replace(/\.0$/, "")} °C` : undefined;
+}
+
+function formatWeatherPercent(value?: number) {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)}%` : undefined;
+}
+
+function formatWeatherWind(direction?: string, speedKPH?: number) {
+  const speed = typeof speedKPH === "number" && Number.isFinite(speedKPH) ? `${speedKPH.toFixed(1).replace(/\.0$/, "")} km/h` : "";
+  return [direction?.trim(), speed].filter(Boolean).join(" ") || undefined;
 }
 
 function appendFields(lines: string[], fields: Array<[string, string | undefined]>) {

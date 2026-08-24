@@ -39,6 +39,7 @@ import type {
   ActivityMedia,
   ActivityNavigation as ActivityNavigationData,
   ActivitySample,
+  ActivityWeather,
   ActivityWorkoutStep,
   ActivitySortBy,
   ActivityTypeFilters as ActivityTypeFiltersValue,
@@ -3811,6 +3812,8 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
         {supportsRouteMetrics(item.sportType) && item.avgGradeAdjustedPaceSPKM !== undefined && <Metric label="GAP" value={formatPace(item.avgGradeAdjustedPaceSPKM)} />}
         {item.caloriesKcal !== undefined && <Metric label="Calories" value={formatCalories(item.caloriesKcal)} />}
       </section>
+
+      {item.weather && <ActivityWeatherPanel weather={item.weather} />}
 
       <ActivityNotesPanel
         notes={item.notes ?? ""}
@@ -7977,6 +7980,45 @@ function Metric({ label, value, icon }: { label: string; value: string; icon?: J
       <strong>{value}</strong>
     </div>
   );
+}
+
+function ActivityWeatherPanel({ weather }: { weather: ActivityWeather }) {
+  const items = [
+    { label: "Temperature", value: formatActivityTemperature(weather.temperatureC) },
+    { label: "Feels like", value: formatActivityTemperature(weather.apparentTemperatureC) },
+    { label: "Humidity", value: formatActivityHumidity(weather.relativeHumidityPct) },
+    { label: "Wind", value: formatActivityWind(weather.windDirection, weather.windSpeedKPH) }
+  ].filter((item) => item.value);
+  if (!weather.condition?.trim() && items.length === 0) {
+    return null;
+  }
+  return (
+    <section className="panel activity-weather-panel" aria-label="Activity weather">
+      <div className="activity-weather-heading">
+        <Cloud size={18} aria-hidden />
+        <div>
+          <div className="panel-heading">Weather</div>
+          {weather.condition?.trim() && <strong>{weather.condition.trim()}</strong>}
+        </div>
+      </div>
+      {items.length > 0 && <div className="activity-weather-values">
+        {items.map((item) => <span key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
+      </div>}
+    </section>
+  );
+}
+
+function formatActivityTemperature(value?: number) {
+  return isFiniteNumber(value) ? `${value.toFixed(1).replace(/\.0$/, "")} °C` : "";
+}
+
+function formatActivityHumidity(value?: number) {
+  return isFiniteNumber(value) ? `${Math.round(value)}%` : "";
+}
+
+function formatActivityWind(direction?: string, speedKPH?: number) {
+  const speed = isFiniteNumber(speedKPH) ? `${speedKPH.toFixed(1).replace(/\.0$/, "")} km/h` : "";
+  return [direction?.trim(), speed].filter(Boolean).join(" ");
 }
 
 function ActivityCombinedChart({ data, onHighlight }: { data: ActivityChartPoint[]; onHighlight: (point?: ActivityChartPoint) => void }) {

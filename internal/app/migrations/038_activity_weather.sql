@@ -1,0 +1,22 @@
+create table if not exists activity_weather (
+    activity_id uuid primary key references activities(id) on delete cascade,
+    provider text not null,
+    observed_at timestamptz,
+    condition text not null default '',
+    temperature_c double precision,
+    apparent_temperature_c double precision,
+    dew_point_c double precision,
+    relative_humidity_pct double precision,
+    wind_speed_kph double precision,
+    wind_gust_kph double precision,
+    wind_direction_deg double precision,
+    wind_direction text not null default '',
+    latitude double precision,
+    longitude double precision,
+    station_id text not null default '',
+    station_name text not null default '',
+    station_timezone text not null default '',
+    raw jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);

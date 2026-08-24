@@ -462,12 +462,53 @@ def inferred_interval_lap_indexes(item, laps, interval_count):
     return None
 
 
+def normalize_weather(payload):
+    if not isinstance(payload, dict):
+        return None
+    weather_type = payload.get("weatherTypeDTO") or {}
+    if not isinstance(weather_type, dict):
+        weather_type = {}
+    station = payload.get("weatherStationDTO") or {}
+    if not isinstance(station, dict):
+        station = {}
+    weather = {
+        "observedAt": parse_garmin_time(payload.get("issueDate")),
+        "condition": str(first_value(weather_type, ("weatherTypeDesc", "description", "desc")) or "").strip(),
+        "temperatureF": parse_number(payload.get("temp")),
+        "apparentTemperatureF": parse_number(payload.get("apparentTemp")),
+        "dewPointF": parse_number(payload.get("dewPoint")),
+        "relativeHumidityPct": parse_number(payload.get("relativeHumidity")),
+        "windSpeedMPH": parse_number(payload.get("windSpeed")),
+        "windGustMPH": parse_number(payload.get("windGust")),
+        "windDirectionDeg": parse_number(payload.get("windDirection")),
+        "windDirection": str(payload.get("windDirectionCompassPoint") or "").strip(),
+        "latitude": parse_number(payload.get("latitude")),
+        "longitude": parse_number(payload.get("longitude")),
+        "stationId": str(first_value(station, ("weatherStationPk", "stationId", "id")) or "").strip(),
+        "stationName": str(first_value(station, ("weatherStationName", "name")) or "").strip(),
+        "stationTimezone": str(first_value(station, ("timezone", "timeZone")) or "").strip(),
+        "raw": payload,
+    }
+    visible_keys = (
+        "condition",
+        "temperatureF",
+        "apparentTemperatureF",
+        "relativeHumidityPct",
+        "windSpeedMPH",
+        "windDirection",
+    )
+    if not any(weather[key] not in (None, "") for key in visible_keys):
+        return None
+    return weather
+
+
 def activity_workout_response(client, activity_id):
     errors = {}
     activity_payload = safe_activity_call(errors, "activity", lambda: client.get_activity(activity_id))
     splits_payload = safe_activity_call(errors, "splits", lambda: client.get_activity_splits(activity_id))
     split_summaries_payload = safe_activity_call(errors, "splitSummaries", lambda: client.get_activity_split_summaries(activity_id))
     typed_splits_payload = safe_activity_call(errors, "typedSplits", lambda: client.get_activity_typed_splits(activity_id))
+    weather_payload = safe_activity_call(errors, "weather", lambda: client.get_activity_weather(activity_id))
     if not isinstance(activity_payload, dict):
         activity_payload = {}
     if not isinstance(splits_payload, dict):
@@ -515,12 +556,14 @@ def activity_workout_response(client, activity_id):
         "workout": normalize_workout(workout_payload),
         "intervals": intervals,
         "laps": laps,
+        "weather": normalize_weather(weather_payload),
         "raw": {
             "activity": activity_payload,
             "splits": splits_payload,
             "splitSummaries": split_summaries_payload,
             "typedSplits": typed_splits_payload,
             "workout": workout_payload,
+            "weather": weather_payload,
         },
         "errors": errors,
     }

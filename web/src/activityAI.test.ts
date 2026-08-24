@@ -141,7 +141,15 @@ describe("formatActivityForAI", () => {
         endElevationM: 62,
         paceSPKM: 320,
         gapSPKM: 295
-      }]
+      }],
+      weather: {
+        condition: "Partly cloudy",
+        temperatureC: 18.3,
+        apparentTemperatureC: 17.6,
+        relativeHumidityPct: 72,
+        windSpeedKPH: 14.5,
+        windDirection: "SW"
+      }
     }), weeklyContext());
 
     expect(result).toContain("# Activity: Morning Run");
@@ -155,6 +163,12 @@ describe("formatActivityForAI", () => {
     expect(result).toContain("| Day | Activity | Distance | Moving time | Avg pace | Avg HR |");
     expect(result).toContain("| Tue 18 Aug | Easy Run | 5.00 km | 25:00 | 5:00 /km | 138 bpm |");
     expect(result).toContain("| Wed 19 Aug | Steady Run | 10.00 km | 50:00 | 5:00 /km |  |");
+    expect(result).toContain("## Weather");
+    expect(result).toContain("- Conditions: Partly cloudy");
+    expect(result).toContain("- Temperature: 18.3 °C");
+    expect(result).toContain("- Feels like: 17.6 °C");
+    expect(result).toContain("- Humidity: 72%");
+    expect(result).toContain("- Wind: SW 14.5 km/h");
     expect(result).toContain("## Notes\n\n> Felt controlled.");
     expect(result).toContain("## Workout\n- Name: Threshold Repeats");
     expect(result).toContain("## Intervals");

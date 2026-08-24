@@ -148,6 +148,68 @@ func TestApplyGarminWorkoutMetadata(t *testing.T) {
 	}
 }
 
+func TestApplyGarminWorkoutMetadataKeepsWeatherWhenWorkoutDataIsUnavailable(t *testing.T) {
+	temperatureF := 68.0
+	apparentTemperatureF := 66.2
+	dewPointF := 53.6
+	humidity := 55.0
+	windMPH := 7.0
+	windGustMPH := 11.0
+	directionDeg := 225.0
+	latitude := 53.35
+	longitude := -6.26
+	observedAt := time.Date(2026, 8, 20, 7, 0, 0, 0, time.UTC)
+	activity := ImportedActivity{}
+
+	applyGarminWorkoutMetadata(&activity, GarminBridgeActivityWorkout{
+		Available: false,
+		Weather: &GarminBridgeWeather{
+			ObservedAt:           &observedAt,
+			Condition:            " Partly cloudy ",
+			TemperatureF:         &temperatureF,
+			ApparentTemperatureF: &apparentTemperatureF,
+			DewPointF:            &dewPointF,
+			RelativeHumidityPct:  &humidity,
+			WindSpeedMPH:         &windMPH,
+			WindGustMPH:          &windGustMPH,
+			WindDirectionDeg:     &directionDeg,
+			WindDirection:        " sw ",
+			Latitude:             &latitude,
+			Longitude:            &longitude,
+			StationID:            " station-1 ",
+			StationName:          " Dublin ",
+			StationTimezone:      " Europe/Dublin ",
+			Raw:                  map[string]any{"latitude": latitude, "privateStation": "station-1"},
+		},
+	})
+
+	if activity.ReplaceWorkoutMetadata {
+		t.Fatal("unavailable workout data should not replace workout metadata")
+	}
+	if activity.Weather == nil {
+		t.Fatal("weather was not applied")
+	}
+	if got := *activity.Weather.TemperatureC; math.Abs(got-20) > 0.0001 {
+		t.Fatalf("temperature = %v, want 20 C", got)
+	}
+	if got := *activity.Weather.WindSpeedKPH; math.Abs(got-11.265408) > 0.0001 {
+		t.Fatalf("wind speed = %v, want 11.265408 kph", got)
+	}
+	if activity.Weather.Condition != "Partly cloudy" || activity.Weather.WindDirection != "SW" {
+		t.Fatalf("weather labels = %#v", activity.Weather)
+	}
+	encoded, err := json.Marshal(Activity{Weather: activity.Weather})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicJSON := string(encoded)
+	for _, privateField := range []string{"provider", "dewPoint", "windGust", "latitude", "longitude", "station", "raw", "privateStation"} {
+		if strings.Contains(publicJSON, privateField) {
+			t.Fatalf("public activity weather leaked %q: %s", privateField, publicJSON)
+		}
+	}
+}
+
 func TestGradeAdjustedPaceFromSpeedMPS(t *testing.T) {
 	speed := 3.2
 	pace := gradeAdjustedPaceFromSpeedMPS(&speed)

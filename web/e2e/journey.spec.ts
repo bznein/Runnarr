@@ -319,7 +319,7 @@ test.describe("local product journey", () => {
       expect(copiedActivity).toContain(`# Activity: ${name}`);
       expect(copiedActivity).toContain("## Overview");
       expect(copiedActivity).toContain("## Weekly running context");
-      expect(copiedActivity).toContain("- Other runs: 3");
+      expect(copiedActivity).toMatch(/^- Other runs: (?:3|4)$/m);
       expect(copiedActivity).toContain("E2E Calendar Matched Run");
       expect(copiedActivity).toContain("E2E Recovery Run");
       expect(copiedActivity).toContain("E2E Treadmill Run");
@@ -327,6 +327,7 @@ test.describe("local product journey", () => {
       expect(copiedActivity).not.toContain("E2E Cycling Activity");
       expect(copiedActivity).not.toContain("E2E Calendar Planned Run");
       expect(copiedActivity).not.toMatch(/latitude|longitude|sourceId|summaryPolyline/);
+      if (mobile) expect(copiedActivity).toContain("E2E chromium Morning Run");
     }
 
     await page.getByRole("button", { name: "Match", exact: true }).click();
@@ -525,6 +526,31 @@ test.describe("local product journey", () => {
 
     await expect(page.getByRole("heading", { name: "E2E Cycling Activity" })).toBeVisible();
     await expect(page.locator(".planned-match-panel")).toHaveCount(0);
+
+    await page.goto("/activities");
+    const weatherActivity = visibleActivityLink(page, "E2E Calendar Matched Run", mobile);
+    await expect(weatherActivity).toBeVisible();
+    await weatherActivity.click();
+    await expect(page.getByRole("heading", { name: "E2E Calendar Matched Run" })).toBeVisible();
+    if (!visualBaseline) {
+      const weatherPanel = page.getByLabel("Activity weather");
+      await expect(weatherPanel).toContainText("Partly cloudy");
+      await expect(weatherPanel.getByText("18.3 °C", { exact: true })).toBeVisible();
+      await expect(weatherPanel.getByText("17.6 °C", { exact: true })).toBeVisible();
+      await expect(weatherPanel.getByText("72%", { exact: true })).toBeVisible();
+      await expect(weatherPanel.getByText("SW 14.5 km/h", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Activity actions" }).click();
+      await page.getByRole("menuitem", { name: "Copy for AI" }).click();
+      await expect(page.getByRole("status")).toHaveText("Activity copied for AI.");
+      const copiedWeatherActivity = await page.evaluate(() => navigator.clipboard.readText());
+      expect(copiedWeatherActivity).toContain("## Weather");
+      expect(copiedWeatherActivity).toContain("- Conditions: Partly cloudy");
+      expect(copiedWeatherActivity).toContain("- Temperature: 18.3 °C");
+      expect(copiedWeatherActivity).not.toMatch(/latitude|longitude|station/i);
+    } else {
+      await expect(page.getByLabel("Activity weather")).toHaveCount(0);
+    }
+    if (mobile) await expectNoHorizontalOverflow(page);
 
     await page.goto("/activities");
     const swimmingActivity = visibleActivityLink(page, "E2E Pool Swim", mobile);

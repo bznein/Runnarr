@@ -359,6 +359,47 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	if err != nil {
 		return "", err
 	}
+	if activity.Weather != nil {
+		weatherRawBytes, marshalErr := marshalJSONObject(activity.Weather.Raw)
+		if marshalErr != nil {
+			return "", marshalErr
+		}
+		_, err = tx.Exec(ctx, `
+			insert into activity_weather(
+				activity_id, provider, observed_at, condition, temperature_c, apparent_temperature_c,
+				dew_point_c, relative_humidity_pct, wind_speed_kph, wind_gust_kph,
+				wind_direction_deg, wind_direction, latitude, longitude,
+				station_id, station_name, station_timezone, raw
+			) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+			on conflict (activity_id) do update set
+				provider = excluded.provider,
+				observed_at = excluded.observed_at,
+				condition = excluded.condition,
+				temperature_c = excluded.temperature_c,
+				apparent_temperature_c = excluded.apparent_temperature_c,
+				dew_point_c = excluded.dew_point_c,
+				relative_humidity_pct = excluded.relative_humidity_pct,
+				wind_speed_kph = excluded.wind_speed_kph,
+				wind_gust_kph = excluded.wind_gust_kph,
+				wind_direction_deg = excluded.wind_direction_deg,
+				wind_direction = excluded.wind_direction,
+				latitude = excluded.latitude,
+				longitude = excluded.longitude,
+				station_id = excluded.station_id,
+				station_name = excluded.station_name,
+				station_timezone = excluded.station_timezone,
+				raw = excluded.raw,
+				updated_at = now()
+		`, id, activity.Weather.Provider, activity.Weather.ObservedAt, activity.Weather.Condition,
+			activity.Weather.TemperatureC, activity.Weather.ApparentTemperatureC, activity.Weather.DewPointC,
+			activity.Weather.RelativeHumidityPct, activity.Weather.WindSpeedKPH, activity.Weather.WindGustKPH,
+			activity.Weather.WindDirectionDeg, activity.Weather.WindDirection, activity.Weather.Latitude,
+			activity.Weather.Longitude, activity.Weather.StationID, activity.Weather.StationName,
+			activity.Weather.StationTimezone, weatherRawBytes)
+		if err != nil {
+			return "", err
+		}
+	}
 
 	if _, err = tx.Exec(ctx, `delete from activity_samples where activity_id = $1`, id); err != nil {
 		return "", err
@@ -878,6 +919,11 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 	if err := scanActivity(row, &activity); err != nil {
 		return activity, err
 	}
+	weather, err := s.getActivityWeather(ctx, id)
+	if err != nil {
+		return activity, err
+	}
+	activity.Weather = weather
 
 	samples, err := s.listSamples(ctx, id)
 	if err != nil {
@@ -910,6 +956,35 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 		laps,
 	)
 	return activity, nil
+}
+
+func (s *Store) getActivityWeather(ctx context.Context, activityID string) (*ActivityWeather, error) {
+	var weather ActivityWeather
+	var rawBytes []byte
+	err := s.db.QueryRow(ctx, `
+		select provider, observed_at, condition, temperature_c, apparent_temperature_c,
+			dew_point_c, relative_humidity_pct, wind_speed_kph, wind_gust_kph,
+			wind_direction_deg, wind_direction, latitude, longitude,
+			station_id, station_name, station_timezone, raw
+		from activity_weather
+		where activity_id = $1
+	`, activityID).Scan(
+		&weather.Provider, &weather.ObservedAt, &weather.Condition, &weather.TemperatureC,
+		&weather.ApparentTemperatureC, &weather.DewPointC, &weather.RelativeHumidityPct,
+		&weather.WindSpeedKPH, &weather.WindGustKPH, &weather.WindDirectionDeg,
+		&weather.WindDirection, &weather.Latitude, &weather.Longitude, &weather.StationID,
+		&weather.StationName, &weather.StationTimezone, &rawBytes,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(rawBytes, &weather.Raw); err != nil {
+		return nil, err
+	}
+	return &weather, nil
 }
 
 func (s *Store) GetClimbDetectionSettings(ctx context.Context) (ClimbDetectionConfig, error) {
