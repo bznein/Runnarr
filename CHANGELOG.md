@@ -3,7 +3,8 @@
 ## Unreleased
 
 - Garmin activity imports now retain weather conditions for a compact
-  activity-detail summary and include them in Copy for AI.
+  activity-detail summary and include them in Copy for AI. Accounts can opt in
+  to an attributed, rate-limited Open-Meteo fallback when Garmin has no weather.
 - Copy for AI now includes the activity weekday and a privacy-safe seven-day running summary with workload totals and each other run in the window.
 - Activity details can now copy a concise Markdown summary with metrics,
   notes, complete interval-tab data, and climbs for use with AI tools.

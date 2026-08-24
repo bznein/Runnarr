@@ -163,6 +163,7 @@ func TestApplyGarminWorkoutMetadataKeepsWeatherWhenWorkoutDataIsUnavailable(t *t
 
 	applyGarminWorkoutMetadata(&activity, GarminBridgeActivityWorkout{
 		Available: false,
+		Raw:       map[string]any{"weather": map[string]any{"latitude": latitude, "longitude": longitude, "temp": temperatureF}},
 		Weather: &GarminBridgeWeather{
 			ObservedAt:           &observedAt,
 			Condition:            " Partly cloudy ",
@@ -186,6 +187,9 @@ func TestApplyGarminWorkoutMetadataKeepsWeatherWhenWorkoutDataIsUnavailable(t *t
 	if activity.ReplaceWorkoutMetadata {
 		t.Fatal("unavailable workout data should not replace workout metadata")
 	}
+	if activity.Raw["garmin_workout"] == nil {
+		t.Fatal("raw Garmin weather payload should be retained when workout metadata is unavailable")
+	}
 	if activity.Weather == nil {
 		t.Fatal("weather was not applied")
 	}
@@ -203,10 +207,30 @@ func TestApplyGarminWorkoutMetadataKeepsWeatherWhenWorkoutDataIsUnavailable(t *t
 		t.Fatal(err)
 	}
 	publicJSON := string(encoded)
-	for _, privateField := range []string{"provider", "dewPoint", "windGust", "latitude", "longitude", "station", "raw", "privateStation"} {
+	if !strings.Contains(publicJSON, `"provider":"garmin"`) {
+		t.Fatalf("public activity weather omitted provider attribution: %s", publicJSON)
+	}
+	for _, privateField := range []string{"dewPoint", "windGust", "latitude", "longitude", "station", "raw", "privateStation"} {
 		if strings.Contains(publicJSON, privateField) {
 			t.Fatalf("public activity weather leaked %q: %s", privateField, publicJSON)
 		}
+	}
+}
+
+func TestActivityWeatherLocationUsesGarminCoordinatesBeforeSamples(t *testing.T) {
+	garminLatitude, garminLongitude := 53.1, -7.2
+	sampleLatitude, sampleLongitude := 51.5, -0.1
+	activity := ImportedActivity{
+		Weather: &ActivityWeather{Latitude: &garminLatitude, Longitude: &garminLongitude},
+		Samples: []ActivitySample{{Latitude: &sampleLatitude, Longitude: &sampleLongitude}},
+	}
+
+	latitude, longitude, ok := activityWeatherLocation(activity)
+	if !ok || latitude != garminLatitude || longitude != garminLongitude {
+		t.Fatalf("location = (%v, %v, %v), want Garmin weather coordinates", latitude, longitude, ok)
+	}
+	if activityWeatherHasDisplayData(activity.Weather) {
+		t.Fatal("coordinate-only Garmin weather should allow fallback")
 	}
 }
 

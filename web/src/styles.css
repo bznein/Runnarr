@@ -773,6 +773,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 18px;
 }
 
@@ -806,6 +807,33 @@ textarea {
 
 .activity-weather-values small {
   color: var(--color-muted);
+}
+
+.activity-weather-attribution,
+.weather-settings-terms {
+  margin: 0;
+}
+
+.activity-weather-attribution {
+  min-width: 0;
+  text-align: right;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.activity-weather-attribution a,
+.weather-settings-terms a {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.activity-weather-attribution a {
+  display: inline;
+}
+
+.activity-weather-attribution svg {
+  vertical-align: -0.15em;
 }
 
 .metric strong {
@@ -5381,6 +5409,10 @@ textarea {
 
   .activity-weather-values {
     justify-content: flex-start;
+  }
+
+  .activity-weather-attribution {
+    text-align: left;
   }
 
   .main {

@@ -63,7 +63,7 @@ type Activity struct {
 }
 
 type ActivityWeather struct {
-	Provider             string         `json:"-"`
+	Provider             string         `json:"provider,omitempty"`
 	ObservedAt           *time.Time     `json:"observedAt,omitempty"`
 	Condition            string         `json:"condition,omitempty"`
 	TemperatureC         *float64       `json:"temperatureC,omitempty"`

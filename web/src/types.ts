@@ -627,6 +627,7 @@ export type Activity = {
 };
 
 export type ActivityWeather = {
+  provider?: string;
   observedAt?: string;
   condition?: string;
   temperatureC?: number;
@@ -634,6 +635,10 @@ export type ActivityWeather = {
   relativeHumidityPct?: number;
   windSpeedKPH?: number;
   windDirection?: string;
+};
+
+export type WeatherConfig = {
+  openMeteoFallbackEnabled: boolean;
 };
 
 export type ActivityTrainingSheetMatch = {

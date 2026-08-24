@@ -6728,6 +6728,7 @@ function SettingsPage({
       {garminSync.error && <div className="error">{garminSync.error instanceof Error ? garminSync.error.message : "Garmin sync failed"}</div>}
       {garminHealthSync.error && <div className="error">{garminHealthSync.error instanceof Error ? garminHealthSync.error.message : "Garmin health sync failed"}</div>}
       {garminGearSync.error && <div className="error">{garminGearSync.error instanceof Error ? garminGearSync.error.message : "Garmin gear sync failed"}</div>}
+      <WeatherSettings canWrite={canWrite} />
       <WorkoutSettings />
       <TrainingSheetSettings />
       <NotificationSettingsSection canWrite={canWrite} />
@@ -6754,6 +6755,44 @@ function SettingsPage({
         importsLoading={imports.isLoading}
       />
     </Page>
+  );
+}
+
+function WeatherSettings({ canWrite }: { canWrite: boolean }) {
+  const queryClient = useQueryClient();
+  const config = useQuery({ queryKey: ["weather-config"], queryFn: api.weatherConfig });
+  const [loaded, setLoaded] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    if (!config.data || loaded) return;
+    setLoaded(true);
+    setEnabled(config.data.openMeteoFallbackEnabled);
+  }, [config.data, loaded]);
+
+  const save = useMutation({
+    mutationFn: () => api.updateWeatherConfig({ openMeteoFallbackEnabled: enabled }),
+    onSuccess: async (saved) => {
+      setEnabled(saved.openMeteoFallbackEnabled);
+      await queryClient.invalidateQueries({ queryKey: ["weather-config"] });
+    }
+  });
+
+  return (
+    <section id="weather" className="panel workout-settings-panel weather-settings-panel">
+      <div>
+        <div className="panel-heading">Activity weather fallback</div>
+        <p className="muted">Garmin weather remains the first choice. When it is missing, this can send the activity’s rounded start coordinates and start date to Open-Meteo and store the nearest hourly model result.</p>
+      </div>
+      <div className="workout-settings-controls">
+        <label className="checkbox-field"><input type="checkbox" disabled={!canWrite || config.isLoading || save.isPending} checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Use Open-Meteo fallback</label>
+        <button className="primary-button small-button" type="button" disabled={!canWrite || save.isPending || config.isLoading} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : "Save weather settings"}</button>
+      </div>
+      <p className="muted weather-settings-terms">Enabling this opts the account into a third-party request during Garmin sync. The free Open-Meteo API is for non-commercial use and may log coordinates for up to 90 days. Its CC BY 4.0 data is attributed wherever fallback weather appears. <a href="https://open-meteo.com/en/terms" target="_blank" rel="noreferrer">Terms and privacy <ExternalLink size={12} aria-hidden /></a> · <a href="https://open-meteo.com/en/license" target="_blank" rel="noreferrer">Licence <ExternalLink size={12} aria-hidden /></a></p>
+      {config.error && <div className="error">{config.error instanceof Error ? config.error.message : "Could not load weather settings"}</div>}
+      {save.error && <div className="error">{save.error instanceof Error ? save.error.message : "Could not save weather settings"}</div>}
+      {save.isSuccess && <div className="muted">Weather settings saved. Run a Garmin activity sync to fetch missing weather.</div>}
+    </section>
   );
 }
 
@@ -8004,6 +8043,7 @@ function ActivityWeatherPanel({ weather }: { weather: ActivityWeather }) {
       {items.length > 0 && <div className="activity-weather-values">
         {items.map((item) => <span key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
       </div>}
+      {weather.provider === "open-meteo" && <p className="muted activity-weather-attribution">Model-derived, nearest-hour conditions; WMO code rendered as text. <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather data by Open-Meteo.com <ExternalLink size={12} aria-hidden /></a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a></p>}
     </section>
   );
 }
