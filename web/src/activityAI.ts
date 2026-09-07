@@ -1,5 +1,5 @@
 import { speedToPaceSPKM } from "./paceDisplay";
-import type { Activity, ActivityAIContext, ActivityClimb, ActivityInterval, ActivityLap, ActivitySample, ActivityWorkoutStep } from "./types";
+import type { Activity, ActivityAIContext, ActivityClimb, ActivityInterval, ActivityLap, ActivitySample, ActivityWorkoutStep, PlannedActivity, Workout, WorkoutStep } from "./types";
 import { openMeteoAISource } from "./weatherAttribution";
 
 type MarkdownColumn<T> = {
@@ -26,7 +26,30 @@ type IntervalExportRow = {
   avgPower?: number;
 };
 
-export function formatActivityForAI(activity: Activity, context?: ActivityAIContext) {
+export type MatchedWorkoutForAI = {
+  plannedActivity: Pick<PlannedActivity, "name" | "plannedDate">;
+  workout: Workout;
+};
+
+type TargetComparisonRow = {
+  kind: Exclude<WorkoutStep["kind"], "repeat">;
+  step: string;
+  condition: string;
+  pace?: string;
+};
+
+type TargetActualComparisonRow = {
+  targetStep: string;
+  targetCondition?: string;
+  targetPace?: string;
+  actualStep: string;
+  actualTime?: string;
+  actualDistance?: string;
+  actualPace?: string;
+  actualHeartRate?: string;
+};
+
+export function formatActivityForAI(activity: Activity, context?: ActivityAIContext, matchedWorkout?: MatchedWorkoutForAI) {
   const lines = [`# Activity: ${inlineText(activity.name)}`, "", "## Overview"];
   appendFields(lines, [
     ["Sport", activity.sportType],
@@ -81,6 +104,9 @@ export function formatActivityForAI(activity: Activity, context?: ActivityAICont
   if (activity.feedback?.trim()) {
     lines.push("", "## Reflection", "", ...quoteText(activity.feedback));
   }
+  if (matchedWorkout) {
+    appendMatchedWorkout(lines, activity, matchedWorkout);
+  }
   if (activity.workout && (activity.workout.name?.trim() || activity.workout.sportType?.trim())) {
     lines.push("", "## Workout");
     appendFields(lines, [
@@ -100,6 +126,167 @@ export function formatActivityForAI(activity: Activity, context?: ActivityAICont
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function appendMatchedWorkout(lines: string[], activity: Activity, matched: MatchedWorkoutForAI) {
+  const { plannedActivity, workout } = matched;
+  lines.push("", "## Matched workout");
+  appendFields(lines, [
+    ["Planned activity", plannedActivity.name],
+    ["Planned date", plannedActivity.plannedDate],
+    ["Workout", workout.name],
+    ["Sport", workout.sportType],
+    ["Source", workout.source === "training_sheet" ? "Training sheet" : "Manual"],
+    ["Scheduled date", workout.scheduledDate],
+    ["Estimated duration", workout.definition.estimatedDurationS > 0 ? formatDuration(workout.definition.estimatedDurationS) : undefined],
+    ["Pace tolerance", workout.paceToleranceSeconds === undefined ? undefined : `${workout.paceToleranceSeconds} seconds`],
+    ["Parse status", humanize(workout.parseStatus)]
+  ]);
+
+  if (workout.sourceText?.trim()) {
+    lines.push("", "### Prescription", "", ...quoteText(workout.sourceText));
+  }
+
+  lines.push("", "### Steps", "", ...workoutStepLines(workout.definition.steps));
+
+  if (workout.parseMessages.length > 0) {
+    lines.push("", "### Parse notes");
+    for (const message of workout.parseMessages) {
+      const level = humanize(message.level) || "Note";
+      const source = message.source?.trim() ? ` (${inlineText(message.source)})` : "";
+      lines.push(`- ${level}: ${inlineText(message.message)}${source}`);
+    }
+  }
+
+  const targets = expandWorkoutTargets(workout.definition.steps);
+  lines.push("", "## Target vs actual");
+  if (targets.length === 0) {
+    lines.push("", "No executable target steps were available for comparison.");
+    return;
+  }
+  lines.push("", ...targetActualComparisonTable(targets, activity));
+}
+
+function workoutStepLines(steps: WorkoutStep[], indent = ""): string[] {
+  const lines: string[] = [];
+  for (const step of steps) {
+    if (step.kind === "repeat") {
+      const repeatCount = Number.isFinite(step.repeatCount) && step.repeatCount && step.repeatCount > 0 ? Math.round(step.repeatCount) : 1;
+      const suffix = step.skipLastRecovery ? "; skip final recovery" : "";
+      const description = step.description?.trim() ? ` — ${inlineText(step.description)}` : "";
+      lines.push(`${indent}- ${repeatCount}× repeat${suffix}${description}`);
+      lines.push(...workoutStepLines(step.children ?? [], `${indent}  `));
+      continue;
+    }
+    const description = step.description?.trim() ? ` — ${inlineText(step.description)}` : "";
+    const target = workoutTargetPaceLabel(step);
+    lines.push(`${indent}- ${workoutStepKindLabel(step.kind)}: ${workoutStepConditionLabel(step)}${target ? `; target ${target}` : ""}${description}`);
+  }
+  return lines.length > 0 ? lines : ["- No steps were available."];
+}
+
+function expandWorkoutTargets(steps: WorkoutStep[], repeatPath: number[] = []): TargetComparisonRow[] {
+  const targets: TargetComparisonRow[] = [];
+  for (const step of steps) {
+    if (step.kind === "repeat") {
+      const repeatCount = Number.isFinite(step.repeatCount) && step.repeatCount && step.repeatCount > 0 ? Math.round(step.repeatCount) : 1;
+      for (let repeat = 1; repeat <= repeatCount; repeat += 1) {
+        const children = step.skipLastRecovery && repeat === repeatCount
+          ? (step.children ?? []).filter((child) => child.kind !== "recovery")
+          : step.children ?? [];
+        targets.push(...expandWorkoutTargets(children, [...repeatPath, repeat]));
+      }
+      continue;
+    }
+    const repeatLabel = repeatPath.length > 0 ? `Set ${repeatPath.join(".")} · ` : "";
+    const description = step.description?.trim() ? ` — ${inlineText(step.description)}` : "";
+    targets.push({
+      kind: step.kind,
+      step: `${repeatLabel}${workoutStepKindLabel(step.kind)}${description}`,
+      condition: workoutStepConditionLabel(step),
+      pace: workoutTargetPaceLabel(step)
+    });
+  }
+  return targets;
+}
+
+function targetActualComparisonTable(targets: TargetComparisonRow[], activity: Activity) {
+  const actuals = activity.intervals ?? [];
+  const rows: TargetActualComparisonRow[] = [];
+  let actualCursor = 0;
+
+  for (const target of targets) {
+    const category = activityCategoryForWorkoutKind(target.kind);
+    const matchedIndex = actuals.findIndex((actual, index) => index >= actualCursor && actual.category.toLowerCase() === category);
+    if (matchedIndex >= 0) {
+      for (let index = actualCursor; index < matchedIndex; index += 1) {
+        rows.push(unplannedActualRow(actuals[index], activity.sportType));
+      }
+      rows.push(targetActualRow(target, actuals[matchedIndex], activity.sportType));
+      actualCursor = matchedIndex + 1;
+      continue;
+    }
+    rows.push({
+      targetStep: target.step,
+      targetCondition: target.condition,
+      targetPace: target.pace,
+      actualStep: "Not recorded"
+    });
+  }
+
+  for (let index = actualCursor; index < actuals.length; index += 1) {
+    rows.push(unplannedActualRow(actuals[index], activity.sportType));
+  }
+
+  return markdownTable(rows, [
+    { heading: "Target step", value: (item) => item.targetStep, always: true },
+    { heading: "Target condition", value: (item) => item.targetCondition },
+    { heading: "Target pace", value: (item) => item.targetPace },
+    { heading: "Actual step", value: (item) => item.actualStep, always: true },
+    { heading: "Actual time", value: (item) => item.actualTime },
+    { heading: "Actual distance", value: (item) => item.actualDistance },
+    { heading: "Actual pace", value: (item) => item.actualPace },
+    { heading: "Avg HR", value: (item) => item.actualHeartRate }
+  ]);
+}
+
+function targetActualRow(target: TargetComparisonRow, actual: ActivityInterval, sportType: string): TargetActualComparisonRow {
+  return {
+    targetStep: target.step,
+    targetCondition: target.condition,
+    targetPace: target.pace,
+    ...actualComparisonFields(actual, sportType)
+  };
+}
+
+function unplannedActualRow(actual: ActivityInterval, sportType: string): TargetActualComparisonRow {
+  return {
+    targetStep: "Unplanned actual",
+    ...actualComparisonFields(actual, sportType)
+  };
+}
+
+function actualComparisonFields(actual: ActivityInterval, sportType: string) {
+  const duration = intervalDisplayTimeS(actual);
+  const pace = isFinitePositive(actual.avgPaceSPKM)
+    ? actual.avgPaceSPKM
+    : isFinitePositive(actual.distanceM) && duration > 0 ? duration / (actual.distanceM / 1000) : undefined;
+  return {
+    actualStep: intervalStepLabel(actual, sportType),
+    actualTime: formatDuration(duration),
+    actualDistance: formatDistance(actual.distanceM),
+    actualPace: formatPace(pace),
+    actualHeartRate: formatBPM(actual.avgHeartRate)
+  };
+}
+
+function activityCategoryForWorkoutKind(kind: TargetComparisonRow["kind"]) {
+  switch (kind) {
+    case "warmup": return "warmup";
+    case "recovery": return "recovery";
+    case "cooldown": return "cooldown";
+    case "work": return "active";
+  }
 }
 
 function weeklyContextTable(context: ActivityAIContext) {
@@ -140,6 +327,31 @@ function formatWeatherPercent(value?: number) {
 function formatWeatherWind(direction?: string, speedKPH?: number) {
   const speed = typeof speedKPH === "number" && Number.isFinite(speedKPH) ? `${speedKPH.toFixed(1).replace(/\.0$/, "")} km/h` : "";
   return [direction?.trim(), speed].filter(Boolean).join(" ") || undefined;
+}
+
+function workoutStepKindLabel(kind: Exclude<WorkoutStep["kind"], "repeat">) {
+  return ({ warmup: "Warm up", work: "Work", recovery: "Recovery", cooldown: "Cool down" } as const)[kind];
+}
+
+function workoutStepConditionLabel(step: WorkoutStep) {
+  const condition = step.endCondition;
+  if (!condition || condition.type === "lap_button") return "Lap button";
+  if (condition.type === "distance") {
+    const value = condition.value;
+    if (value === undefined || !Number.isFinite(value)) return "Distance";
+    return value >= 1000 ? `${(value / 1000).toLocaleString()} km` : `${value} m`;
+  }
+  return formatDuration(condition.value) ?? "Time";
+}
+
+function workoutTargetPaceLabel(step: WorkoutStep) {
+  const target = step.target;
+  const paces = [target.paceFastSecondsPerKM, target.paceSlowSecondsPerKM]
+    .filter((pace): pace is number => isFinitePositive(pace))
+    .sort((left, right) => left - right);
+  if (paces.length === 2) return `${formatPace(paces[0])}–${formatPace(paces[1])}`;
+  if (isFinitePositive(target.paceSecondsPerKM)) return formatPace(target.paceSecondsPerKM);
+  return undefined;
 }
 
 function appendFields(lines: string[], fields: Array<[string, string | undefined]>) {

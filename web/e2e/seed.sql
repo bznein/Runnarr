@@ -366,6 +366,51 @@ on conflict (id) do update set
     archived_at = null,
     updated_at = :'e2e_now'::timestamptz;
 
+-- The completed calendar activity is linked to the planned workout above and
+-- includes a recorded interval so Copy for AI can compare the prescription
+-- with a concrete result.
+insert into activity_workouts(
+    activity_id, provider, provider_workout_id, name, sport_type, steps, raw
+)
+select activity.id, 'e2e', 'e2e-calendar-matched-workout', 'E2E Completed Easy Run', 'Run',
+    '[{"index":0,"order":0,"type":"interval"}]'::jsonb, '{"fixture":"ai-matched-workout"}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-calendar-matched-run'
+on conflict (activity_id) do update set
+    provider = excluded.provider,
+    provider_workout_id = excluded.provider_workout_id,
+    name = excluded.name,
+    sport_type = excluded.sport_type,
+    steps = excluded.steps,
+    raw = excluded.raw,
+    updated_at = :'e2e_now'::timestamptz;
+
+insert into activity_intervals(
+    activity_id, interval_index, category, provider_type,
+    workout_step_index, elapsed_time_s, moving_time_s, distance_m,
+    avg_pace_s_per_km, avg_heart_rate, raw
+)
+select activity.id, 0, 'active', 'run', 0, 2880, 2880, 8000, 360, 145,
+    '{"fixture":"ai-matched-workout"}'::jsonb
+from activities activity
+join users on users.id = activity.user_id
+where users.username = :'e2e_username'
+  and activity.source = 'e2e'
+  and activity.source_id = 'e2e-calendar-matched-run'
+on conflict (activity_id, interval_index) do update set
+    category = excluded.category,
+    provider_type = excluded.provider_type,
+    workout_step_index = excluded.workout_step_index,
+    elapsed_time_s = excluded.elapsed_time_s,
+    moving_time_s = excluded.moving_time_s,
+    distance_m = excluded.distance_m,
+    avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+    avg_heart_rate = excluded.avg_heart_rate,
+    raw = excluded.raw;
+
 -- A deterministic spatial fixture keeps the course library and detail views
 -- inspectable before the browser journey creates user-scoped courses itself.
 insert into courses(

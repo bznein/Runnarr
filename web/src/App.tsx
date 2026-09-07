@@ -3407,11 +3407,18 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
     setActionsOpen(false);
     setCopyFeedback(undefined);
     try {
-      const context = await api.activityAIContext(displayItem.id, browserCalendarTimezone());
-      await copyTextToClipboard(formatActivityForAI(displayItem, context));
+      const [context, workout] = await Promise.all([
+        api.activityAIContext(displayItem.id, browserCalendarTimezone()),
+        matchedPlannedActivity?.workoutId ? api.workout(matchedPlannedActivity.workoutId) : Promise.resolve(undefined)
+      ]);
+      await copyTextToClipboard(formatActivityForAI(
+        displayItem,
+        context,
+        matchedPlannedActivity && workout ? { plannedActivity: matchedPlannedActivity, workout } : undefined
+      ));
       setCopyFeedback({ kind: "success", message: "Activity copied for AI." });
     } catch {
-      setCopyFeedback({ kind: "error", message: "Could not load weekly context or copy the activity. Try again." });
+      setCopyFeedback({ kind: "error", message: "Could not load AI copy details or copy the activity. Try again." });
     }
   };
   const handleDelete = () => {

@@ -9,6 +9,7 @@
   the median-temperature record from explicit UKMO, ICON, and ECMWF models
   instead of a potentially unrepresentative auto-selected start-hour value.
 - Copy for AI now includes the activity weekday and a privacy-safe seven-day running summary with workload totals and each other run in the window.
+- Copy for AI now includes a matched workout's prescription and steps, plus a per-step target-versus-actual interval comparison when structured results are available.
 - Activity details can now copy a concise Markdown summary with metrics,
   notes, complete interval-tab data, and climbs for use with AI tools.
 - Course maps now show zoom-aware kilometre markers while planning and when

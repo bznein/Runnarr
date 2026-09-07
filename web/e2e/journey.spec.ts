@@ -1092,6 +1092,27 @@ test.describe("local product journey", () => {
     await expect(visibleCalendarLists.getByRole("link", { name: "E2E Calendar Planned Run", exact: true })).toHaveCount(0);
     await expect(page.locator(".calendar-day-match-meta:visible").filter({ hasText: "Matched plan: E2E Calendar Planned Run · Planned for" })).toBeVisible();
 
+    if (!visualBaseline) {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
+      await visibleCalendarLists.getByRole("link", { name: "E2E Calendar Matched Run", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "E2E Calendar Matched Run" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Workout", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Activity actions" }).click();
+      await page.getByRole("menuitem", { name: "Copy for AI" }).click();
+      await expect(page.getByRole("status")).toHaveText("Activity copied for AI.");
+      const copiedMatchedActivity = await page.evaluate(() => navigator.clipboard.readText());
+      expect(copiedMatchedActivity).toContain("## Matched workout");
+      expect(copiedMatchedActivity).toContain("- Planned activity: E2E Calendar Planned Run");
+      expect(copiedMatchedActivity).toContain("- Workout: E2E Calendar Planned Run");
+      expect(copiedMatchedActivity).toContain("### Steps\n\n- Work: 48:00");
+      expect(copiedMatchedActivity).toContain("## Target vs actual");
+      expect(copiedMatchedActivity).toContain("| Target step | Target condition | Actual step | Actual time | Actual distance | Actual pace | Avg HR |");
+      expect(copiedMatchedActivity).toContain("| Work | 48:00 | Run | 48:00 | 8.00 km | 6:00 /km | 145 bpm |");
+
+      await navigateTo(page, "Calendar", mobile);
+      await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
+    }
+
     const todayDayLink = page.locator(".calendar-day-link:visible").filter({ hasText: String(new Date().getDate()) }).first();
     await expect(todayDayLink).toBeVisible();
     await todayDayLink.click();
