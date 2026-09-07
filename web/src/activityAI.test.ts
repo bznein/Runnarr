@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatActivityForAI } from "./activityAI";
-import type { Activity, ActivityAIContext } from "./types";
+import type { Activity, ActivityAIContext, Workout } from "./types";
 
 function activity(overrides: Partial<Activity> = {}): Activity {
   return {
@@ -202,6 +202,96 @@ describe("formatActivityForAI", () => {
     expect(result).toContain("| 1 | 200 m | 1:00 | 5:00 /km |");
     expect(result).not.toContain("Avg HR");
     expect(result).not.toContain("## Intervals");
+  });
+
+  it("includes a matched workout's prescription, expanded steps, and target versus actual intervals", () => {
+    const matchedWorkout: Workout = {
+      id: "matched-workout-secret-id",
+      source: "training_sheet",
+      plannedActivityId: "planned-activity-secret-id",
+      name: "Threshold builder",
+      sportType: "Run",
+      sourceText: "10mins warm up//2x5mins@4:00(90secs)//10mins cool down",
+      definition: {
+        version: 1,
+        sportType: "Run",
+        estimatedDurationS: 1890,
+        steps: [{
+          order: 1,
+          kind: "warmup",
+          endCondition: { type: "time", value: 600, unit: "seconds" },
+          target: { type: "none" }
+        }, {
+          order: 2,
+          kind: "repeat",
+          repeatCount: 2,
+          skipLastRecovery: true,
+          target: { type: "none" },
+          children: [{
+            order: 1,
+            kind: "work",
+            description: "Threshold",
+            endCondition: { type: "time", value: 300, unit: "seconds" },
+            target: { type: "pace", paceSecondsPerKM: 240 }
+          }, {
+            order: 2,
+            kind: "recovery",
+            endCondition: { type: "time", value: 90, unit: "seconds" },
+            target: { type: "none" }
+          }]
+        }, {
+          order: 3,
+          kind: "cooldown",
+          endCondition: { type: "time", value: 600, unit: "seconds" },
+          target: { type: "none" }
+        }]
+      },
+      parseStatus: "warning",
+      parseMessages: [{ level: "warning", message: "Pace target was rounded.", source: "workout-secret-source" }],
+      scheduledDate: "2026-08-20",
+      paceToleranceSeconds: 8,
+      garminExcluded: false,
+      revision: 3,
+      garmin: {},
+      generatedAt: "2026-08-01T00:00:00Z",
+      createdAt: "2026-08-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z"
+    };
+    const result = formatActivityForAI(activity({
+      intervals: [{
+        index: 0, category: "warmup", elapsedTimeS: 600, movingTimeS: 600, distanceM: 1500, avgPaceSPKM: 400, avgHeartRate: 138
+      }, {
+        index: 1, category: "active", workoutRepeatIndex: 1, elapsedTimeS: 305, movingTimeS: 305, distanceM: 1300, avgPaceSPKM: 235, avgHeartRate: 164
+      }, {
+        index: 2, category: "recovery", workoutRepeatIndex: 1, elapsedTimeS: 90, movingTimeS: 90, distanceM: 200, avgPaceSPKM: 450, avgHeartRate: 148
+      }, {
+        index: 3, category: "active", workoutRepeatIndex: 2, elapsedTimeS: 298, movingTimeS: 298, distanceM: 1270, avgPaceSPKM: 235, avgHeartRate: 167
+      }, {
+        index: 4, category: "active", workoutRepeatIndex: 3, elapsedTimeS: 30, movingTimeS: 30, distanceM: 120, avgPaceSPKM: 250, avgHeartRate: 170, raw: { providerToken: "secret" }
+      }]
+    }), undefined, {
+      plannedActivity: { name: "Wednesday threshold", plannedDate: "2026-08-20" },
+      workout: matchedWorkout
+    });
+
+    expect(result).toContain("## Matched workout");
+    expect(result).toContain("- Planned activity: Wednesday threshold");
+    expect(result).toContain("- Planned date: 2026-08-20");
+    expect(result).toContain("- Workout: Threshold builder");
+    expect(result).toContain("- Source: Training sheet");
+    expect(result).toContain("- Estimated duration: 31:30");
+    expect(result).toContain("- Pace tolerance: 8 seconds");
+    expect(result).toContain("### Prescription\n\n> 10mins warm up//2x5mins@4:00(90secs)//10mins cool down");
+    expect(result).toContain("- 2× repeat; skip final recovery");
+    expect(result).toContain("  - Work: 5:00; target 4:00 /km — Threshold");
+    expect(result).toContain("### Parse notes\n- Warning: Pace target was rounded. (workout-secret-source)");
+    expect(result).toContain("## Target vs actual");
+    expect(result).toContain("| Target step | Target condition | Target pace | Actual step | Actual time | Actual distance | Actual pace | Avg HR |");
+    expect(result).toContain("| Set 1 · Work — Threshold | 5:00 | 4:00 /km | 1. Run | 5:05 | 1.30 km | 3:55 /km | 164 bpm |");
+    expect(result).toContain("| Set 2 · Work — Threshold | 5:00 | 4:00 /km | 2. Run | 4:58 | 1.27 km | 3:55 /km | 167 bpm |");
+    expect(result).toContain("| Cool down | 10:00 |  | Not recorded |  |  |  |  |");
+    expect(result).toContain("| Unplanned actual |  |  | 3. Run | 0:30 | 120 m | 4:10 /km | 170 bpm |");
+    expect(result).not.toMatch(/matched-workout-secret-id|planned-activity-secret-id|providerToken/);
   });
 
   it("keeps multiline notes bounded and escapes Markdown table cells", () => {
