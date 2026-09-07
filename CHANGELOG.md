@@ -71,6 +71,8 @@
 
 ### Fixes
 
+- Updated `golang.org/x/crypto` and `golang.org/x/image` to resolve the
+  critical and high-severity vulnerabilities detected in the candidate image.
 - Garmin structured intervals now use Garmin Connect's displayed average pace
   instead of the faster moving pace, including repair of retained interval data
   and provider-pace-based training-sheet aggregates.
