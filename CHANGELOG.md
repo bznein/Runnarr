@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Activity details now include a Workout summary tab comparing matched or
+  imported prescriptions with recorded intervals and workout laps. A documented
+  Runnarr execution score measures work-step adherence with explicit coverage
+  for missing or ambiguous results; nested repeats and skipped final recoveries
+  are preserved, including metadata recovered from existing Garmin imports.
 - Garmin activity imports now retain weather conditions for a compact
   activity-detail summary and include them in Copy for AI. Accounts can opt in
   to an attributed, rate-limited Open-Meteo fallback when Garmin has no weather.

@@ -12,6 +12,91 @@ select to_char(current_timestamp at time zone 'Europe/Dublin', 'YYYY-MM-DD') as 
 select :'e2e_date' || 'T12:00:00Z' as e2e_now \gset
 \endif
 
+-- Workout summary fixtures also ship to previews and staging. Keep their dates
+-- outside the existing import/navigation journeys and scheduling horizon.
+insert into activities(id, user_id, source, source_id, name, sport_type, start_time,
+    distance_m, moving_time_s, elapsed_time_s, raw)
+select fixture.id::uuid, users.id, 'e2e', fixture.source_id, fixture.name, 'Run',
+    (:'e2e_date'::date - 60) + fixture.start_time::time, 8000, 1980, 1980, '{"fixture":"workout-summary"}'::jsonb
+from users cross join (values
+    ('00000000-0000-4000-8000-000000002680', 'e2e-workout-summary', 'E2E Workout Summary', '08:00'),
+    ('00000000-0000-4000-8000-000000002681', 'e2e-workout-partial', 'E2E Partial Workout', '09:00'),
+    ('00000000-0000-4000-8000-000000002682', 'e2e-workout-empty', 'E2E Workout Without Results', '10:00')
+) as fixture(id, source_id, name, start_time)
+where users.username = :'e2e_username'
+on conflict (id) do update set start_time = excluded.start_time, name = excluded.name;
+
+insert into planned_activities(id, user_id, source, source_id, workbook_id, sheet_id, plan_cell, planned_date, name,
+    sport_type, status, matched_activity_id, matched_at, raw)
+select '00000000-0000-4000-8000-000000002684'::uuid, id, 'manual',
+    'workout:00000000-0000-4000-8000-000000002685', '', '', '', :'e2e_date'::date - 60,
+    'E2E Workout Prescription', 'Run', 'completed', '00000000-0000-4000-8000-000000002680'::uuid,
+    :'e2e_now'::timestamptz, '{"fixture":"workout-summary"}'::jsonb
+from users where username = :'e2e_username'
+on conflict (id) do update set planned_date = excluded.planned_date,
+    matched_activity_id = excluded.matched_activity_id, status = excluded.status;
+
+insert into workouts(id, user_id, source, planned_activity_id, name, sport_type,
+    source_text, source_hash, definition, parse_status, parse_messages,
+    scheduled_date, pace_tolerance_s, garmin_excluded, revision)
+select '00000000-0000-4000-8000-000000002685'::uuid, id, 'manual',
+    '00000000-0000-4000-8000-000000002684'::uuid, 'E2E Workout Prescription', 'Run',
+    '10mins warm up // 3x5mins@4:00 (90secs recovery, skip final recovery) // 1min@3:30 // 5mins cool down',
+    'e2e-workout-summary',
+    '{"version":1,"sportType":"Run","estimatedDurationS":2040,"steps":[
+      {"order":1,"kind":"warmup","endCondition":{"type":"time","value":600},"target":{"type":"none"}},
+      {"order":2,"kind":"repeat","repeatCount":3,"skipLastRecovery":true,"target":{"type":"none"},"children":[
+        {"order":3,"kind":"work","description":"Tempo effort","endCondition":{"type":"time","value":300},"target":{"type":"pace","paceSecondsPerKM":240}},
+        {"order":4,"kind":"recovery","endCondition":{"type":"time","value":90},"target":{"type":"none"}}
+      ]},
+      {"order":5,"kind":"work","description":"Fast finish","endCondition":{"type":"time","value":60},"target":{"type":"pace","paceSecondsPerKM":210}},
+      {"order":6,"kind":"cooldown","endCondition":{"type":"time","value":300},"target":{"type":"none"}}
+    ]}'::jsonb, 'ready', '[]'::jsonb, :'e2e_date'::date - 60, 0, true, 1
+from users where username = :'e2e_username'
+on conflict (id) do update set definition = excluded.definition, source_text = excluded.source_text,
+    scheduled_date = excluded.scheduled_date, pace_tolerance_s = 0, garmin_excluded = true;
+
+insert into activity_workouts(activity_id, provider, provider_workout_id, name, sport_type, steps, raw)
+select activity.id, 'garmin', 'e2e-imported-workout', 'E2E Watch Prescription', 'Run',
+    case when activity.source_id = 'e2e-workout-empty' then '[]'::jsonb else
+    '[{"index":1,"order":1,"type":"warmup","endCondition":"time","endConditionValue":600},
+      {"index":2,"order":2,"type":"repeat","repeatCount":3,"children":[
+        {"index":201,"order":3,"type":"interval","description":"Tempo effort","endCondition":"time","endConditionValue":300,"targetType":"pace.zone","targetValueOne":4.166666666666667,"targetValueTwo":4.166666666666667},
+        {"index":202,"order":4,"type":"recovery","endCondition":"time","endConditionValue":90}
+      ]},
+      {"index":3,"order":5,"type":"interval","description":"Fast finish","endCondition":"time","endConditionValue":60,"targetType":"pace.zone","targetValueOne":4.761904761904762,"targetValueTwo":4.761904761904762},
+      {"index":4,"order":6,"type":"cooldown","endCondition":"time","endConditionValue":300}]'::jsonb end,
+    '{"fixture":"workout-summary","workoutSegments":[{"workoutSteps":[{}, {"skipLastRestStep":true}, {}, {}]}]}'::jsonb
+from activities activity join users on users.id = activity.user_id
+where users.username = :'e2e_username' and activity.source = 'e2e'
+    and activity.source_id in ('e2e-workout-summary', 'e2e-workout-partial', 'e2e-workout-empty')
+on conflict (activity_id) do update set steps = excluded.steps, raw = excluded.raw;
+
+insert into activity_intervals(activity_id, interval_index, category, provider_type,
+    workout_step_index, workout_repeat_index, elapsed_time_s, moving_time_s, distance_m,
+    avg_pace_s_per_km, avg_heart_rate, raw)
+select activity.id, actual.i, actual.category, 'run', actual.step, actual.rep,
+    actual.duration, actual.duration, actual.duration * 1000.0 / actual.pace,
+    actual.pace, actual.hr, jsonb_build_object('duration', actual.duration, 'fixture', 'workout-summary')
+from activities activity join users on users.id = activity.user_id
+cross join (values
+    (0, 'warmup', 1, 1, 600, 360, 130),
+    (1, 'active', 3, 1, 300, 240, 160),
+    (2, 'recovery', 4, 1, 90, 420, 135),
+    (3, 'active', 3, 2, 270, 264, 165),
+    (4, 'recovery', 4, 2, 90, 420, 138),
+    (5, 'active', 3, 3, 300, 264, 168),
+    (6, 'active', 5, 1, 60, 210, 175),
+    (7, 'cooldown', 6, 1, 300, 360, 135)
+) as actual(i, category, step, rep, duration, pace, hr)
+where users.username = :'e2e_username' and activity.source = 'e2e'
+    and (activity.source_id = 'e2e-workout-summary' or (activity.source_id = 'e2e-workout-partial' and actual.i in (1, 5)))
+on conflict (activity_id, interval_index) do update set category = excluded.category,
+    workout_step_index = excluded.workout_step_index, workout_repeat_index = excluded.workout_repeat_index,
+    elapsed_time_s = excluded.elapsed_time_s, moving_time_s = excluded.moving_time_s,
+    distance_m = excluded.distance_m, avg_pace_s_per_km = excluded.avg_pace_s_per_km,
+    avg_heart_rate = excluded.avg_heart_rate, raw = excluded.raw;
+
 update user_settings
 set training_sheet_sheet_url = 'https://docs.google.com/spreadsheets/d/e2e-workbook/edit',
     training_sheet_enabled = false,

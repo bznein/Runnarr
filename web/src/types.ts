@@ -489,6 +489,7 @@ export type ActivityWorkoutStep = {
   type?: string;
   description?: string;
   repeatCount?: number;
+  skipLastRecovery?: boolean;
   endCondition?: string;
   endConditionValue?: number;
   targetType?: string;

@@ -133,6 +133,93 @@ async function ensureActivityImported(page: Page, projectName: string, mobile: b
 }
 
 test.describe("local product journey", () => {
+  test("compares workout goals and execution with explicit coverage", { tag: "@visual-workout-summary" }, async ({ page }, testInfo) => {
+    const mobile = isMobileProject(testInfo.project.name);
+    const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
+    await login(page, mobile);
+    await page.goto("/activities/00000000-0000-4000-8000-000000002680");
+    await expect(page.getByRole("heading", { name: "E2E Workout Summary", exact: true })).toBeVisible();
+    if (visualBaseline) {
+      await expect(page.getByRole("link", { name: "Workout", exact: true })).toBeVisible();
+      await page.getByRole("tab", { name: "Intervals", exact: true }).click();
+      await expect(page.locator(".activity-intervals-panel")).toBeVisible();
+      return;
+    }
+    const tab = page.getByRole("tab", { name: "Workout summary", exact: true });
+    await expect(tab).toBeVisible();
+    await page.getByRole("tab", { name: "Stats", exact: true }).focus();
+    await page.keyboard.press("End");
+    await expect(tab).toBeFocused();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    const panel = page.getByRole("tabpanel", { name: "Workout summary", exact: true });
+    await expect(panel.getByText("Goals from matched workout", { exact: true })).toBeVisible();
+    await expect(panel.getByText("E2E Workout Prescription", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("link", { name: "View workout" })).toHaveAttribute("href", "/workouts/00000000-0000-4000-8000-000000002685");
+    await expect(panel.getByLabel("Execution score")).toContainText("96/100");
+    await expect(panel.getByLabel("Execution score")).toContainText("4 of 4 work steps scored");
+    const comparisons = panel.getByRole("region", { name: "Workout step comparisons" });
+    await expect(comparisons.locator("tbody tr")).toHaveCount(8);
+    await expect(comparisons.getByRole("row", { name: /Set 2 · Work/ })).toContainText("4:30");
+    await expect(comparisons.getByRole("row", { name: /Set 2 · Work/ })).toContainText("90/100");
+    await expect(comparisons.getByRole("row", { name: /Fast finish/ })).toContainText("3:30 /km");
+    await expect(comparisons.getByRole("row", { name: /Set 3 · Recovery/ })).toHaveCount(0);
+    await panel.getByText("How the score is calculated", { exact: true }).click();
+    await expect(panel.getByText(/Missing or ambiguous results are excluded/)).toBeVisible();
+    await panel.getByText("How the score is calculated", { exact: true }).click();
+    await expectNoHorizontalOverflow(page);
+    await panel.evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await page.evaluate(() => window.scrollBy(0, -80));
+    await testInfo.attach("workout-summary", { body: await page.screenshot(), contentType: "image/png" });
+    if (mobile) {
+      await comparisons.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+      await testInfo.attach("workout-results-mobile", { body: await comparisons.screenshot(), contentType: "image/png" });
+    }
+
+    await page.goto("/activities/00000000-0000-4000-8000-000000002681");
+    await expect(page.getByRole("tab", { name: "Stats", exact: true })).toHaveAttribute("aria-selected", "true");
+    await tab.click();
+    await expect(panel.getByText("Goals from imported workout", { exact: true })).toBeVisible();
+    await expect(panel.getByLabel("Execution score")).toContainText("98/100");
+    await expect(panel.getByLabel("Execution score")).toContainText("2 of 4 work steps scored · Partial coverage");
+    await expect(panel.getByRole("row", { name: /Set 2 · Work/ })).toContainText("No reliable result");
+    await expect(panel.getByRole("row", { name: /Set 3 · Recovery/ })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+
+    await page.goto("/activities/00000000-0000-4000-8000-000000002682");
+    await tab.click();
+    await expect(panel.getByLabel("Execution score")).toContainText("Unavailable");
+    await expect(panel.getByText("No usable workout steps are available for comparison.", { exact: true })).toBeVisible();
+    await expect(panel.getByText("No recorded intervals or workout laps are available.", { exact: true })).toBeVisible();
+    await page.goto("/activities");
+    await visibleActivityLink(page, "E2E Pool Swim", mobile).click();
+    await expect(page.getByRole("tab", { name: "Stats", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(tab).toHaveCount(0);
+  });
+
+  test("loads workout goals and retries a failed matched prescription", async ({ page }, testInfo) => {
+    await login(page, isMobileProject(testInfo.project.name));
+    let release = () => {};
+    let fail = true;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route("**/api/workouts/00000000-0000-4000-8000-000000002685", async (route) => {
+      await gate;
+      if (fail) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Synthetic workout failure" }) });
+      else await route.continue();
+    });
+    await page.goto("/activities/00000000-0000-4000-8000-000000002680");
+    await page.getByRole("tab", { name: "Workout summary", exact: true }).click();
+    const panel = page.getByRole("tabpanel", { name: "Workout summary", exact: true });
+    try {
+      await expect(panel.getByRole("status")).toHaveText("Loading workout goals…");
+    } finally { release(); }
+    await expect(panel.getByRole("alert")).toContainText("Could not load the matched workout.", { timeout: 15000 });
+    await expect(panel.getByText("Goals from imported workout", { exact: true })).toBeVisible();
+    fail = false;
+    await panel.getByRole("button", { name: "Retry workout", exact: true }).click();
+    await expect(panel.getByText("Goals from matched workout", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("alert")).toHaveCount(0);
+  });
+
   test("redirects unauthenticated users, logs in, and logs out", { tag: "@visual-auth" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
     await page.goto("/");
@@ -1272,6 +1359,16 @@ test.describe("local product journey", () => {
     await expect(trainingSheetLink).toHaveAttribute("href", "https://docs.google.com/spreadsheets/d/e2e-workbook/edit#gid=e2e-sheet");
     await expect(trainingSheetLink).toHaveAttribute("target", "_blank");
     await expect(trainingSheetLink).toHaveAttribute("rel", "noreferrer");
+
+    // Keep an established visual profile exercising the new tab while the
+    // dedicated workout-summary profile is awaiting the default-branch catalog.
+    if (process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") !== true) {
+      await page.getByRole("tab", { name: "Workout summary", exact: true }).click();
+      const summary = page.getByRole("tabpanel", { name: "Workout summary", exact: true });
+      await expect(summary.getByText("Goals from matched workout", { exact: true })).toBeVisible();
+      await expect(summary.getByLabel("Execution score")).toContainText("100/100");
+      await expectNoHorizontalOverflow(page);
+    }
 
     await navigateTo(page, "Settings", mobile);
     if (await page.getByText("Connected as Offline Garmin Testbed", { exact: true }).count() === 0) {

@@ -270,6 +270,7 @@ type ActivityWorkoutStep struct {
 	Type              string                `json:"type,omitempty"`
 	Description       string                `json:"description,omitempty"`
 	RepeatCount       *int                  `json:"repeatCount,omitempty"`
+	SkipLastRecovery  *bool                 `json:"skipLastRecovery,omitempty"`
 	EndCondition      string                `json:"endCondition,omitempty"`
 	EndConditionValue *float64              `json:"endConditionValue,omitempty"`
 	TargetType        string                `json:"targetType,omitempty"`
