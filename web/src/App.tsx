@@ -24,6 +24,7 @@ import { supportsRouteMetrics } from "./activityMetrics";
 import { NotificationBell, NotificationSettingsSection, NotificationsPage, unregisterCurrentPushDevice } from "./notifications";
 import { hasIntervalAnalysis, resolveActivityAnalysisTab } from "./activityAnalysis";
 import type { ActivityAnalysisTab } from "./activityAnalysis";
+import { WorkoutSummaryPanel } from "./WorkoutSummaryPanel";
 import { fullPathForSimplePath, normalizeSimpleMatchFilter, shouldRedirectToSimple, simpleIntervalSummary, simpleMatchStatusLabel } from "./simpleMode";
 import type { SimpleMatchFilter } from "./simpleMode";
 import { trainingSheetWritebackStatusLabel } from "./trainingSheetWriteback";
@@ -3300,7 +3301,13 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
   const writeback = plannedMatchCandidates.data?.writeback;
   const matchedPlannedActivity = plannedMatchCandidates.data?.matched;
   const intervalAnalysisAvailable = hasIntervalAnalysis(item);
-  const visibleAnalysisTab = resolveActivityAnalysisTab(analysisTab, intervalAnalysisAvailable);
+  const workoutAnalysisAvailable = Boolean(item?.workout || matchedPlannedActivity?.workoutId);
+  const visibleAnalysisTab = resolveActivityAnalysisTab(analysisTab, intervalAnalysisAvailable, workoutAnalysisAvailable);
+  const analysisTabs: Array<{ key: ActivityAnalysisTab; label: string }> = [
+    { key: "stats", label: "Stats" },
+    ...(intervalAnalysisAvailable ? [{ key: "intervals" as const, label: "Intervals" }] : []),
+    ...(workoutAnalysisAvailable ? [{ key: "workout" as const, label: "Workout summary" }] : [])
+  ];
   const effectiveClimbs = item ? (climbPreview.data?.climbs ?? item.climbs ?? []) : [];
 
   useEffect(() => {
@@ -3888,32 +3895,38 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
       )}
 
       <div className="activity-analysis-tabs" role="tablist" aria-label="Activity analysis">
-        <button
-          className={visibleAnalysisTab === "stats" ? "active" : ""}
+        {analysisTabs.map((tab, index) => <button
+          key={tab.key}
+          id={`activity-${tab.key}-tab`}
+          className={visibleAnalysisTab === tab.key ? "active" : ""}
           type="button"
           role="tab"
-          aria-selected={visibleAnalysisTab === "stats"}
-          onClick={() => setAnalysisTab("stats")}
-        >
-          Stats
-        </button>
-        {intervalAnalysisAvailable && (
-          <button
-            className={visibleAnalysisTab === "intervals" ? "active" : ""}
-            type="button"
-            role="tab"
-            aria-selected={visibleAnalysisTab === "intervals"}
-            onClick={() => setAnalysisTab("intervals")}
-          >
-            Intervals
-          </button>
+          aria-selected={visibleAnalysisTab === tab.key}
+          aria-controls="activity-analysis-panel"
+          tabIndex={visibleAnalysisTab === tab.key ? 0 : -1}
+          onClick={() => setAnalysisTab(tab.key)}
+          onKeyDown={(event) => {
+            const next = event.key === "ArrowRight" ? (index + 1) % analysisTabs.length
+              : event.key === "ArrowLeft" ? (index + analysisTabs.length - 1) % analysisTabs.length
+              : event.key === "Home" ? 0 : event.key === "End" ? analysisTabs.length - 1 : undefined;
+            if (next === undefined) return;
+            event.preventDefault();
+            setAnalysisTab(analysisTabs[next].key);
+            document.getElementById(`activity-${analysisTabs[next].key}-tab`)?.focus();
+          }}
+        >{tab.label}</button>)}
+      </div>
+      <div id="activity-analysis-panel" className="activity-analysis-panel" role="tabpanel" aria-labelledby={`activity-${visibleAnalysisTab}-tab`}>
+        {visibleAnalysisTab === "stats" ? (
+          <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
+        ) : visibleAnalysisTab === "intervals" ? (
+          <ActivityIntervalsPanel activity={displayItem} />
+        ) : (
+          <WorkoutSummaryPanel key={item.id} activity={item} matchedWorkoutId={matchedPlannedActivity?.workoutId}
+            matchLoading={plannedMatchCandidates.isPending} matchError={plannedMatchCandidates.isError}
+            retryMatch={() => void plannedMatchCandidates.refetch()} />
         )}
       </div>
-      {visibleAnalysisTab === "stats" ? (
-        <ActivityCombinedChart key={item.id} data={chartData} onHighlight={setHighlightedSample} />
-      ) : (
-        <ActivityIntervalsPanel activity={displayItem} />
-      )}
     </Page>
   );
 }

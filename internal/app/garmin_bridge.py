@@ -263,10 +263,11 @@ def normalize_workout_step(item, index):
         children = []
     return {
         "index": index,
-        "order": parse_int(item.get("stepOrder")) or index,
+        "order": parse_int(item.get("stepOrder")) if parse_int(item.get("stepOrder")) is not None else index,
         "type": str(step_type.get("stepTypeKey") or "").strip(),
         "description": str(item.get("description") or "").strip(),
         "repeatCount": parse_int(item.get("numberOfIterations")),
+        "skipLastRecovery": item.get("skipLastRestStep") if isinstance(item.get("skipLastRestStep"), bool) else None,
         "endCondition": str(end_condition.get("conditionTypeKey") or "").strip(),
         "endConditionValue": parse_number(item.get("endConditionValue")),
         "targetType": str(target_type.get("workoutTargetTypeKey") or "").strip(),

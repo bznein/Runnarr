@@ -17,6 +17,11 @@
       "viewports": ["desktop", "mobile"]
     },
     {
+      "id": "workout-summary",
+      "tag": "@visual-workout-summary",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
       "id": "courses",
       "tag": "@visual-courses",
       "viewports": ["desktop", "mobile"]

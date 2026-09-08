@@ -244,7 +244,12 @@ insert into activity_workouts(
     activity_id, provider, provider_workout_id, name, sport_type, steps, raw
 )
 select activity.id, 'testbed', activity.source_id, 'Tempo intervals', 'Run',
-    '[{"index":0,"order":0,"type":"warmup"},{"index":1,"order":1,"type":"repeat","repeatCount":4},{"index":2,"order":2,"type":"cooldown"}]'::jsonb,
+    '[{"index":0,"order":0,"type":"warmup","endCondition":"time","endConditionValue":600},
+      {"index":1,"order":1,"type":"repeat","repeatCount":4,"skipLastRecovery":true,"children":[
+        {"index":101,"order":2,"type":"interval","endCondition":"time","endConditionValue":300,"targetType":"pace.zone","targetValueOne":3.2258064516,"targetValueTwo":3.4482758621},
+        {"index":102,"order":3,"type":"recovery","endCondition":"time","endConditionValue":120}
+      ]},
+      {"index":2,"order":4,"type":"cooldown","endCondition":"time","endConditionValue":600}]'::jsonb,
     '{"fixture":"testbed"}'::jsonb
 from activities activity
 where activity.user_id = (select id from users where username = :'e2e_username')
@@ -265,14 +270,14 @@ insert into activity_intervals(
     elapsed_time_s, moving_time_s, distance_m, avg_heart_rate,
     max_heart_rate, lap_indexes, raw
 )
-select activity.id, repeat_index, 'active', 'run', 1, repeat_index,
+select activity.id, repeat_index, 'active', 'run', 2, repeat_index + 1,
     activity.start_time + (300 + repeat_index * 420) * interval '1 second',
     activity.start_time + (600 + repeat_index * 420) * interval '1 second',
     300, 290, 1000,
     coalesce(activity.avg_heart_rate, 150) + repeat_index * 2,
     coalesce(activity.max_heart_rate, 175),
     array[least(repeat_index, 2)],
-    '{"fixture":"testbed"}'::jsonb
+    '{"fixture":"testbed","duration":300}'::jsonb
 from activities activity
 cross join generate_series(0, 3) as repeat_index
 where activity.user_id = (select id from users where username = :'e2e_username')

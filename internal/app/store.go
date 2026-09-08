@@ -2013,6 +2013,7 @@ func (s *Store) getActivityWorkout(ctx context.Context, activityID string) (*Act
 				return nil, nil, err
 			}
 		}
+		restoreActivityWorkoutRepeatMetadata(&workout)
 		workoutPtr = &workout
 	}
 

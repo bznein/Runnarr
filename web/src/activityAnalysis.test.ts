@@ -16,6 +16,11 @@ describe("hasIntervalAnalysis", () => {
 });
 
 describe("resolveActivityAnalysisTab", () => {
+  it("keeps Workout summary only for activities with a workout source", () => {
+    expect(resolveActivityAnalysisTab("workout", true, true)).toBe("workout");
+    expect(resolveActivityAnalysisTab("workout", false, true)).toBe("workout");
+    expect(resolveActivityAnalysisTab("workout", true, false)).toBe("stats");
+  });
   it("falls back to Stats when Intervals is unavailable", () => {
     expect(resolveActivityAnalysisTab("intervals", false)).toBe("stats");
   });
