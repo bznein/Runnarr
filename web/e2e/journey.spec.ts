@@ -196,6 +196,16 @@ test.describe("local product journey", () => {
     await expect(tab).toHaveCount(0);
   });
 
+  test("shows a matched workout when imported workout metadata is missing", async ({ page }, testInfo) => {
+    await login(page, isMobileProject(testInfo.project.name));
+    await page.goto("/activities/00000000-0000-4000-8000-000000002683");
+    await expect(page.getByRole("heading", { name: "E2E Matched-Only Workout", exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Workout summary", exact: true }).click();
+    const panel = page.getByRole("tabpanel", { name: "Workout summary", exact: true });
+    await expect(panel.getByText("Goals from matched workout", { exact: true })).toBeVisible();
+    await expect(panel.getByText("E2E Matched-Only Prescription", { exact: true })).toBeVisible();
+  });
+
   test("loads workout goals and retries a failed matched prescription", async ({ page }, testInfo) => {
     await login(page, isMobileProject(testInfo.project.name));
     let release = () => {};

@@ -182,6 +182,35 @@ func TestIntervalUpdatesForContinuousTableExpandsStructuredLaps(t *testing.T) {
 	}
 }
 
+func TestIntervalUpdatesForPlannedActivityUsesMatchedWorkoutWhenImportedWorkoutIsMissing(t *testing.T) {
+	table := &trainingSheetWorkoutTable{
+		Columns: map[string]string{trainingSheetMetricAvgPace: "B"},
+		Rows:    []trainingSheetWorkoutTableRow{{Row: 5, Label: "3min rep avg", Kind: trainingSheetRowAverage, Group: "duration:3m"}},
+	}
+	pace := 205.0
+	planned := PlannedActivity{
+		WorkoutID:  "matched-workout",
+		SheetTitle: "Week",
+		Raw:        map[string]any{"workoutTable": table},
+	}
+	activity := Activity{
+		Intervals: []ActivityInterval{{Category: "active", MovingTimeS: 180, DistanceM: 878, AvgPaceSPKM: &pace}},
+	}
+
+	plan, err := intervalUpdatesForPlannedActivity(planned, activity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value := updateValue(plan.Updates, "'Week'!B5"); value != "'3:25" {
+		t.Fatalf("matched workout pace = %#v, want 3:25", value)
+	}
+
+	planned.WorkoutID = ""
+	if _, err := intervalUpdatesForPlannedActivity(planned, activity); err == nil {
+		t.Fatal("activity without imported or matched workout should be rejected")
+	}
+}
+
 func TestIntervalUpdatesForRecordsRejectsUnmappedRows(t *testing.T) {
 	table := &trainingSheetWorkoutTable{
 		Columns: map[string]string{trainingSheetMetricAvgPace: "B"},
