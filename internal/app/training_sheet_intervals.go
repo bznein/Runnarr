@@ -293,7 +293,7 @@ type trainingSheetWorkoutRecord struct {
 }
 
 func structuredWorkoutRecords(activity Activity, expandLaps bool) []trainingSheetWorkoutRecord {
-	if activity.Workout == nil || len(activity.Intervals) == 0 {
+	if len(activity.Intervals) == 0 {
 		return nil
 	}
 	records := make([]trainingSheetWorkoutRecord, 0, len(activity.Intervals))
@@ -373,7 +373,7 @@ func intervalUpdatesForPlannedActivity(planned PlannedActivity, activity Activit
 	if table == nil {
 		return trainingSheetIntervalUpdatePlan{}, nil
 	}
-	if activity.Workout == nil || len(activity.Intervals) == 0 {
+	if (activity.Workout == nil && planned.WorkoutID == "") || len(activity.Intervals) == 0 {
 		return trainingSheetIntervalUpdatePlan{}, fmt.Errorf("the activity has no structured Garmin workout intervals")
 	}
 

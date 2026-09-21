@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Let a matched planned workout supply missing workout context for structured activity interval writeback, so cross-day matches can populate workout details and expose the workout summary.
 - Activity details now include a Workout summary tab comparing matched or
   imported prescriptions with recorded intervals and workout laps. A documented
   Runnarr execution score measures work-step adherence with explicit coverage

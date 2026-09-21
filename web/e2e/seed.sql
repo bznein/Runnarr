@@ -56,6 +56,16 @@ from users where username = :'e2e_username'
 on conflict (id) do update set definition = excluded.definition, source_text = excluded.source_text,
     scheduled_date = excluded.scheduled_date, pace_tolerance_s = 0, garmin_excluded = true;
 
+-- Keep the primary summary fixture without imported workout metadata. Its
+-- matched planned workout must supply the prescription, mirroring activities
+-- whose structured Garmin intervals arrive without a workout object.
+delete from activity_workouts
+where activity_id in (
+    select activity.id from activities activity join users on users.id = activity.user_id
+    where users.username = :'e2e_username' and activity.source = 'e2e'
+        and activity.source_id = 'e2e-workout-summary'
+);
+
 insert into activity_workouts(activity_id, provider, provider_workout_id, name, sport_type, steps, raw)
 select activity.id, 'garmin', 'e2e-imported-workout', 'E2E Watch Prescription', 'Run',
     case when activity.source_id = 'e2e-workout-empty' then '[]'::jsonb else
@@ -69,7 +79,7 @@ select activity.id, 'garmin', 'e2e-imported-workout', 'E2E Watch Prescription', 
     '{"fixture":"workout-summary","workoutSegments":[{"workoutSteps":[{}, {"skipLastRestStep":true}, {}, {}]}]}'::jsonb
 from activities activity join users on users.id = activity.user_id
 where users.username = :'e2e_username' and activity.source = 'e2e'
-    and activity.source_id in ('e2e-workout-summary', 'e2e-workout-partial', 'e2e-workout-empty')
+    and activity.source_id in ('e2e-workout-partial', 'e2e-workout-empty')
 on conflict (activity_id) do update set steps = excluded.steps, raw = excluded.raw;
 
 insert into activity_intervals(activity_id, interval_index, category, provider_type,
