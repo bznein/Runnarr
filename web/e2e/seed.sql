@@ -21,7 +21,8 @@ select fixture.id::uuid, users.id, 'e2e', fixture.source_id, fixture.name, 'Run'
 from users cross join (values
     ('00000000-0000-4000-8000-000000002680', 'e2e-workout-summary', 'E2E Workout Summary', '08:00'),
     ('00000000-0000-4000-8000-000000002681', 'e2e-workout-partial', 'E2E Partial Workout', '09:00'),
-    ('00000000-0000-4000-8000-000000002682', 'e2e-workout-empty', 'E2E Workout Without Results', '10:00')
+    ('00000000-0000-4000-8000-000000002682', 'e2e-workout-empty', 'E2E Workout Without Results', '10:00'),
+    ('00000000-0000-4000-8000-000000002683', 'e2e-workout-matched-only', 'E2E Matched-Only Workout', '11:00')
 ) as fixture(id, source_id, name, start_time)
 where users.username = :'e2e_username'
 on conflict (id) do update set start_time = excluded.start_time, name = excluded.name;
@@ -56,15 +57,35 @@ from users where username = :'e2e_username'
 on conflict (id) do update set definition = excluded.definition, source_text = excluded.source_text,
     scheduled_date = excluded.scheduled_date, pace_tolerance_s = 0, garmin_excluded = true;
 
--- Keep the primary summary fixture without imported workout metadata. Its
--- matched planned workout must supply the prescription, mirroring activities
--- whose structured Garmin intervals arrive without a workout object.
-delete from activity_workouts
-where activity_id in (
-    select activity.id from activities activity join users on users.id = activity.user_id
-    where users.username = :'e2e_username' and activity.source = 'e2e'
-        and activity.source_id = 'e2e-workout-summary'
-);
+insert into planned_activities(id, user_id, source, source_id, workbook_id, sheet_id, plan_cell, planned_date, name,
+    sport_type, status, matched_activity_id, matched_at, raw)
+select '00000000-0000-4000-8000-000000002686'::uuid, id, 'manual',
+    'workout:00000000-0000-4000-8000-000000002687', '', '', '', :'e2e_date'::date - 61,
+    'E2E Matched-Only Prescription', 'Run', 'completed', '00000000-0000-4000-8000-000000002683'::uuid,
+    :'e2e_now'::timestamptz, '{"fixture":"workout-summary-matched-only"}'::jsonb
+from users where username = :'e2e_username'
+on conflict (id) do update set planned_date = excluded.planned_date,
+    matched_activity_id = excluded.matched_activity_id, status = excluded.status;
+
+insert into workouts(id, user_id, source, planned_activity_id, name, sport_type,
+    source_text, source_hash, definition, parse_status, parse_messages,
+    scheduled_date, pace_tolerance_s, garmin_excluded, revision)
+select '00000000-0000-4000-8000-000000002687'::uuid, id, 'manual',
+    '00000000-0000-4000-8000-000000002686'::uuid, 'E2E Matched-Only Prescription', 'Run',
+    '10mins warm up // 3x5mins@4:00 (90secs recovery, skip final recovery) // 1min@3:30 // 5mins cool down',
+    'e2e-workout-summary-matched-only',
+    '{"version":1,"sportType":"Run","estimatedDurationS":2040,"steps":[
+      {"order":1,"kind":"warmup","endCondition":{"type":"time","value":600},"target":{"type":"none"}},
+      {"order":2,"kind":"repeat","repeatCount":3,"skipLastRecovery":true,"target":{"type":"none"},"children":[
+        {"order":3,"kind":"work","description":"Tempo effort","endCondition":{"type":"time","value":300},"target":{"type":"pace","paceSecondsPerKM":240}},
+        {"order":4,"kind":"recovery","endCondition":{"type":"time","value":90},"target":{"type":"none"}}
+      ]},
+      {"order":5,"kind":"work","description":"Fast finish","endCondition":{"type":"time","value":60},"target":{"type":"pace","paceSecondsPerKM":210}},
+      {"order":6,"kind":"cooldown","endCondition":{"type":"time","value":300},"target":{"type":"none"}}
+    ]}'::jsonb, 'ready', '[]'::jsonb, :'e2e_date'::date - 61, 0, true, 1
+from users where username = :'e2e_username'
+on conflict (id) do update set definition = excluded.definition, source_text = excluded.source_text,
+    scheduled_date = excluded.scheduled_date, pace_tolerance_s = 0, garmin_excluded = true;
 
 insert into activity_workouts(activity_id, provider, provider_workout_id, name, sport_type, steps, raw)
 select activity.id, 'garmin', 'e2e-imported-workout', 'E2E Watch Prescription', 'Run',
@@ -79,7 +100,7 @@ select activity.id, 'garmin', 'e2e-imported-workout', 'E2E Watch Prescription', 
     '{"fixture":"workout-summary","workoutSegments":[{"workoutSteps":[{}, {"skipLastRestStep":true}, {}, {}]}]}'::jsonb
 from activities activity join users on users.id = activity.user_id
 where users.username = :'e2e_username' and activity.source = 'e2e'
-    and activity.source_id in ('e2e-workout-partial', 'e2e-workout-empty')
+    and activity.source_id in ('e2e-workout-summary', 'e2e-workout-partial', 'e2e-workout-empty')
 on conflict (activity_id) do update set steps = excluded.steps, raw = excluded.raw;
 
 insert into activity_intervals(activity_id, interval_index, category, provider_type,
@@ -100,7 +121,8 @@ cross join (values
     (7, 'cooldown', 6, 1, 300, 360, 135)
 ) as actual(i, category, step, rep, duration, pace, hr)
 where users.username = :'e2e_username' and activity.source = 'e2e'
-    and (activity.source_id = 'e2e-workout-summary' or (activity.source_id = 'e2e-workout-partial' and actual.i in (1, 5)))
+    and (activity.source_id in ('e2e-workout-summary', 'e2e-workout-matched-only')
+        or (activity.source_id = 'e2e-workout-partial' and actual.i in (1, 5)))
 on conflict (activity_id, interval_index) do update set category = excluded.category,
     workout_step_index = excluded.workout_step_index, workout_repeat_index = excluded.workout_repeat_index,
     elapsed_time_s = excluded.elapsed_time_s, moving_time_s = excluded.moving_time_s,
