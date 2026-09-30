@@ -56,6 +56,7 @@ import type {
   PushSubscriptionDevice,
   RunnarrNotification
 } from "./types";
+import type { HeatmapMetadata } from "./heatmap";
 
 export class ApiError extends Error {
   status: number;
@@ -163,6 +164,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  heatmap: (query: string, signal?: AbortSignal) => request<HeatmapMetadata>(`/api/heatmap?${query}`, { signal }),
   session: () => request<Session>("/api/session"),
   login: (username: string, password: string) =>
     request<Session>("/api/session/login", {

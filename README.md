@@ -47,6 +47,33 @@ rest, can be renamed, tested, or removed from Settings, and can reach an
 installed phone PWA while the app is closed. iPhone and iPad push requires the
 site to be added to the Home Screen before permission is requested.
 
+## Personal heatmap
+
+Heatmap in the full experience (under More on mobile) shows your GPS activity
+history, initially all-time running. Choose sports and local-calendar dates,
+pan or zoom, fit all selected routes, or expand the map to fullscreen. Filters,
+appearance, and position stay in the URL. Appearance follows the app theme by
+default and can be set to Light or Dark independently.
+
+Heat measures distinct activities at each location: more samples, slower pace,
+or repeated laps within one activity do not inflate it. The logarithmic legend
+uses the same scale across filters. Counts and distance describe the entire
+filtered selection, with separate counts for routes being prepared and
+activities without usable GPS. GPS gaps and dateline crossings are split;
+summary polylines are used only when sample GPS is absent.
+
+Download PNG previews the current crop at up to twice its displayed resolution
+(maximum 4096 pixels per edge). Map includes the muted basemap and attribution;
+Artwork puts the routes on a plain background. Map export reuses visible
+basemap tiles and requires provider CORS support. If a custom provider prevents
+export, use Artwork. Both include the selected sports and dates.
+
+The route index is derived from locally stored activities. Historical backfill
+runs automatically and resumes after interruption; new imports, reimports,
+and deletions update the map automatically. No Garmin sync or training-sheet
+sync/writeback is needed. Heatmap tiles are authenticated, account-private,
+and never cached by the service worker; there is no public sharing endpoint.
+
 ## Courses
 
 The full experience includes a private course library on desktop and under

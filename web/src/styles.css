@@ -6152,3 +6152,42 @@ textarea {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+.heatmap-filters { display: grid; gap: 14px; }
+.heatmap-presets, .heatmap-summary, .heatmap-map-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.heatmap-filter-fields { display: grid; grid-template-columns: 1fr 1fr 1.3fr 1fr; gap: 14px; align-items: start; }
+.heatmap-filter-fields input, .heatmap-filter-fields select { width: 100%; min-width: 0; }
+.heatmap-sports select { height: 92px; }
+.heatmap-summary { padding: 10px 2px; font-size: 13px; }
+.heatmap-summary span { color: var(--color-muted); }
+.heatmap-map-panel { position: relative; padding: 0; overflow: hidden; }
+.heatmap-map-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px; }
+.heatmap-map-toolbar .muted { display: block; margin-top: 4px; font-size: 12px; }
+.heatmap-map { height: clamp(420px, 65vh, 900px); width: 100%; background: #f6f4ef; }
+.heatmap-map-panel[data-appearance="dark"] .heatmap-map { background: #101519; }
+.heatmap-fullscreen { position: fixed; inset: 0; z-index: 1200; border-radius: 0; display: flex; flex-direction: column; }
+.heatmap-fullscreen .heatmap-map { flex: 1; min-height: 0; }
+.heatmap-legend { display: flex; align-items: center; gap: 14px; padding: 12px 16px; font-size: 11px; }
+.heatmap-legend > div { width: min(360px, 100%); }
+.heatmap-gradient { height: 7px; border-radius: 4px; background: linear-gradient(to right, #5d3599, #a42c72, #d74325, #972012); }
+[data-appearance="dark"] .heatmap-gradient { background: linear-gradient(to right, #683fa3, #b5367a, #ed6925, #fcdf6e); }
+.heatmap-legend-ticks { position: relative; height: 15px; margin-top: 5px; }
+.heatmap-legend-ticks span { position: absolute; transform: translateX(-50%); }
+.heatmap-legend-ticks span:last-child { transform: translateX(-100%); }
+.heatmap-map-panel > .error { margin: 10px; }
+.heatmap-export-dialog { width: min(820px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 16px; border-radius: 12px; border: 1px solid var(--color-border); color: var(--color-text); background: var(--color-surface); }
+.heatmap-export-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.heatmap-export-dialog .heatmap-map-toolbar { padding: 0 0 14px; }
+.heatmap-export-dialog h2 { margin: 0; }
+.heatmap-export-modes { display: flex; gap: 20px; border: 0; padding: 0; margin: 0 0 14px; }
+.heatmap-export-modes legend { margin-bottom: 8px; font-size: 13px; }
+.heatmap-export-modes label { display: flex; align-items: center; gap: 8px; }
+.heatmap-export-preview { display: block; width: 100%; max-height: 65vh; object-fit: contain; margin-bottom: 16px; }
+.heatmap-export-dialog > .heatmap-map-actions { justify-content: flex-end; }
+@media (max-width: 720px) {
+  .heatmap-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .heatmap-map { height: 60vh; min-height: 360px; }
+  .heatmap-map-toolbar { padding: 10px; }
+  .heatmap-map-actions { gap: 6px; }
+  .heatmap-map-actions button { font-size: 11px; padding: 8px; }
+  .heatmap-fullscreen .heatmap-map { min-height: 0; }
+}

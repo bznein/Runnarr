@@ -31,6 +31,11 @@
 
 ### Features
 
+- Added private activity heatmaps with sport/date filters, persistent map views,
+  app/light/dark appearance, fullscreen, and current-view Map or Artwork PNG
+  exports. Heat counts distinct activities rather than GPS samples or laps.
+  Existing routes are indexed locally in the background without a provider sync;
+  reimports and deletions automatically refresh the map.
 - Added a confirmation-based training-sheet interval-pace reconciliation that
   scans matched activities newest-first, supports an explicit age cutoff, and
   revalidates live sheet values before applying each approved correction.

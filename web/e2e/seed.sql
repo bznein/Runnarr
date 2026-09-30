@@ -796,3 +796,36 @@ on conflict (id) do update set
     scheduled_date = excluded.scheduled_date,
     archived_at = null,
     updated_at = :'e2e_now'::timestamptz;
+
+-- Heatmap fixtures also populate previews/staging. Historical dates keep these
+-- routes outside the existing current-week planning and dashboard scenarios.
+begin;
+insert into activities(id,user_id,source,source_id,name,sport_type,start_time,distance_m,moving_time_s,elapsed_time_s,raw)
+select ('00000000-0000-4000-8000-' || lpad((4100+n)::text,12,'0'))::uuid,users.id,'e2e',
+    'e2e-heatmap-' || n, 'Heatmap ' || case when n=8 then 'Indoor Session' when n=9 then 'Dateline Route' else 'Riverside Loop ' || n end,
+    case when n=7 then 'Cycling' when n=8 then 'Strength Training' when n=9 then 'Other' else 'Run' end,
+    (:'e2e_date'::date - 180 - n) + time '08:00',case when n=8 then 0 else 8000 end,3600,3600,'{"fixture":"heatmap"}'::jsonb
+from users cross join generate_series(1,10) n where username=:'e2e_username'
+on conflict(id) do update set start_time=excluded.start_time,name=excluded.name;
+
+insert into activity_samples(activity_id,sample_index,timestamp,elapsed_s,latitude,longitude,distance_m)
+select activities.id,p,start_time + p * interval '10 seconds',p*10,
+    case when n=10 and p between 95 and 105 then null when n=9 then 0 else 53.35 + 0.009*sin((p%120)*2*pi()/120) + (n%3)*0.00025 end,
+    case when n=10 and p between 95 and 105 then null when n=9 then case when p%2=0 then 179.999 else -179.999 end else -6.265 + 0.015*cos((p%120)*2*pi()/120) end,
+    p*25
+from generate_series(1,10) n
+join activities on source='e2e' and source_id='e2e-heatmap-' || n
+join users on users.id=activities.user_id
+cross join lateral generate_series(0,case when n=6 then 360 when n=9 then 1 else 120 end) p
+where users.username=:'e2e_username' and n<>8
+on conflict(activity_id,sample_index) do update set latitude=excluded.latitude,longitude=excluded.longitude;
+
+-- Re-seeding must refresh derived routes too. Keep the shared visual-review
+-- seed compatible with a baseline app that predates the heatmap migration.
+do $$ begin
+    if to_regclass('activity_heatmap_routes') is not null then
+        execute 'delete from activity_heatmap_routes where activity_id in
+            (select id from activities where source=''e2e'' and raw->>''fixture''=''heatmap'')';
+    end if;
+end $$;
+commit;
