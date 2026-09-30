@@ -18,6 +18,7 @@ import { plannedMatchResponseForDialog, PlannedActivityMatchAgenda } from "./pla
 import { plannedMatchPreviewForActivity, plannedMatchRequestIsCurrent } from "./plannedMatchPreview";
 import { calendarPlanMatchDescription } from "./calendarPlanMatch";
 import { applyThemePreference, parseThemePreference, themeOptions, themePreferenceForAccount } from "./theme";
+import { HeatmapPage } from "./HeatmapPage";
 import type { ThemePreference } from "./theme";
 import { chartDisplayDomain } from "./activityChartBounds";
 import { supportsRouteMetrics } from "./activityMetrics";
@@ -466,6 +467,7 @@ function AuthenticatedApp({
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/calendar" icon={<CalendarDays size={18} />} label="Calendar" />
           <NavItem to="/courses" icon={<RouteIcon size={18} />} label="Courses" />
+          <NavItem to="/heatmap" icon={<MapIcon size={18} />} label="Heatmap" />
           <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
           <NavItem to="/health" icon={<HeartPulse size={18} />} label="Health" />
           <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
@@ -511,6 +513,7 @@ function AuthenticatedApp({
           <Route path="/courses/:id" element={<CourseDetailPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
           <Route path="/notifications" element={<NotificationsPage canWrite={session?.canWrite !== false} />} />
           <Route path="/health" element={<HealthPage />} />
+          <Route path="/heatmap" element={<HeatmapPage key={session?.user?.id} accountID={session?.user?.id ?? ""} theme={themePreference} tileURL={config.data?.mapTileURL} />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/gear" element={<GearPage />} />
           <Route path="/gear/:id" element={<GearDetailPage />} />
@@ -715,6 +718,8 @@ function MobileNavigation({
             ? "Calendar"
           : location.pathname.startsWith("/courses")
             ? "Courses"
+          : location.pathname.startsWith("/heatmap")
+            ? "Heatmap"
           : location.pathname.startsWith("/workouts")
             ? "Workouts"
           : location.pathname.startsWith("/notifications")
@@ -791,6 +796,7 @@ function MobileNavigation({
               )}
               <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
               <NavItem to="/courses" icon={<RouteIcon size={18} />} label="Courses" />
+              <NavItem to="/heatmap" icon={<MapIcon size={18} />} label="Heatmap" />
               <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
               <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
               <NavItem to="/settings" icon={<SettingsIcon size={18} />} label="Settings" />

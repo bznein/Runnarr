@@ -169,6 +169,37 @@ The browser tests intentionally use local password authentication and local
 fixtures. Garmin Connect, Google OAuth, MFA, and real provider syncs are not
 part of the deterministic CI suite.
 
+### Heatmap checks
+
+The shared preview/testbed seed includes overlapping GPS loops, repeated laps,
+missing GPS, an indoor session, multiple sports, and a dateline crossing. The
+`heatmap` visual scenario exercises filters, appearance, fullscreen, and both
+PNG backgrounds on desktop and mobile. Additional browser coverage checks tile
+and export retries, empty states, and providers that disallow canvas export.
+
+Geometry and rendering tests run in the normal Go suite. The PostGIS integration
+test additionally checks backfill, reimport/deletion revisions, authentication,
+account isolation, and cached tiles. Point it at a disposable PostGIS server
+whose test role can create databases; the test creates and drops its own database:
+
+```bash
+RUNNARR_HEATMAP_TEST_DATABASE_URL='postgres://test:test@localhost:5432/test?sslmode=disable' \
+GOCACHE=/tmp/runnarr-go-cache go test -race ./internal/app -run Heatmap
+```
+
+Run the renderer benchmark separately:
+
+```bash
+go test ./internal/app -run '^$' -bench BenchmarkHeatmap10000Routes -benchmem
+```
+
+The initial HTTP performance check used 10,000 synthetic overlapping 121-point
+routes, a 982×468 viewport at zoom 13, 15 tiles, and four concurrent requests on
+an AMD Ryzen 9 7950X3D. With a cold rendered-tile cache it took 1.35 seconds at
+1× and 3.87 seconds at 2×; cached requests took about 22 ms. Metadata took 30 ms.
+These local measurements include PostGIS and HTTP, but exclude external basemap
+delivery and are not a production latency guarantee.
+
 ### What the script does
 
 - Validates required runtime variables

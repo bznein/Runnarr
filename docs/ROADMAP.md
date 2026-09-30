@@ -9,6 +9,19 @@ When a project is concluded, update this file before starting the next one.
 When asked “what’s next?”, inspect this roadmap together with the current
 issues, pull requests, and branch state.
 
+## Current product priority
+
+The agreed priority is personal activity heatmaps, followed by planning the
+race/performance work. The heatmap implementation adds private historical route
+indexing, sport/date filters, activity-frequency rendering, theme controls, and
+Map/Artwork PNG exports. The implementation is ready for review and release;
+no Garmin or training-sheet sync/writeback is required.
+
+Next, plan race tagging, provider race predictions, performance graphs, VDOT,
+and age grading together. That is a separate design discussion; this heatmap
+change does not commit to their data model or implementation scope. Resume the
+remaining order below after these explicitly prioritized projects.
+
 ## Order
 
 ### 1. 1.0.0 release — complete (2026-07-30)

@@ -48,6 +48,7 @@ type Server struct {
 	oidcMu           sync.Mutex
 	oidc             *oidcClient
 	loginLimiter     *loginRateLimiter
+	heatTiles        *heatTileService
 }
 
 func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
@@ -94,6 +95,7 @@ func NewServer(cfg Config, db *pgxpool.Pool, logger *slog.Logger) (*Server, erro
 		syncCancels:      make(map[string]context.CancelFunc),
 		writebackRetries: make(map[string]struct{}),
 		loginLimiter:     newLoginRateLimiter(),
+		heatTiles:        newHeatTileService(),
 	}
 	webPush, err := newWebPushService(context.Background(), cfg, store, logger)
 	if err != nil {
@@ -163,6 +165,8 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/tools/vdot", s.handleToolsVDOT)
 			r.Post("/session/logout", s.handleLogout)
 			r.Get("/activities", s.handleListActivities)
+			r.Get("/heatmap", s.handleHeatmap)
+			r.Get("/heatmap/tiles/{z}/{x}/{y}", s.handleHeatmapTile)
 			r.Get("/activities/{id}/navigation", s.handleActivityNavigation)
 			r.Get("/activities/{id}/ai-context", s.handleActivityAIContext)
 			r.Get("/activities/{id}/series", s.handleActivitySeries)
@@ -1133,6 +1137,7 @@ func (s *Server) handleCancelSyncJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) StartBackgroundSync(ctx context.Context) {
+	go s.runHeatmapBackfill(ctx)
 	if err := s.store.ReconcileRunningSyncJobs(context.Background()); err != nil {
 		s.logger.Error("reconcile sync jobs after startup", "error", err)
 	}

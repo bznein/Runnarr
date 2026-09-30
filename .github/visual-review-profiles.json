@@ -2,6 +2,11 @@
   "version": 1,
   "scenarios": [
     {
+      "id": "heatmap",
+      "tag": "@visual-heatmap",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
       "id": "auth",
       "tag": "@visual-auth",
       "viewports": ["desktop", "mobile"]

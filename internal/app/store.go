@@ -510,6 +510,11 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 		}
 	}
 
+	if source != trainingSheetProvider {
+		if err = saveHeatmapRouteTx(ctx, tx, id, scopedUserID(ctx), activity.Samples, activity.SummaryPolyline); err != nil {
+			return "", err
+		}
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return "", err
 	}
