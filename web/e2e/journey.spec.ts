@@ -396,7 +396,8 @@ test.describe("local product journey", () => {
   });
 
   test("imports and inspects an activity, media, and export", { tag: "@visual-activity-inspection" }, async ({ page }, testInfo) => {
-    testInfo.setTimeout(60_000);
+    // Recording adds deliberate delays to each action in this extended journey.
+    testInfo.setTimeout(process.env.RUNNARR_VISUAL_PROFILES_JSON ? 90_000 : 60_000);
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     await login(page, mobile);
