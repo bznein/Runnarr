@@ -6,7 +6,9 @@ The v1 scope covers the existing private activity, health, calendar, gear, tools
 planning, Garmin, manual-import, map, chart, multi-user, and PWA workflows.
 Course support provides private per-account storage, a searchable/favorite
 library, GPX review/import/export, course inspection, activity route snapshots,
-and waypoint planning with optional self-hosted Valhalla routing. Printable
+and waypoint planning with optional self-hosted Valhalla routing. Race support
+adds private planning, confirmed results, performance analysis, and editable
+reports for fixed-distance running events. Printable
 pace bands, basic/expert mode, Garmin write-back, and encrypted support mode
 remain post-v1 work. Maintainers can optionally
 provision isolated PR previews, persistent staging, and manually approved
@@ -46,6 +48,69 @@ sent as browser push. Push is opt-in per device; subscriptions are encrypted at
 rest, can be renamed, tested, or removed from Settings, and can reach an
 installed phone PWA while the app is closed. iPhone and iPad push requires the
 site to be added to the Home Screen before permission is requested.
+
+## Races and performance
+
+Races in the full experience (under More on mobile) keeps upcoming events and
+race history independently of recorded activities. Create an event manually,
+use **Mark as race** on a run, or review suggestions from imported activities.
+The Review tab can scan existing history; suggestions always require a
+confirmation and dismissals are remembered. Road, track, trail, cross-country,
+parkrun, virtual events, time trials, and fixed-distance ultras are supported.
+Unknown dates and distances can stay blank.
+
+Each race can hold A/B/C importance, time and non-time goals, registration and
+travel notes, reusable preparation checklists, a training-plan link, and an
+independent snapshot of a saved running course. Calendar entries use the event
+local date and display its timezone when a start time is known. A race links to
+one complete recording; linking never applies an activity/training-plan match
+or queues a Google Sheets writeback.
+
+Official distance, chip/gun/manual finish times, places, and manually entered
+cumulative checkpoints stay separate from watch measurements and laps. Confirm
+finished results to include them in PBs and calendar-year bests by exact
+distance and discipline. Results can be excluded individually. Recurring-event
+groups let you compare editions while retaining each edition's distance and
+course. The 12-week build-up shows recorded running before race day.
+
+Halfway prefers an exact official midpoint checkpoint. Otherwise confirm that
+the complete activity contains only the race. The estimate uses the midpoint
+of recorded distance, full original samples, and elapsed time including stops.
+It rejects distance resets, invalid timestamps, incomplete boundaries, and
+interpolation gaps exceeding 60 seconds or 250 metres. Compatible confirmed
+chip/manual times can scale both elapsed halves; gun time never supplies that
+scaling. Every estimate identifies its source and timing basis.
+
+Performance includes result, VDOT, and age-grade trends. VDOT uses confirmed
+road/track results from 1500 m through marathon; current equivalents default to
+the best eligible VDOT in the last 90 days, with an explicit reference override.
+No older result is silently substituted. Age grading uses bundled CC0 USATF
+MLDR road 2025 tables, exact listed distances and ages 5–99, with optional birth
+date/table preferences or per-race overrides. The source revision and license
+are retained in `internal/app/data/race-age-grades/`.
+
+Garmin prediction sync and Open-Meteo race forecasts are separate opt-ins in
+race settings. Prediction sync initially requests 365 days, then refreshes the
+last 14 days daily or manually, retaining nullable results and raw responses.
+Comparisons exclude same-day Garmin predictions without a reliable timestamp;
+historical data fetched after race day is labelled. Local VDOT predictions are
+saved before the race and never reconstructed retrospectively from its result.
+Forecasts send rounded event coordinates, cover the next 16 days, refresh at
+most every six hours through the shared weather limiter, and preserve the last
+pre-start forecast. A date-only event uses local midnight as its cutoff.
+Forecast errors preserve prior data. Observed activity weather stays separate.
+
+Reports combine chosen facts, goals, results, checkpoints, halfway analysis,
+optional watch laps/build-up/forecast, and your own account. Save the draft,
+copy/download Markdown, or use the print view to save PDF. Generated exports
+exclude birth date and private logistics; review your own narrative before
+sharing. No AI service or automatic publishing is involved.
+
+Existing activities need no Garmin resync: use the local historical scan.
+Only the optional Garmin prediction history requires its own sync. No
+training-sheet sync or writeback is needed for race features. Timed events,
+relays/stage races, trimmed or multiple recordings, external result imports,
+public sharing, and automated race notifications remain outside this scope.
 
 ## Personal heatmap
 

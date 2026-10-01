@@ -368,6 +368,16 @@ textarea {
   gap: 6px;
 }
 
+.sidebar > .nav {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar > .brand,
+.sidebar-bottom {
+  flex-shrink: 0;
+}
+
 .sidebar-bottom {
   display: grid;
   gap: 6px;
@@ -6190,4 +6200,82 @@ textarea {
   .heatmap-map-actions { gap: 6px; }
   .heatmap-map-actions button { font-size: 11px; padding: 8px; }
   .heatmap-fullscreen .heatmap-map { min-height: 0; }
+}
+
+/* Races: compact forms and inspection tables, shared with report previews. */
+.race-page { min-width: 0; }
+.race-heading, .race-actions, .race-resource-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.race-heading h1, .race-heading h2 { margin: 0; }
+.race-actions { justify-content: flex-start; }
+.race-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--color-border); margin: 20px 0; overflow-x: auto; }
+.race-tabs a { padding: 8px 0; white-space: nowrap; }
+.race-tabs a.active { color: var(--color-primary-text); border-bottom: 2px solid var(--color-primary); font-weight: 600; }
+.race-section, .race-form-section, .race-report-preview { margin: 16px 0; padding: 20px; min-width: 0; }
+.race-section h2 { font-size: 20px; }
+.race-section h3 { font-size: 16px; margin-bottom: 8px; }
+.race-section p, .race-form-section p { line-height: 1.55; }
+.race-section fieldset { border: 0; padding: 0; min-width: 0; }
+.race-form-section { border: 1px solid var(--color-border); }
+.race-form-section legend { padding: 0 8px; font-weight: 600; }
+.race-form-grid, .race-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 12px 0; }
+.race-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; }
+.race-field input, .race-field select, .race-field textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--color-border-control); background: var(--color-surface); color: var(--color-text); border-radius: 5px; font: inherit; }
+.race-field textarea { resize: vertical; }
+.race-check { display: flex; align-items: center; gap: 8px; margin: 12px 0; }
+.race-check input, .race-checklist input { width: auto; flex: 0 0 auto; }
+.race-checklist-edit-row, .race-checkpoint-edit-row, .race-goal-edit-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; align-items: end; gap: 12px; margin-bottom: 12px; }
+.race-table-wrap { overflow-x: auto; max-width: 100%; margin: 14px 0; }
+.race-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.race-table th, .race-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+.race-table td { white-space: nowrap; }
+.race-table td:first-child { white-space: normal; min-width: 140px; }
+.race-table a[href^="/activities?"] { white-space: nowrap; }
+.race-table th { color: var(--color-muted-strong); font-weight: 600; white-space: nowrap; }
+.race-table small { display: block; color: var(--color-muted); margin-top: 5px; }
+.race-badge { display: inline-block; border: 1px solid var(--color-border); background: var(--color-surface-soft); padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-right: 4px; margin-left: 4px; white-space: nowrap; }
+.race-calendar-entries { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; font-size: 12px; }
+.race-calendar-entries li > span { display: block; margin-top: 4px; }
+.race-checklist { list-style: none; padding: 0; }
+.race-checklist li { display: flex; justify-content: space-between; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+.race-checklist label { display: flex; align-items: center; gap: 8px; }
+.race-overdue { color: var(--color-danger); }
+.race-metrics { display: flex; flex-wrap: wrap; gap: 24px; margin: 20px 0; }
+.race-metrics > div { display: flex; flex-direction: column; gap: 7px; }
+.race-metrics span { color: var(--color-muted); font-size: 12px; }
+.race-metrics strong { font-size: 22px; font-weight: 600; }
+.race-notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+.race-notes dt { color: var(--color-muted); font-size: 12px; margin-bottom: 5px; }
+.race-notes dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.race-chart { margin: 16px 0; min-width: 0; }
+.race-chart figcaption { font-size: 13px; color: var(--color-muted); margin-bottom: 12px; }
+.race-chart-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.race-candidate, .race-resource-row { border-top: 1px solid var(--color-border); padding: 14px 0; }
+.race-candidate > span { display: block; color: var(--color-muted); margin: 8px 0; }
+.race-save-bar { display: flex; gap: 12px; margin: 20px 0; }
+.race-report-options { display: flex; flex-wrap: wrap; gap: 0 20px; }
+.race-report-controls textarea { margin-bottom: 16px; }
+.race-report-preview { overflow-wrap: anywhere; }
+.race-delete { margin: 16px 0; }
+@media (max-width: 760px) {
+  .race-section, .race-form-section, .race-report-preview { padding: 14px; }
+  .race-checklist-edit-row, .race-checkpoint-edit-row, .race-goal-edit-row { grid-template-columns: minmax(0, 1fr); border-bottom: 1px solid var(--color-border); padding-bottom: 14px; }
+  .race-form-grid, .race-filters { grid-template-columns: minmax(0, 1fr); }
+  .race-chart-pair { grid-template-columns: minmax(0, 1fr); }
+  .race-heading { align-items: flex-start; }
+  .race-notes { grid-template-columns: minmax(0, 1fr); }
+}
+@media print {
+  body.race-printing { background: white; color: black; }
+  body.race-printing .sidebar,
+  body.race-printing .mobile-header,
+  body.race-printing .mobile-bottom-nav,
+  body.race-printing .mobile-menu-backdrop,
+  body.race-printing .support-banner,
+  body.race-printing .race-page > :not(.race-report-preview) { display: none !important; }
+  body.race-printing .app-shell { display: block; min-height: 0; }
+  body.race-printing .main { margin: 0; padding: 0; }
+  body.race-printing .race-report-preview { margin: 0; padding: 0; border: none; box-shadow: none; background: white; color: black; }
+  body.race-printing .race-report-preview th, body.race-printing .race-report-preview td { color: black; }
+  body.race-printing .race-report-preview tr { break-inside: avoid; }
+  body.race-printing .race-table-wrap { overflow: visible; }
 }

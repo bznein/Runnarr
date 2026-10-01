@@ -960,6 +960,12 @@ def main():
         return
 
     client = login(token_store)
+    if action == "race-predictions":
+        print(json.dumps(client.get_race_predictions(
+            startdate=request["from"], enddate=request["to"], _type="daily"
+        )))
+        return
+
     if action == "list":
         start = int(request.get("start") or 0)
         limit = int(request.get("limit") or 100)

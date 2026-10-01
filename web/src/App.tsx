@@ -1,3 +1,5 @@
+import { RacesPage } from "./races/RacesPage";
+import { RaceCalendarEntries } from "./races/components";
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -466,6 +468,7 @@ function AuthenticatedApp({
           <NavItem to="/" icon={<BarChart3 size={18} />} label="Dashboard" />
           <NavItem to="/activities" icon={<MapIcon size={18} />} label="Activities" />
           <NavItem to="/calendar" icon={<CalendarDays size={18} />} label="Calendar" />
+          <NavItem to="/races" icon={<Timer size={18} />} label="Races" />
           <NavItem to="/courses" icon={<RouteIcon size={18} />} label="Courses" />
           <NavItem to="/heatmap" icon={<MapIcon size={18} />} label="Heatmap" />
           <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
@@ -505,6 +508,7 @@ function AuthenticatedApp({
           <Route path="/workouts" element={<WorkoutsPage />} />
           <Route path="/workouts/new" element={<WorkoutEditorPage />} />
           <Route path="/workouts/:id" element={<WorkoutEditorPage />} />
+          <Route path="/races/*" element={<RacesPage canWrite={session?.canWrite !== false} renderCourse={(course) => <><CourseMap legs={course.legs} tileURL={config.data?.mapTileURL} /><CourseElevationProfile profile={course.profile} /></>} />} />
           <Route path="/courses" element={<CoursesPage canWrite={session?.canWrite !== false} />} />
           <Route path="/courses/new" element={<CoursePlannerPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} routingEnabled={config.data?.courseRoutingEnabled === true} searchEnabled={config.data?.courseSearchEnabled === true} />} />
           <Route path="/courses/import" element={<CourseImportPage canWrite={session?.canWrite !== false} mapTileURL={config.data?.mapTileURL} />} />
@@ -716,6 +720,8 @@ function MobileNavigation({
         ? "Day view"
           : location.pathname.startsWith("/calendar")
             ? "Calendar"
+          : location.pathname.startsWith("/races")
+            ? "Races"
           : location.pathname.startsWith("/courses")
             ? "Courses"
           : location.pathname.startsWith("/heatmap")
@@ -795,7 +801,8 @@ function MobileNavigation({
                 </button>
               )}
               <NavItem to="/tools" icon={<Calculator size={18} />} label="Tools" />
-              <NavItem to="/courses" icon={<RouteIcon size={18} />} label="Courses" />
+              <NavItem to="/races" icon={<Timer size={18} />} label="Races" />
+          <NavItem to="/courses" icon={<RouteIcon size={18} />} label="Courses" />
               <NavItem to="/heatmap" icon={<MapIcon size={18} />} label="Heatmap" />
               <NavItem to="/workouts" icon={<Timer size={18} />} label="Workouts" />
               <NavItem to="/gear" icon={<Footprints size={18} />} label="Gear" />
@@ -2251,6 +2258,7 @@ function ActivityCalendarPage() {
     return {
       day,
       dayData,
+      races: calendar.data?.races?.filter((r) => r.date === date) ?? [],
       date
     };
   });
@@ -2304,7 +2312,7 @@ function ActivityCalendarPage() {
               return <div className="calendar-day-cell empty" key={`empty-${index}`} />;
             }
             const hasActivities = entry.dayData && entry.dayData.activityCount > 0;
-            const hasDayView = Boolean(hasActivities || entry.dayData?.hasHealthData);
+            const hasDayView = Boolean(hasActivities || entry.dayData?.hasHealthData || entry.races.length);
             return (
               <div
                 className={`calendar-day-cell ${hasDayView ? "calendar-day-cell--active" : ""}`}
@@ -2317,6 +2325,7 @@ function ActivityCalendarPage() {
                 ) : (
                   <div className="calendar-day-number">{entry.day}</div>
                 )}
+                <RaceCalendarEntries races={entry.races} />
                 {hasActivities && (
                   <ul className="calendar-day-list">
                     {entry.dayData?.activities.map((activity) => (
@@ -2345,7 +2354,7 @@ function ActivityCalendarPage() {
           {monthCells.filter((entry): entry is NonNullable<typeof entry> => entry !== null).map((entry) => (
             <div className="calendar-agenda-day" key={`agenda-${entry.date}`}>
               <div className="calendar-agenda-day-header">
-                {(entry.dayData?.activityCount || entry.dayData?.hasHealthData) ? (
+                {(entry.dayData?.activityCount || entry.dayData?.hasHealthData || entry.races.length) ? (
                   <Link className="calendar-day-link" to={`/calendar/day/${entry.date}`}>
                     <strong>{formatCalendarAgendaDate(entry.date)}</strong>
                   </Link>
@@ -2354,6 +2363,7 @@ function ActivityCalendarPage() {
                 )}
                 <span>{entry.dayData?.activityCount ? `${entry.dayData.activityCount} activit${entry.dayData.activityCount === 1 ? "y" : "ies"}` : "No activities"}</span>
               </div>
+              <RaceCalendarEntries races={entry.races} />
               {entry.dayData && entry.dayData.activityCount > 0 ? (
                 <ul className="calendar-day-list">
                   {entry.dayData.activities.map((activity) => (
@@ -2372,7 +2382,7 @@ function ActivityCalendarPage() {
                   ))}
                 </ul>
               ) : (
-                <span className="muted">Rest day</span>
+                <span className="muted">{entry.races.length ? "No recorded activities" : "Rest day"}</span>
               )}
             </div>
           ))}
@@ -2414,6 +2424,7 @@ function CalendarDayPage() {
 
       {date && !day.isLoading && !day.error && (
         <>
+          {!!day.data?.races?.length && <section className="panel"><div className="panel-heading">Races</div><RaceCalendarEntries races={day.data.races} /></section>}
           {health ? (
             <>
               <section className="health-summary" aria-label="Daily health">
@@ -2873,7 +2884,7 @@ function ActivityTable({
           {activities.map((activity) => (
             <tr key={activity.id}>
               {showColumn("date") && <td>{formatDate(activity.startTime)}</td>}
-              <td className="activity-name-cell"><Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link></td>
+              <td className="activity-name-cell"><Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link>{activity.race && <Link className="race-badge" to={`/races/${activity.race.id}`}>Race</Link>}</td>
               {showColumn("type") && <td className="clip-cell" title={activity.sportType}>{activity.sportType}</td>}
               {showColumn("gear") && <td className="gear-table-cell"><GearChipList gear={activity.gear} compact /></td>}
               {showColumn("distance") && <td>{supportsRouteMetrics(activity.sportType) ? formatDistance(activity.distanceM) : ""}</td>}
@@ -2924,7 +2935,7 @@ function ActivityCardList({
         return <article className="activity-card" key={activity.id}>
           <div className="activity-card-header">
             <div className="activity-card-title">
-              <Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link>
+              <Link to={activityDetailPath(activity.id, activityListSearch)} title={activity.name}>{activity.name}</Link>{activity.race && <Link className="race-badge" to={`/races/${activity.race.id}`}>Race</Link>}
               <span>{formatDate(activity.startTime)} · {activity.sportType}</span>
             </div>
             {onDelete && (
@@ -3673,6 +3684,7 @@ function ActivityDetailPage({ config, simple = false, canWrite = true }: { confi
       eyebrow={`${confirmedItem.sportType} · ${formatDate(confirmedItem.startTime)}`}
       actions={
         <>
+          {confirmedItem.race ? <Link className="secondary-button small-button" to={`/races/${confirmedItem.race.id}`}>View race</Link> : canWrite && isRunningSport(confirmedItem.sportType) && confirmedItem.source !== "training_sheet" && <Link className="secondary-button small-button" to={`/races/new?activityId=${confirmedItem.id}`}>Mark as race</Link>}
           <ActivityNavigation
             previousId={activityNavigation.data?.previousId}
             nextId={activityNavigation.data?.nextId}

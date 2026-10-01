@@ -5,7 +5,7 @@ import base64
 import json
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 
 
 class NotFoundException(RuntimeError):
@@ -108,6 +108,19 @@ def main():
     os.makedirs(token_store, mode=0o700, exist_ok=True)
     path, state = load_state(token_store)
 
+    if action == "race-predictions":
+        start = date.fromisoformat(request["from"])
+        end = date.fromisoformat(request["to"])
+        rows = []
+        current = start
+        while current <= end:
+            progress = (current - start).days
+            rows.append({"calendarDate": current.isoformat(), "raceTime5K": 1320 - progress * 0.1,
+                         "raceTime10K": 2760 - progress * 0.2, "raceTimeHalf": 6100 - progress * 0.4,
+                         "raceTimeMarathon": 12800 - progress * 0.7})
+            current += timedelta(days=1)
+        print(json.dumps(rows))
+        return
     if action == "connect":
         print(json.dumps({
             "accountId": "testbed-garmin",

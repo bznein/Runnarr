@@ -1,0 +1,9 @@
+Source: https://github.com/AlanLyttonJones/Age-Grade-Tables
+Commit: 4aac6737cb9f216c90a0a610355667cd3d921c61
+Input: 2025 Files/AgeGrade.zip
+Archive SHA256: 5a5dc7e63288b95717e91d8f3030e1723525b518699cdb90b0718fc456485bfc
+License: CC0-1.0 (see LICENSE.txt).
+2025 road standards and one-year factors; exact listed distances only, ages 5–99.
+AgeGrade.42k denotes the marathon (42195 m); duplicate AgeGrade.26m omitted.
+AgeGrade.hm denotes 21097.5 m. Miles converted using 1609.344 m.
+Each two-column line supplies the open standard in seconds; each three-column line supplies a category, integer age and factor. No factors were interpolated.

@@ -511,6 +511,9 @@ func (s *Store) SaveImportedActivity(ctx context.Context, source, sourceID strin
 	}
 
 	if source != trainingSheetProvider {
+		if err = saveRaceImportTx(ctx, tx, id, activity); err != nil {
+			return "", err
+		}
 		if err = saveHeatmapRouteTx(ctx, tx, id, scopedUserID(ctx), activity.Samples, activity.SummaryPolyline); err != nil {
 			return "", err
 		}
@@ -552,6 +555,9 @@ func (s *Store) ListActivityPage(ctx context.Context, limit, offset int, filters
 	hasMore := len(activities) > limit
 	if hasMore {
 		activities = activities[:limit]
+	}
+	if err := s.attachRaceSummaries(ctx, activities); err != nil {
+		return ActivityListPage{}, err
 	}
 	if filters.TrainingSheetMatching {
 		if err := s.attachTrainingSheetMatches(ctx, activities); err != nil {
@@ -963,6 +969,11 @@ func (s *Store) GetActivity(ctx context.Context, id string) (Activity, error) {
 		samples,
 		laps,
 	)
+	linked := []Activity{activity}
+	if err := s.attachRaceSummaries(ctx, linked); err != nil {
+		return activity, err
+	}
+	activity.Race = linked[0].Race
 	return activity, nil
 }
 

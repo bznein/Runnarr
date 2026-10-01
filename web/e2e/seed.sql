@@ -829,3 +829,54 @@ do $$ begin
     end if;
 end $$;
 commit;
+
+-- Race support: these private fixtures also exercise previews and staging.
+-- Before recordings use the current driver against the previous app schema.
+select to_regclass('races') is not null as has_race_tables \gset
+\if :has_race_tables
+insert into race_groups(id,user_id,name)
+select '00000000-0000-4000-8000-000000005100',id,'E2E Riverside Series' from users where username=:'e2e_username'
+on conflict(id) do nothing;
+insert into race_checklist_templates(id,user_id,name,items)
+select '00000000-0000-4000-8000-000000005101',id,'E2E Race essentials',
+ '[{"label":"Collect bib","done":false,"daysBefore":1},{"label":"Pack race shoes","done":false,"daysBefore":2}]'::jsonb
+from users where username=:'e2e_username' on conflict(id) do nothing;
+insert into activities(id,user_id,source,source_id,name,sport_type,start_time,distance_m,moving_time_s,elapsed_time_s,elevation_gain_m,raw)
+select v.id::uuid,u.id,'e2e',v.source_id,v.name,'Run',(:'e2e_date'::date+v.day_offset)+time '08:00',v.distance,2400,2500,30,'{"fixture":"races"}'::jsonb
+from users u cross join (values
+ ('00000000-0000-4000-8000-000000005102','e2e-race-recording','E2E Riverside 10K recording',-14,10200),
+ ('00000000-0000-4000-8000-000000005103','e2e-race-suggestion','E2E Parkrun race suggestion',-7,5000),
+ ('00000000-0000-4000-8000-000000005104','e2e-race-gap','E2E Sparse race recording',-21,10000)
+) v(id,source_id,name,day_offset,distance) where u.username=:'e2e_username'
+on conflict(id) do update set start_time=excluded.start_time;
+insert into activity_samples(activity_id,sample_index,timestamp,elapsed_s,distance_m)
+select a.id,n,a.start_time+round(n*2500.0/102)*interval '1 second',round(n*2500.0/102)::int,n*100
+from activities a cross join generate_series(0,102) n where a.id='00000000-0000-4000-8000-000000005102'
+on conflict(activity_id,sample_index) do update set timestamp=excluded.timestamp;
+insert into activity_samples(activity_id,sample_index,timestamp,elapsed_s,distance_m)
+select a.id,n,a.start_time+n*1250*interval '1 second',n*1250,n*5000
+from activities a cross join generate_series(0,2) n where a.id='00000000-0000-4000-8000-000000005104'
+on conflict(activity_id,sample_index) do update set timestamp=excluded.timestamp;
+insert into races(id,user_id,group_id,activity_id,name,race_date,status,discipline,kind,distance_m,data)
+select v.id::uuid,u.id,'00000000-0000-4000-8000-000000005100',nullif(v.activity_id,'')::uuid,v.name,
+ case when v.day_offset is null then null else :'e2e_date'::date+v.day_offset end,v.status,v.discipline,v.kind,v.distance,
+ jsonb_build_object('timezone','Europe/Dublin','startTime',case when v.day_offset is null then '' else '09:00' end,'raceOnly',false,
+ 'priority','B','result',jsonb_build_object('confirmed',v.status='finished','chipTimeMs',v.result_ms,'excluded',false,'checkpoints','[]'::jsonb),
+ 'goals','[{"name":"Target","timeMs":2400000},{"name":"Enjoy the finish"}]'::jsonb,
+ 'checklist','[{"label":"Collect bib","done":false,"daysBefore":1}]'::jsonb,'travelNotes','PRIVATE fixture hotel reference',
+ 'ageOverride',40,'tableOverride','M')
+from users u cross join (values
+ ('00000000-0000-4000-8000-000000005110','00000000-0000-4000-8000-000000005102','E2E Riverside 10K',-14,'finished','road','race',10000,2400000::bigint),
+ ('00000000-0000-4000-8000-000000005111','','E2E Riverside next edition',14,'registered','road','race',10000,null::bigint),
+ ('00000000-0000-4000-8000-000000005112','','E2E Trail ultra wishlist',null,'wishlist','trail','race',50000,null::bigint),
+ ('00000000-0000-4000-8000-000000005113','','E2E Riverside previous edition',-380,'finished','road','race',10000,2450000::bigint),
+ ('00000000-0000-4000-8000-000000005114','00000000-0000-4000-8000-000000005104','E2E Sparse 10K',-21,'finished','road','race',10000,2600000::bigint)
+) v(id,activity_id,name,day_offset,status,discipline,kind,distance,result_ms) where u.username=:'e2e_username'
+on conflict(id) do update set race_date=excluded.race_date;
+insert into race_discovery(user_id,source,source_id,activity_id,reasons,confidence)
+select user_id,source,source_id,id,'["Activity name mentions a race, parkrun, or time trial"]'::jsonb,'strong' from activities where id='00000000-0000-4000-8000-000000005103'
+on conflict(user_id,source,source_id) do nothing;
+insert into race_predictions(user_id,prediction_date,distance_m,time_ms,fetched_at,backfilled,raw)
+select id,:'e2e_date'::date-15,10000,2380000,:'e2e_now'::timestamptz,true,'{"fixture":"races"}'::jsonb from users where username=:'e2e_username'
+on conflict(user_id,prediction_date,distance_m) do nothing;
+\endif

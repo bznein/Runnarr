@@ -125,12 +125,21 @@ func (s *Store) ListCourses(ctx context.Context, options CourseListOptions) (Cou
 	return page, nil
 }
 
+type courseReader interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 func (s *Store) GetCourse(ctx context.Context, id string) (Course, error) {
-	summary, err := scanCourseSummary(s.db.QueryRow(ctx, courseSummarySelect+` where id = $1 and user_id = $2`, id, scopedUserID(ctx)))
+	return readCourse(ctx, s.db, id, true)
+}
+
+func readCourse(ctx context.Context, db courseReader, id string, bounded bool) (Course, error) {
+	summary, err := scanCourseSummary(db.QueryRow(ctx, courseSummarySelect+` where id = $1 and user_id = $2`, id, scopedUserID(ctx)))
 	if err != nil {
 		return Course{}, err
 	}
-	waypointRows, err := s.db.Query(ctx, `
+	waypointRows, err := db.Query(ctx, `
 		select id::text, waypoint_index, name, st_y(location), st_x(location)
 		from course_waypoints where course_id = $1 order by waypoint_index
 	`, id)
@@ -151,7 +160,7 @@ func (s *Store) GetCourse(ctx context.Context, id string) (Course, error) {
 		return Course{}, err
 	}
 	waypointRows.Close()
-	rows, err := s.db.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		select id::text, leg_index, mode, st_asgeojson(geometry, 9), elevations
 		from course_legs where course_id = $1 order by leg_index
 	`, id)
@@ -188,7 +197,9 @@ func (s *Store) GetCourse(ctx context.Context, id string) (Course, error) {
 	course.CreatedAt = summary.CreatedAt
 	course.UpdatedAt = summary.UpdatedAt
 	course.Diagnostics = summary.Diagnostics
-	boundCourseLegPayload(&course, maxCourseMapPreview)
+	if bounded {
+		boundCourseLegPayload(&course, maxCourseMapPreview)
+	}
 	return course, nil
 }
 
