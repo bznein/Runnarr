@@ -65,6 +65,16 @@
       "id": "notifications",
       "tag": "@visual-notifications",
       "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "races-planning",
+      "tag": "@visual-races-planning",
+      "viewports": ["desktop", "mobile"]
+    },
+    {
+      "id": "races-analysis",
+      "tag": "@visual-races-analysis",
+      "viewports": ["desktop", "mobile"]
     }
   ]
 }

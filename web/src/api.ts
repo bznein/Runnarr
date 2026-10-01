@@ -143,7 +143,7 @@ function healthRangeQuery(range?: HealthRange) {
   return params.toString();
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (!(init.body instanceof FormData) && init.body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");

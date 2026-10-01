@@ -17,10 +17,14 @@ indexing, sport/date filters, activity-frequency rendering, theme controls, and
 Map/Artwork PNG exports. The implementation is ready for review and release;
 no Garmin or training-sheet sync/writeback is required.
 
-Next, plan race tagging, provider race predictions, performance graphs, VDOT,
-and age grading together. That is a separate design discussion; this heatmap
-change does not commit to their data model or implementation scope. Resume the
-remaining order below after these explicitly prioritized projects.
+Race/performance support is now implemented on the race-support feature branch
+for one complete release, validated and ready for review. It covers planning,
+confirmed results, reviewed activity discovery, saved courses, checklists,
+build-ups, performance analysis, optional predictions/forecasts, and reports
+([#225](https://github.com/bznein/Runnarr/issues/225),
+[#275](https://github.com/bznein/Runnarr/issues/275)). Core features use existing
+local data; optional Garmin predictions have a separate read-only sync and no
+training-sheet writeback. Resume the remaining order below after this release.
 
 ## Order
 

@@ -28,6 +28,7 @@ type SessionUser struct {
 }
 
 type Activity struct {
+	Race                     *RaceSummary                `json:"race,omitempty"`
 	ID                       string                      `json:"id"`
 	Source                   string                      `json:"source"`
 	SourceID                 string                      `json:"sourceId"`
@@ -542,12 +543,14 @@ type CalendarDay struct {
 }
 
 type ActivityCalendar struct {
+	Races      []RaceSummary `json:"races"`
 	MonthStart string        `json:"monthStart"`
 	MonthEnd   string        `json:"monthEnd"`
 	Days       []CalendarDay `json:"days"`
 }
 
 type CalendarDayView struct {
+	Races      []RaceSummary      `json:"races"`
 	Date       string             `json:"date"`
 	Health     *DailyHealthMetric `json:"health,omitempty"`
 	Activities []CalendarActivity `json:"activities"`

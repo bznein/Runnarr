@@ -1,3 +1,4 @@
+import type { RaceSummary } from "./races/types";
 export type Session = {
   authenticated: boolean;
   publicMode?: boolean;
@@ -593,6 +594,7 @@ export type Gear = GearSummary & {
 };
 
 export type Activity = {
+  race?: RaceSummary;
   id: string;
   source: string;
   sourceId: string;
@@ -895,12 +897,14 @@ export type CalendarDay = {
 };
 
 export type ActivityCalendar = {
+  races?: RaceSummary[];
   monthStart: string;
   monthEnd: string;
   days: CalendarDay[];
 };
 
 export type CalendarDayView = {
+  races?: RaceSummary[];
   date: string;
   health?: DailyHealthMetric;
   activities: CalendarActivitySummary[];

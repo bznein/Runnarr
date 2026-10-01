@@ -130,6 +130,7 @@ func (s *Server) Routes() http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
+			s.raceRoutes(r)
 			r.Post("/session/support", s.handleStartSupport)
 			r.Delete("/session/support", s.handleStopSupport)
 			r.Post("/session/password", s.handleChangePassword)
@@ -858,6 +859,10 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not load calendar")
 		return
 	}
+	calendar.Races, err = s.store.RaceSummaries(r.Context(), dateFrom.Format("2006-01-02"), dateTo.Format("2006-01-02"))
+	if s.writeRaceError(w, err) {
+		return
+	}
 	writeJSON(w, http.StatusOK, calendar)
 }
 
@@ -881,6 +886,10 @@ func (s *Server) handleCalendarDay(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.logger.Error("calendar day", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not load calendar day")
+		return
+	}
+	day.Races, err = s.store.RaceSummaries(r.Context(), date.Format("2006-01-02"), date.Format("2006-01-02"))
+	if s.writeRaceError(w, err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, day)
@@ -1145,6 +1154,7 @@ func (s *Server) StartBackgroundSync(ctx context.Context) {
 		s.logger.Error("reconcile Garmin course sends after startup", "error", err)
 	}
 	go s.runGarminScheduledSync(ctx)
+	go s.runRaceMaintenance(ctx)
 	go s.runGarminWorkoutScheduledSync(ctx)
 	go s.runTrainingSheetScheduledSync(ctx)
 	go s.runWebPushDispatcher(ctx)

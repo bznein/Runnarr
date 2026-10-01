@@ -408,6 +408,22 @@ test.describe("local product journey", () => {
     await expect(page.getByRole("heading", { name })).toBeVisible();
 
     if (!visualBaseline) {
+      const activityURL = page.url();
+      await page.getByRole("link", { name: "Mark as race", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "New race", exact: true })).toBeVisible();
+      await page.getByLabel("Distance preset").selectOption("5000");
+      await page.getByLabel("Chip time", { exact: true }).fill("20:00");
+      await page.getByLabel("I confirm the race distance and finish time").check();
+      await page.getByRole("button", { name: "Save race", exact: true }).click();
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Halfway analysis", exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Race report", exact: true }).click();
+      await expect(page.getByRole("article", { name: "Report preview" })).toContainText("20:00");
+      await page.goto(activityURL);
+      await expect(page.getByRole("link", { name: "View race", exact: true })).toBeVisible();
+    }
+
+    if (!visualBaseline) {
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
       await page.getByRole("button", { name: "Activity actions" }).click();
       await page.getByRole("menuitem", { name: "Copy for AI" }).click();
@@ -1313,6 +1329,7 @@ test.describe("local product journey", () => {
 
   test("keeps navigation and key controls usable on mobile", { tag: "@visual-mobile-navigation" }, async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "mobile-chromium", "This assertion targets the mobile project.");
+    const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     await login(page, true);
     await expectNoHorizontalOverflow(page);
 
@@ -1326,6 +1343,17 @@ test.describe("local product journey", () => {
     await expect(menu.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
     await menu.getByRole("button", { name: "Close navigation", exact: true }).click();
     await expect(menu).toBeHidden();
+
+    if (!visualBaseline) {
+      await navigateMobileMenu(page, "Races");
+      await expect(page.locator(".mobile-header-title")).toHaveText("Races");
+      await expect(page.getByRole("heading", { name: "Upcoming races" })).toBeVisible();
+      await page.getByRole("link", { name: "E2E Riverside next edition", exact: true }).click();
+      await page.getByLabel("Collect bib", { exact: true }).check();
+      await expect(page.getByLabel("Collect bib", { exact: true })).toBeChecked();
+      await page.getByRole("heading", { name: "Halfway analysis" }).scrollIntoViewIfNeeded();
+      await expectNoHorizontalOverflow(page);
+    }
 
     await navigateTo(page, "Activities", true);
     await expect(page.getByRole("heading", { name: "Activities" })).toBeVisible();

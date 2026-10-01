@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Added private race planning and history with goals, reusable checklists,
+  logistics, recurring-event groups, independent course snapshots, and optional
+  activity/training links. Races appear in navigation, calendars, and activity
+  badges; historical/import discovery uses a confirmation-based review queue.
+- Added confirmed official results, intermediate checkpoints, labelled halfway
+  estimates using full elapsed-time samples, 12-week build-ups, PB/season-best
+  comparisons, VDOT equivalents, and bundled 2025 road age grading.
+- Added opt-in Garmin prediction history and Open-Meteo race forecasts with
+  dated provenance, pre-race snapshots, conservative comparison cutoffs, and
+  cached forecasts that survive provider failures.
+- Added editable race reports with selective facts and authored narrative,
+  Markdown copy/download, and printable PDF output excluding private logistics.
+  Core race features require no provider resync or training-sheet writeback.
+
 - Let a matched planned workout supply missing workout context for structured activity interval writeback, so cross-day matches can populate workout details and expose the workout summary.
 - Activity details now include a Workout summary tab comparing matched or
   imported prescriptions with recorded intervals and workout laps. A documented
