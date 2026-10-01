@@ -396,8 +396,7 @@ test.describe("local product journey", () => {
   });
 
   test("imports and inspects an activity, media, and export", { tag: "@visual-activity-inspection" }, async ({ page }, testInfo) => {
-    // Recording adds deliberate delays to each action in this extended journey.
-    testInfo.setTimeout(process.env.RUNNARR_VISUAL_PROFILES_JSON ? 90_000 : 60_000);
+    testInfo.setTimeout(60_000);
     const mobile = isMobileProject(testInfo.project.name);
     const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
     await login(page, mobile);
@@ -632,6 +631,9 @@ test.describe("local product journey", () => {
     await page.getByRole("dialog", { name: "Export GPX" }).getByRole("button", { name: "Download" }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/\.gpx$/);
+    // Bound this recording to the imported activity, race, media, and export.
+    // The full E2E run continues with the other sports and weather assertions.
+    if (process.env.RUNNARR_VISUAL_PROFILES_JSON) return;
     await page.goto("/activities");
     const cyclingActivity = visibleActivityLink(page, "E2E Cycling Activity", mobile);
     await expect(cyclingActivity).toBeVisible();
