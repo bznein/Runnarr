@@ -368,6 +368,16 @@ textarea {
   gap: 6px;
 }
 
+.sidebar > .nav {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar > .brand,
+.sidebar-bottom {
+  flex-shrink: 0;
+}
+
 .sidebar-bottom {
   display: grid;
   gap: 6px;

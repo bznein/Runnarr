@@ -15,6 +15,8 @@
 - Added editable race reports with selective facts and authored narrative,
   Markdown copy/download, and printable PDF output excluding private logistics.
   Core race features require no provider resync or training-sheet writeback.
+- Keep desktop account controls reachable on shorter screens by scrolling the
+  expanded navigation list independently.
 
 - Let a matched planned workout supply missing workout context for structured activity interval writeback, so cross-day matches can populate workout details and expose the workout summary.
 - Activity details now include a Workout summary tab comparing matched or

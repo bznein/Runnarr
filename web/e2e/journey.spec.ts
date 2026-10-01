@@ -1043,6 +1043,8 @@ test.describe("local product journey", () => {
 
   test("exits support view to the dashboard from an activity", { tag: "@visual-support-exit" }, async ({ page }, testInfo) => {
     const mobile = isMobileProject(testInfo.project.name);
+    const visualBaseline = process.env.RUNNARR_E2E_PROJECT?.endsWith("-before") === true;
+    if (!mobile && !visualBaseline) await page.setViewportSize({ width: 1280, height: 600 });
     const supportUsername = `e2e-support-${projectSlug(testInfo.project.name)}`;
     const supportPassword = "e2e-support-password-123";
     const supportActivity = `E2E ${testInfo.project.name} Support Activity`;
@@ -1061,6 +1063,13 @@ test.describe("local product journey", () => {
     }
     await expect(supportUserRow).toBeVisible();
 
+    if (!mobile && !visualBaseline) {
+      const sidebar = page.locator(".sidebar");
+      await expect(sidebar.getByRole("button", { name: "Log out", exact: true })).toBeInViewport();
+      await sidebar.getByRole("link", { name: "Gear", exact: true }).scrollIntoViewIfNeeded();
+      await expect(sidebar.getByRole("link", { name: "Gear", exact: true })).toBeInViewport();
+      await expect(sidebar.getByRole("button", { name: "Log out", exact: true })).toBeInViewport();
+    }
     await logout(page, mobile);
     await loginAs(page, supportUsername, supportPassword, mobile);
     await ensureActivityImported(page, testInfo.project.name, mobile, supportActivity);
